@@ -1,9 +1,21 @@
 import unittest
+from io import StringIO
 
 from data_retrieval.ingestion.chunker import TextChunker
 
 
 class TextChunkerTests(unittest.TestCase):
+    def test_streaming_chunks_match_in_memory_chunks(self) -> None:
+        text = (
+            "First paragraph has a useful natural boundary.\n\n"
+            "Second paragraph is deliberately repeated to cross windows. " * 40
+        )
+        chunker = TextChunker(max_chars=180, overlap_chars=30)
+
+        streamed = tuple(chunker.iter_stream(StringIO(text), read_size=181))
+
+        self.assertEqual(streamed, chunker.split(text))
+
     def test_preserves_order_offsets_and_overlap(self) -> None:
         text = " ".join(f"word-{index}" for index in range(100))
         chunks = TextChunker(max_chars=120, overlap_chars=20).split(text)

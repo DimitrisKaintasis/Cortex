@@ -99,7 +99,14 @@ class IngestService:
             for chunk in chunks
         )
 
-        existing_catalog = {tag.canonical_text: tag for tag in self.repository.list_tags(namespace)}
+        normalized_tags = deduplicate_tags(explicit_tags)
+        existing_catalog = {
+            tag.canonical_text: tag
+            for tag in self.repository.get_tags_by_canonical(
+                namespace=namespace,
+                canonical_texts=tuple(canonical for canonical, _ in normalized_tags),
+            )
+        }
         tags_by_canonical: dict[str, Tag] = {}
         origins: dict[str, TagOrigin] = {}
         edge_evidence: dict[tuple[str, str], set[str]] = {}
@@ -130,7 +137,7 @@ class IngestService:
             edge_evidence.setdefault(key, set()).add(evidence_source)
             edge_confidence[key] = max(confidence, edge_confidence.get(key, 0.0))
 
-        for canonical, display in deduplicate_tags(explicit_tags):
+        for canonical, display in normalized_tags:
             tag = resolve_tag(canonical, display)
             for atom in atoms:
                 attach_tag(

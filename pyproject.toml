@@ -9,6 +9,8 @@ description = "A tag-centric, explainable data retrieval engine."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "pgvector>=0.4,<1",
+    "psycopg[binary]>=3.2,<4",
     "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
 ]
 

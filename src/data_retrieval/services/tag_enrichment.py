@@ -30,9 +30,18 @@ class TagEnrichmentResult:
 class TagEnrichmentService:
     """Apply optional tag proposals after canonical ingestion has succeeded."""
 
-    def __init__(self, repository: Repository, proposer: TagProposer) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        proposer: TagProposer,
+        *,
+        catalog_hint_limit: int = 500,
+    ) -> None:
+        if catalog_hint_limit <= 0:
+            raise ValueError("catalog_hint_limit must be positive")
         self.repository = repository
         self.proposer = proposer
+        self.catalog_hint_limit = catalog_hint_limit
 
     def enrich_document(self, document_id: str) -> TagEnrichmentResult:
         document = self.repository.get_document(document_id)
@@ -52,7 +61,12 @@ class TagEnrichmentService:
                 idempotent=True,
             )
 
-        catalog = {tag.canonical_text: tag for tag in self.repository.list_tags(document.namespace)}
+        catalog = {
+            tag.canonical_text: tag
+            for tag in self.repository.list_tags(
+                document.namespace, limit=self.catalog_hint_limit
+            )
+        }
         tags_by_canonical: dict[str, Tag] = {}
         all_edges: dict[tuple[str, str], AtomTag] = {
             (edge.atom_id, edge.tag_id): edge
@@ -73,6 +87,18 @@ class TagEnrichmentService:
                 current = best.get(canonical)
                 if canonical and (current is None or proposal.confidence > current[1]):
                     best[canonical] = (proposal.text.strip(), proposal.confidence)
+
+            missing = tuple(
+                canonical
+                for canonical in best
+                if canonical not in catalog and canonical not in tags_by_canonical
+            )
+            catalog.update(
+                (tag.canonical_text, tag)
+                for tag in self.repository.get_tags_by_canonical(
+                    namespace=document.namespace, canonical_texts=missing
+                )
+            )
 
             for canonical, (display, confidence) in best.items():
                 tag = tags_by_canonical.get(canonical) or catalog.get(canonical)

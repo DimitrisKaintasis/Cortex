@@ -26,6 +26,9 @@ The repository currently provides a dependency-free domain slice for:
 - a pinned Temporal History bridge and Ollama summarizer that produce auditable
   calendar-summary atoms from stored source atoms;
 - a durable SQLite repository with transactions, foreign keys, and full hydration;
+- a PostgreSQL/pgvector adapter for canonical online storage;
+- bounded indexed retrieval candidates instead of namespace-wide hydration;
+- restart-safe, bounded-memory PostgreSQL ingestion for large UTF-8 files;
 - an in-memory repository for fast tests.
 - explainable tag, lexical, semantic, learned-relationship, and temporal retrieval;
 - content-hash-aware embedding enrichment through a replaceable Ollama model;
@@ -45,6 +48,63 @@ Optional developer tools can be installed with:
 ```powershell
 python -m pip install -e ".[dev]"
 ```
+
+### PostgreSQL scale mode
+
+SQLite remains the default for local development. PostgreSQL is selected only when
+`--postgres-dsn` or `DATA_RETRIEVAL_POSTGRES_DSN` is provided. The DSN is never returned
+in CLI output.
+
+For a local development database, set a non-committed password and start the pinned
+pgvector image:
+
+```powershell
+$env:DATA_RETRIEVAL_POSTGRES_PASSWORD = "replace-with-a-long-random-password"
+docker compose -f .\compose.postgres.yml up -d
+
+$env:DATA_RETRIEVAL_POSTGRES_DSN = `
+  "postgresql://data_retrieval:$($env:DATA_RETRIEVAL_POSTGRES_PASSWORD)@127.0.0.1:5432/data_retrieval"
+```
+
+The container runs PostgreSQL on the laptop, binds only to laptop localhost, persists data
+in the `data_retrieval_postgres` Docker volume, and restarts unless explicitly stopped.
+The repository initializes its private `data_retrieval` schema and requires permission to
+create the `vector` extension. Inspect service errors with:
+
+```powershell
+docker compose -f .\compose.postgres.yml ps
+docker compose -f .\compose.postgres.yml logs postgres
+```
+
+With the DSN set, the normal commands use PostgreSQL. File ingestion automatically uses
+two-pass streaming and bounded transactions; the first pass computes the stable content
+hash and the second creates deterministic atom batches:
+
+```powershell
+python -m data_retrieval ingest .\large-dataset.txt `
+  --namespace benchmarks `
+  --source longmemeval/oracle `
+  --batch-size 1000
+```
+
+An interrupted document remains hidden in `staging`. Repeating the same command resumes by
+idempotently upserting the same atom IDs and publishes the document only after verifying
+its final atom count. PostgreSQL retrieval uses GIN full-text search, indexed tag joins,
+and pgvector similarity to bound each initial channel to 500 candidates before learned
+relationship and temporal processing.
+
+This command is the bounded-memory path for plain UTF-8 text; it is not a benchmark-format
+adapter. LongMemEval, EverMemBench, and WikiConv need streaming JSON/JSONL adapters that
+preserve conversations, timestamps, participant IDs, and source record boundaries. Those
+adapters should create many reasonably sized documents and run tag enrichment per document
+and Temporal enrichment per bounded time window, rather than treating a whole benchmark
+archive as one document.
+
+The Docker definition is a development deployment, not the final always-online database.
+Before production use, choose hosted storage, require TLS, restrict network access, store
+the DSN in a secret manager, schedule `pg_dump`/provider backups, and test restoration. The
+Mac should connect to that protected database as a worker; do not expose port 5432 directly
+to the public internet.
 
 ### Laptop storage with Mac inference
 
@@ -220,6 +280,8 @@ raw-ingestion/enrichment boundary in
 [ADR-0005](docs/decisions/0005-raw-ingestion-before-enrichment.md).
 The staged retrieval and conservative feedback policy are recorded in
 [ADR-0006](docs/decisions/0006-staged-retrieval-and-outcome-learning.md).
+The PostgreSQL scale target and its staged-ingestion boundary are recorded in
+[ADR-0007](docs/decisions/0007-postgresql-scale-target.md).
 The first real Mac model comparison and current default are recorded in the
 [tag proposal model benchmark](docs/MODEL-BENCHMARK.md).
 The current semantic model choice and its reproducibility caveats are recorded in the

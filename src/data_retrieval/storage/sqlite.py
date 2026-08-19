@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
@@ -22,7 +24,10 @@ from data_retrieval.domain.models import (
     TagRelation,
     TagState,
 )
-from data_retrieval.retrieval.models import AtomEmbedding
+from data_retrieval.retrieval.embedding import cosine_similarity
+from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
+
+TOKEN_PATTERN = re.compile(r"[^\W_]{2,}", re.UNICODE)
 
 
 class SQLiteRepository:
@@ -181,12 +186,32 @@ class SQLiteRepository:
             ).fetchall()
         return tuple(self._atom(row) for row in rows)
 
+    def get_document_atom_count(self, document_id: str) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT COUNT(*) FROM atoms WHERE document_id = ?", (document_id,)
+            ).fetchone()
+        return int(row[0])
+
     def get_atom(self, atom_id: str) -> Atom | None:
         with self._lock:
             row = self._connection.execute(
                 "SELECT * FROM atoms WHERE atom_id = ?", (atom_id,)
             ).fetchone()
         return self._atom(row) if row else None
+
+    def get_atoms(self, atom_ids: tuple[str, ...]) -> tuple[Atom, ...]:
+        if not atom_ids:
+            return ()
+        found: dict[str, Atom] = {}
+        with self._lock:
+            for batch in self._batches(atom_ids):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self._connection.execute(
+                    f"SELECT * FROM atoms WHERE atom_id IN ({placeholders})", batch
+                ).fetchall()
+                found.update((row["atom_id"], self._atom(row)) for row in rows)
+        return tuple(found[atom_id] for atom_id in atom_ids if atom_id in found)
 
     def get_atom_links(self, atom_id: str) -> tuple[AtomLink, ...]:
         with self._lock:
@@ -224,17 +249,92 @@ class SQLiteRepository:
             ).fetchall()
         return tuple(self._atom_link(row) for row in rows)
 
-    def list_tags(self, namespace: str) -> tuple[Tag, ...]:
+    def get_atom_links_touching(
+        self,
+        *,
+        atom_ids: tuple[str, ...],
+        relation: str | None = None,
+    ) -> tuple[AtomLink, ...]:
+        if not atom_ids:
+            return ()
+        found: dict[tuple[str, str, str], AtomLink] = {}
+        with self._lock:
+            for batch in self._batches(atom_ids):
+                placeholders = ",".join("?" for _ in batch)
+                parameters: list[Any] = [*batch, *batch]
+                relation_clause = ""
+                if relation is not None:
+                    relation_clause = "AND relation = ?"
+                    parameters.append(str(relation))
+                rows = self._connection.execute(
+                    f"""
+                    SELECT * FROM atom_links
+                    WHERE (from_atom_id IN ({placeholders})
+                           OR to_atom_id IN ({placeholders}))
+                      {relation_clause}
+                    """,
+                    parameters,
+                ).fetchall()
+                for row in rows:
+                    link = self._atom_link(row)
+                    found[(link.from_atom_id, link.to_atom_id, link.relation)] = link
+        return tuple(
+            sorted(
+                found.values(),
+                key=lambda item: (item.relation, item.from_atom_id, item.to_atom_id),
+            )
+        )
+
+    def list_tags(self, namespace: str, limit: int | None = None) -> tuple[Tag, ...]:
+        limit_clause = "" if limit is None else "LIMIT ?"
+        parameters: list[Any] = [namespace]
+        if limit is not None:
+            if limit <= 0:
+                return ()
+            parameters.append(limit)
         with self._lock:
             rows = self._connection.execute(
-                """
+                f"""
                 SELECT * FROM tags
                 WHERE namespace = ?
                 ORDER BY canonical_text
+                {limit_clause}
                 """,
-                (namespace,),
+                parameters,
             ).fetchall()
         return tuple(self._tag(row) for row in rows)
+
+    def get_tags(self, tag_ids: tuple[str, ...]) -> tuple[Tag, ...]:
+        if not tag_ids:
+            return ()
+        found: dict[str, Tag] = {}
+        with self._lock:
+            for batch in self._batches(tag_ids):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self._connection.execute(
+                    f"SELECT * FROM tags WHERE tag_id IN ({placeholders})", batch
+                ).fetchall()
+                found.update((row["tag_id"], self._tag(row)) for row in rows)
+        return tuple(found[tag_id] for tag_id in tag_ids if tag_id in found)
+
+    def get_tags_by_canonical(
+        self, *, namespace: str, canonical_texts: tuple[str, ...]
+    ) -> tuple[Tag, ...]:
+        if not canonical_texts:
+            return ()
+        found: dict[str, Tag] = {}
+        with self._lock:
+            for batch in self._batches(canonical_texts):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self._connection.execute(
+                    f"""
+                    SELECT * FROM tags
+                    WHERE namespace = ? AND canonical_text IN ({placeholders})
+                    """,
+                    [namespace, *batch],
+                ).fetchall()
+                found.update((row["canonical_text"], self._tag(row)) for row in rows)
+        return tuple(found[value] for value in canonical_texts if value in found)
 
     def list_tag_relations(
         self, *, namespace: str, relation_type: str | None = None
@@ -258,6 +358,42 @@ class SQLiteRepository:
             ).fetchall()
         return tuple(self._tag_relation(row) for row in rows)
 
+    def get_tag_relations_touching(
+        self,
+        *,
+        tag_ids: tuple[str, ...],
+        relation_type: str | None = None,
+    ) -> tuple[TagRelation, ...]:
+        if not tag_ids:
+            return ()
+        found: dict[tuple[str, str, str], TagRelation] = {}
+        with self._lock:
+            for batch in self._batches(tag_ids):
+                placeholders = ",".join("?" for _ in batch)
+                parameters: list[Any] = [*batch, *batch]
+                relation_clause = ""
+                if relation_type is not None:
+                    relation_clause = "AND relation_type = ?"
+                    parameters.append(relation_type)
+                rows = self._connection.execute(
+                    f"""
+                    SELECT * FROM tag_relations
+                    WHERE (source_tag_id IN ({placeholders})
+                           OR target_tag_id IN ({placeholders}))
+                      {relation_clause}
+                    """,
+                    parameters,
+                ).fetchall()
+                for row in rows:
+                    edge = self._tag_relation(row)
+                    found[(edge.source_tag_id, edge.target_tag_id, edge.relation_type)] = edge
+        return tuple(
+            sorted(
+                found.values(),
+                key=lambda item: (item.relation_type, item.source_tag_id, item.target_tag_id),
+            )
+        )
+
     def list_atoms(
         self,
         *,
@@ -271,27 +407,20 @@ class SQLiteRepository:
         if kind is not None:
             clauses.append("kind = ?")
             parameters.append(kind.value)
+        if occurred_from is not None:
+            clauses.append("julianday(occurred_at) >= julianday(?)")
+            parameters.append(occurred_from.isoformat())
+        if occurred_to is not None:
+            clauses.append("julianday(occurred_at) < julianday(?)")
+            parameters.append(occurred_to.isoformat())
         query = (
             "SELECT * FROM atoms WHERE " + " AND ".join(clauses) + " ORDER BY document_id, position"
         )
         with self._lock:
             rows = self._connection.execute(query, parameters).fetchall()
-        atoms = (self._atom(row) for row in rows)
-        filtered = (
-            atom
-            for atom in atoms
-            if (
-                occurred_from is None
-                or (atom.occurred_at is not None and atom.occurred_at >= occurred_from)
-            )
-            and (
-                occurred_to is None
-                or (atom.occurred_at is not None and atom.occurred_at < occurred_to)
-            )
-        )
         return tuple(
             sorted(
-                filtered,
+                (self._atom(row) for row in rows),
                 key=lambda atom: (
                     atom.occurred_at is None,
                     atom.occurred_at or atom.created_at,
@@ -300,6 +429,127 @@ class SQLiteRepository:
                 ),
             )
         )
+
+    def iter_atoms(
+        self,
+        *,
+        namespace: str,
+        batch_size: int = 1_000,
+        occurred_from: datetime | None = None,
+        occurred_to: datetime | None = None,
+        kind: AtomKind | None = None,
+    ) -> Iterator[tuple[Atom, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        clauses = ["namespace = ?"]
+        parameters: list[Any] = [namespace]
+        if kind is not None:
+            clauses.append("kind = ?")
+            parameters.append(kind.value)
+        if occurred_from is not None:
+            clauses.append("julianday(occurred_at) >= julianday(?)")
+            parameters.append(occurred_from.isoformat())
+        if occurred_to is not None:
+            clauses.append("julianday(occurred_at) < julianday(?)")
+            parameters.append(occurred_to.isoformat())
+        query = (
+            "SELECT * FROM atoms WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY document_id, position"
+        )
+        with self._lock:
+            cursor = self._connection.execute(query, parameters)
+            while rows := cursor.fetchmany(batch_size):
+                yield tuple(self._atom(row) for row in rows)
+
+    def search_tag_hits(
+        self,
+        *,
+        namespace: str,
+        canonical_tags: tuple[str, ...],
+        limit: int,
+    ) -> tuple[SearchHit, ...]:
+        if not canonical_tags or limit <= 0:
+            return ()
+        placeholders = ",".join("?" for _ in canonical_tags)
+        with self._lock:
+            rows = self._connection.execute(
+                f"""
+                SELECT edges.atom_id, tags.canonical_text, edges.weight_raw,
+                       edges.confidence
+                FROM atom_tags AS edges
+                JOIN tags ON tags.tag_id = edges.tag_id
+                JOIN atoms ON atoms.atom_id = edges.atom_id
+                WHERE atoms.namespace = ?
+                  AND tags.canonical_text IN ({placeholders})
+                """,
+                [namespace, *canonical_tags],
+            ).fetchall()
+        scores: dict[str, float] = {}
+        evidence: dict[str, list[str]] = {}
+        for row in rows:
+            scores[row["atom_id"]] = scores.get(row["atom_id"], 0.0) + (
+                row["confidence"] * math.log1p(row["weight_raw"]) / math.log(2.0)
+            ) / len(canonical_tags)
+            evidence.setdefault(row["atom_id"], []).append(f"tag={row['canonical_text']}")
+        ordered = sorted(scores, key=lambda atom_id: (scores[atom_id], atom_id), reverse=True)
+        return tuple(
+            SearchHit(atom_id, scores[atom_id], tuple(sorted(evidence[atom_id])))
+            for atom_id in ordered[:limit]
+        )
+
+    def search_lexical_hits(
+        self, *, namespace: str, query: str, limit: int
+    ) -> tuple[SearchHit, ...]:
+        query_terms = set(TOKEN_PATTERN.findall(query.casefold()))
+        if not query_terms or limit <= 0:
+            return ()
+        hits: list[SearchHit] = []
+        for batch in self.iter_atoms(namespace=namespace):
+            for atom in batch:
+                matches = sorted(
+                    query_terms.intersection(TOKEN_PATTERN.findall(atom.content.casefold()))
+                )
+                if matches:
+                    hits.append(
+                        SearchHit(
+                            atom.atom_id,
+                            len(matches) / len(query_terms),
+                            tuple(f"lexical={term}" for term in matches[:5]),
+                        )
+                    )
+        hits.sort(key=lambda hit: (hit.score, hit.atom_id), reverse=True)
+        return tuple(hits[:limit])
+
+    def search_semantic_hits(
+        self,
+        *,
+        namespace: str,
+        provider: str,
+        model: str,
+        query_vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[SearchHit, ...]:
+        if not query_vector or limit <= 0:
+            return ()
+        hits: list[SearchHit] = []
+        for atoms in self.iter_atoms(namespace=namespace, batch_size=500):
+            embeddings = self.get_embeddings(
+                atom_ids=tuple(atom.atom_id for atom in atoms),
+                provider=provider,
+                model=model,
+            )
+            for atom in atoms:
+                embedding = embeddings.get(atom.atom_id)
+                if embedding is None or embedding.content_hash != atom.content_hash:
+                    continue
+                similarity = max(0.0, cosine_similarity(query_vector, embedding.vector))
+                if similarity > 0.0:
+                    hits.append(
+                        SearchHit(atom.atom_id, similarity, (f"semantic={similarity:.4f}",))
+                    )
+        hits.sort(key=lambda hit: (hit.score, hit.atom_id), reverse=True)
+        return tuple(hits[:limit])
 
     def upsert_embeddings(self, embeddings: tuple[AtomEmbedding, ...]) -> None:
         with self._lock, self._connection:
@@ -391,6 +641,21 @@ class SQLiteRepository:
                 (namespace,),
             ).fetchall()
         return tuple(self._atom_tag(row) for row in rows)
+
+    def get_atom_tags_for_atoms(self, atom_ids: tuple[str, ...]) -> tuple[AtomTag, ...]:
+        if not atom_ids:
+            return ()
+        found: dict[tuple[str, str], AtomTag] = {}
+        with self._lock:
+            for batch in self._batches(atom_ids):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self._connection.execute(
+                    f"SELECT * FROM atom_tags WHERE atom_id IN ({placeholders})", batch
+                ).fetchall()
+                for row in rows:
+                    edge = self._atom_tag(row)
+                    found[(edge.atom_id, edge.tag_id)] = edge
+        return tuple(sorted(found.values(), key=lambda item: (item.atom_id, item.tag_id)))
 
     def record_retrieval_event(self, event: dict[str, object]) -> None:
         with self._lock, self._connection:
@@ -775,3 +1040,8 @@ class SQLiteRepository:
         if not isinstance(parsed, list):
             raise ValueError("expected a JSON array")
         return parsed
+
+    @staticmethod
+    def _batches(values: tuple[str, ...], size: int = 500) -> Iterator[tuple[str, ...]]:
+        for offset in range(0, len(values), size):
+            yield values[offset : offset + size]

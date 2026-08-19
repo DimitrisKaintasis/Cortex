@@ -58,14 +58,23 @@ class LearningService:
         namespace = str(event["namespace"])
         sign = 1.0 if request.outcome == "positive" else -1.0
         credit = self._source_credit(namespace, selected_ids)
-        tags = self.repository.list_tags(namespace)
-        tags_by_id = {tag.tag_id: tag for tag in tags}
         query_tags = {str(value) for value in event.get("query_tags", [])}
+
+        edges_by_atom = {
+            atom_id: self.repository.atom_tags_for(atom_id) for atom_id in credit
+        }
+        relevant_tag_ids = {
+            edge.tag_id for edges in edges_by_atom.values() for edge in edges
+        }
+        tags_by_id = {
+            tag.tag_id: tag
+            for tag in self.repository.get_tags(tuple(sorted(relevant_tag_ids)))
+        }
 
         atom_tag_updates: list[AtomTag] = []
         credited_tag_ids: set[str] = set()
         for atom_id, factor in sorted(credit.items()):
-            for edge in self.repository.atom_tags_for(atom_id):
+            for edge in edges_by_atom[atom_id]:
                 tag = tags_by_id.get(edge.tag_id)
                 if tag is None:
                     continue
@@ -91,7 +100,12 @@ class LearningService:
             sign=sign,
             feedback_id=request.feedback_id,
         )
-        query_tag_ids = {tag.tag_id for tag in tags if tag.canonical_text in query_tags}
+        query_tag_ids = {
+            tag.tag_id
+            for tag in self.repository.get_tags_by_canonical(
+                namespace=namespace, canonical_texts=tuple(sorted(query_tags))
+            )
+        }
         relationship_tag_ids = [*sorted(query_tag_ids)]
         relationship_tag_ids.extend(
             tag_id for tag_id in sorted(credited_tag_ids) if tag_id not in query_tag_ids
@@ -128,15 +142,6 @@ class LearningService:
         )
 
     def _source_credit(self, namespace: str, selected_ids: set[str]) -> dict[str, float]:
-        links = self.repository.list_atom_links(namespace=namespace)
-        children: dict[str, set[str]] = {}
-        for link in links:
-            if link.relation in {
-                AtomLinkRelation.SUMMARIZES,
-                AtomLinkRelation.DERIVED_FROM,
-            }:
-                children.setdefault(link.from_atom_id, set()).add(link.to_atom_id)
-
         credit: dict[str, float] = {}
         for selected_id in selected_ids:
             atom = self.repository.get_atom(selected_id)
@@ -145,7 +150,12 @@ class LearningService:
             if atom.kind is AtomKind.SOURCE:
                 credit[selected_id] = 1.0
                 continue
-            stack = list(children.get(selected_id, ()))
+            stack = [
+                link.to_atom_id
+                for link in self.repository.get_atom_links(selected_id)
+                if link.relation
+                in {AtomLinkRelation.SUMMARIZES, AtomLinkRelation.DERIVED_FROM}
+            ]
             visited: set[str] = set()
             while stack:
                 atom_id = stack.pop()
@@ -156,7 +166,12 @@ class LearningService:
                 if descendant is not None and descendant.kind is AtomKind.SOURCE:
                     credit[atom_id] = max(credit.get(atom_id, 0.0), self.summary_credit)
                 else:
-                    stack.extend(children.get(atom_id, ()))
+                    stack.extend(
+                        link.to_atom_id
+                        for link in self.repository.get_atom_links(atom_id)
+                        if link.relation
+                        in {AtomLinkRelation.SUMMARIZES, AtomLinkRelation.DERIVED_FROM}
+                    )
         return credit
 
     def _co_used_updates(
@@ -169,8 +184,8 @@ class LearningService:
     ) -> tuple[AtomLink, ...]:
         existing = {
             (link.from_atom_id, link.to_atom_id): link
-            for link in self.repository.list_atom_links(
-                namespace=namespace, relation=AtomLinkRelation.CO_USED
+            for link in self.repository.get_atom_links_touching(
+                atom_ids=atom_ids, relation=AtomLinkRelation.CO_USED
             )
         }
         updates: list[AtomLink] = []
@@ -211,8 +226,8 @@ class LearningService:
     ) -> tuple[TagRelation, ...]:
         existing = {
             (edge.source_tag_id, edge.target_tag_id): edge
-            for edge in self.repository.list_tag_relations(
-                namespace=namespace, relation_type="co_occurs"
+            for edge in self.repository.get_tag_relations_touching(
+                tag_ids=tag_ids, relation_type="co_occurs"
             )
         }
         updates: list[TagRelation] = []

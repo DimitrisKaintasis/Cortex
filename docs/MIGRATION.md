@@ -40,7 +40,10 @@ application code belong in this repository.
 - Foreign-key and uniqueness constraints
 - Complete model hydration after close and reopen
 - WAL mode and rollback verification
-- Neo4j deferred until measured graph-query requirements justify a server
+- PostgreSQL/pgvector scale adapter with model-specific vector indexes
+- Bounded indexed candidate queries for large namespaces
+- Restart-safe staged ingestion for large UTF-8 files
+- Neo4j deferred unless measured traversal requirements justify a projection
 
 ### 4. Tag generation and canonicalization — in progress
 

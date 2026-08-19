@@ -10,15 +10,20 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
+
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
+from data_retrieval.services.large_ingestion import LargeFileIngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
+from data_retrieval.storage.postgresql import PostgreSQLRepository
+from data_retrieval.storage.repository import Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
 from data_retrieval.tagging.ollama import OllamaError, OllamaTagProposer
 from data_retrieval.temporal import TemporalBridge
@@ -31,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     ingest = commands.add_parser("ingest", help="ingest one UTF-8 text file")
     ingest.add_argument("path", type=Path)
-    ingest.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    _add_storage_options(ingest)
+    ingest.add_argument("--batch-size", type=int, default=1_000)
     ingest.add_argument("--namespace", required=True)
     ingest.add_argument("--source", help="stable source label; defaults to the input path")
     ingest.add_argument("--tag", action="append", default=[], dest="tags")
@@ -48,13 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
         "enrich-tags", help="add Ollama tag proposals to an ingested document"
     )
     tags.add_argument("document_id")
-    tags.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    _add_storage_options(tags)
     _add_ollama_options(tags, timeout_default="120")
 
     temporal = commands.add_parser(
         "enrich-temporal", help="create Temporal History summary atoms from stored atoms"
     )
-    temporal.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    _add_storage_options(temporal)
     temporal.add_argument("--namespace", required=True)
     temporal.add_argument("--timeline-id", required=True)
     temporal.add_argument("--range-start", required=True, type=_aware_datetime)
@@ -67,15 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings = commands.add_parser(
         "enrich-embeddings", help="embed all changed atoms in one namespace"
     )
-    embeddings.add_argument(
-        "--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3")
-    )
+    _add_storage_options(embeddings)
     embeddings.add_argument("--namespace", required=True)
     _add_embedding_options(embeddings)
 
     retrieve = commands.add_parser("retrieve", help="run explainable hybrid retrieval")
     retrieve.add_argument("query")
-    retrieve.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    _add_storage_options(retrieve)
     retrieve.add_argument("--namespace", required=True)
     retrieve.add_argument("--tag", action="append", default=[], dest="tags")
     retrieve.add_argument("--top-k", type=int, default=10)
@@ -94,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         "feedback", help="apply one explicit outcome to a recorded retrieval"
     )
     feedback.add_argument("retrieval_id")
-    feedback.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    _add_storage_options(feedback)
     feedback.add_argument("--feedback-id", default=None)
     feedback.add_argument("--selected-atom", action="append", required=True)
     feedback.add_argument("--outcome", choices=("positive", "negative"), required=True)
@@ -102,8 +106,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     evaluate = commands.add_parser("evaluate", help="run the retrieval evaluation corpus")
     evaluate.add_argument("--dataset", type=Path, default=Path("evals/retrieval_cases.json"))
-    evaluate.add_argument(
-        "--db", type=Path, default=_env_path("DATA_RETRIEVAL_EVAL_DB", "evaluation.sqlite3")
+    _add_storage_options(
+        evaluate,
+        sqlite_env="DATA_RETRIEVAL_EVAL_DB",
+        sqlite_default="evaluation.sqlite3",
     )
     _add_embedding_options(evaluate, required=False)
     return parser
@@ -132,7 +138,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _feedback(args)
         else:
             output = _evaluate(args)
-    except (OSError, UnicodeError, OllamaError, ValueError, sqlite3.Error) as error:
+    except (
+        OSError,
+        UnicodeError,
+        OllamaError,
+        ValueError,
+        sqlite3.Error,
+        psycopg.Error,
+    ) as error:
         print(f"{args.command} failed: {error}", file=sys.stderr)
         return 1
 
@@ -143,25 +156,42 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, object]:
     if not args.path.is_file():
         parser.error(f"input file does not exist: {args.path}")
-    text = args.path.read_text(encoding="utf-8")
     metadata = {"source_type": "text_file", **args.metadata_json}
     if args.timeline_id:
         metadata["timeline_id"] = args.timeline_id
-    with SQLiteRepository(args.db) as repository:
-        result = IngestService(repository).ingest_text(
-            namespace=args.namespace,
-            source=args.source or args.path.as_posix(),
-            text=text,
-            explicit_tags=tuple(args.tags),
-            occurred_at=args.occurred_at,
-            metadata=metadata,
-        )
+    with _open_repository(args) as repository:
+        if args.postgres_dsn:
+            result = LargeFileIngestService(
+                repository, batch_size=args.batch_size
+            ).ingest_path(
+                path=args.path,
+                namespace=args.namespace,
+                source=args.source or args.path.as_posix(),
+                explicit_tags=tuple(args.tags),
+                occurred_at=args.occurred_at,
+                metadata=metadata,
+            )
+            atom_ids: tuple[str, ...] = ()
+            atom_count = result.atom_count
+        else:
+            text = args.path.read_text(encoding="utf-8")
+            result = IngestService(repository).ingest_text(
+                namespace=args.namespace,
+                source=args.source or args.path.as_posix(),
+                text=text,
+                explicit_tags=tuple(args.tags),
+                occurred_at=args.occurred_at,
+                metadata=metadata,
+            )
+            atom_ids = result.atom_ids
+            atom_count = len(atom_ids)
     return {
         "document_id": result.document_id,
-        "atom_ids": result.atom_ids,
+        "atom_ids": atom_ids,
+        "atom_count": atom_count,
         "tag_ids": result.tag_ids,
         "idempotent": result.idempotent,
-        "database": str(args.db),
+        "database": _database_label(args),
     }
 
 
@@ -171,25 +201,29 @@ def _enrich_tags(args: argparse.Namespace) -> dict[str, object]:
         model=args.ollama_model,
         timeout_seconds=args.ollama_timeout,
     )
-    with SQLiteRepository(args.db) as repository:
+    with _open_repository(args) as repository:
         result = TagEnrichmentService(repository, proposer).enrich_document(args.document_id)
     return {
         "document_id": result.document_id,
         "tag_ids": result.tag_ids,
         "atom_tag_count": result.atom_tag_count,
         "idempotent": result.idempotent,
-        "database": str(args.db),
+        "database": _database_label(args),
     }
 
 
 def _enrich_temporal(args: argparse.Namespace) -> dict[str, object]:
-    state_path = args.state or args.db.with_name(f"{args.db.stem}.temporal-state.sqlite3")
+    state_path = args.state or (
+        Path("temporal-state.sqlite3")
+        if args.postgres_dsn
+        else args.db.with_name(f"{args.db.stem}.temporal-state.sqlite3")
+    )
     summarizer = OllamaTemporalSummarizer(
         base_url=args.ollama_url,
         model=args.ollama_model,
         timeout_seconds=args.ollama_timeout,
     )
-    with SQLiteRepository(args.db) as repository:
+    with _open_repository(args) as repository:
         result = TemporalEnrichmentService(repository, TemporalBridge(summarizer)).enrich_range(
             namespace=args.namespace,
             timeline_id=args.timeline_id,
@@ -204,22 +238,25 @@ def _enrich_temporal(args: argparse.Namespace) -> dict[str, object]:
         "summary_counts": result.summary_counts,
         "coverage_count": result.coverage_count,
         "generation": result.generation,
-        "database": str(args.db),
+        "database": _database_label(args),
         "temporal_state": str(state_path),
     }
 
 
 def _enrich_embeddings(args: argparse.Namespace) -> dict[str, object]:
     embedder = _embedder(args)
-    with SQLiteRepository(args.db) as repository:
+    with _open_repository(args) as repository:
         result = EmbeddingEnrichmentService(repository, embedder).enrich_namespace(args.namespace)
     return {
         "namespace": result.namespace,
         "embedded_atom_ids": result.embedded_atom_ids,
         "reused_atom_ids": result.reused_atom_ids,
+        "embedded_count": result.embedded_count,
+        "reused_count": result.reused_count,
+        "reported_ids_truncated": result.reported_ids_truncated,
         "provider": embedder.provider,
         "model": embedder.model,
-        "database": str(args.db),
+        "database": _database_label(args),
     }
 
 
@@ -236,7 +273,7 @@ def _retrieve(args: argparse.Namespace) -> dict[str, object]:
         range_start=args.range_start,
         range_end=args.range_end,
     )
-    with SQLiteRepository(args.db) as repository:
+    with _open_repository(args) as repository:
         result = RetrievalService(repository, embedder=embedder).retrieve(plan)
     return {
         "retrieval_id": result.retrieval_id,
@@ -268,7 +305,7 @@ def _retrieve(args: argparse.Namespace) -> dict[str, object]:
 
 def _feedback(args: argparse.Namespace) -> dict[str, object]:
     feedback_id = args.feedback_id or str(uuid4())
-    with SQLiteRepository(args.db) as repository:
+    with _open_repository(args) as repository:
         result = LearningService(repository).apply_feedback(
             FeedbackRequest(
                 feedback_id=feedback_id,
@@ -284,18 +321,18 @@ def _feedback(args: argparse.Namespace) -> dict[str, object]:
         "atom_tag_updates": result.atom_tag_updates,
         "atom_link_updates": result.atom_link_updates,
         "tag_relation_updates": result.tag_relation_updates,
-        "database": str(args.db),
+        "database": _database_label(args),
     }
 
 
 def _evaluate(args: argparse.Namespace) -> dict[str, object]:
     embedder = _embedder(args) if args.embedding_model else None
-    with SQLiteRepository(args.db) as repository:
+    with _open_repository(args) as repository:
         report = EvaluationRunner(repository, embedder=embedder).run(args.dataset)
     return {
         **report.as_dict(),
         "dataset": str(args.dataset),
-        "database": str(args.db),
+        "database": _database_label(args),
         "embedding_model": embedder.model if embedder else None,
     }
 
@@ -311,6 +348,30 @@ def _add_ollama_options(parser: argparse.ArgumentParser, *, timeout_default: str
         type=float,
         default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", timeout_default)),
     )
+
+
+def _add_storage_options(
+    parser: argparse.ArgumentParser,
+    *,
+    sqlite_env: str = "DATA_RETRIEVAL_DB",
+    sqlite_default: str = "data.sqlite3",
+) -> None:
+    parser.add_argument("--db", type=Path, default=_env_path(sqlite_env, sqlite_default))
+    parser.add_argument(
+        "--postgres-dsn",
+        default=os.getenv("DATA_RETRIEVAL_POSTGRES_DSN"),
+        help="PostgreSQL connection string; takes precedence over --db",
+    )
+
+
+def _open_repository(args: argparse.Namespace) -> Repository:
+    if args.postgres_dsn:
+        return PostgreSQLRepository(args.postgres_dsn)
+    return SQLiteRepository(args.db)
+
+
+def _database_label(args: argparse.Namespace) -> str:
+    return "postgresql" if args.postgres_dsn else str(args.db)
 
 
 def _add_embedding_options(parser: argparse.ArgumentParser, *, required: bool = True) -> None:

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: data_retrieval
+      POSTGRES_USER: data_retrieval
+      POSTGRES_PASSWORD: ${DATA_RETRIEVAL_POSTGRES_PASSWORD:?set DATA_RETRIEVAL_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - data_retrieval_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U data_retrieval -d data_retrieval"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  data_retrieval_postgres:

@@ -71,6 +71,21 @@ class AtomEmbedding:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchHit:
+    """One bounded candidate returned by a storage-native search channel."""
+
+    atom_id: str
+    score: float
+    evidence: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.atom_id.strip():
+            raise ValueError("search hit atom_id cannot be empty")
+        if self.score < 0.0:
+            raise ValueError("search hit score must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class ScoreBreakdown:
     tag: float = 0.0
     lexical: float = 0.0

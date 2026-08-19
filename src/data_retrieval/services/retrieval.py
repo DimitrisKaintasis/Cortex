@@ -12,6 +12,7 @@ from data_retrieval.retrieval.models import (
     RetrievalItem,
     RetrievalResult,
     ScoreBreakdown,
+    SearchHit,
     TemporalMode,
 )
 from data_retrieval.retrieval.planning import QueryPlanner
@@ -35,28 +36,41 @@ class RetrievalService:
         planner: QueryPlanner | None = None,
         temporal_lens: TemporalLens | None = None,
         low_confidence_threshold: float = 0.20,
+        candidate_limit: int = 500,
+        catalog_hint_limit: int = 500,
     ) -> None:
+        if candidate_limit <= 0:
+            raise ValueError("candidate_limit must be positive")
+        if catalog_hint_limit <= 0:
+            raise ValueError("catalog_hint_limit must be positive")
         self.repository = repository
         self.tag_proposer = tag_proposer
         self.embedder = embedder
         self.planner = planner or QueryPlanner()
         self.temporal_lens = temporal_lens or TemporalLens()
         self.low_confidence_threshold = low_confidence_threshold
+        self.candidate_limit = candidate_limit
+        self.catalog_hint_limit = catalog_hint_limit
 
     def retrieve(self, requested_plan: QueryPlan) -> RetrievalResult:
         auto_temporal = requested_plan.temporal_mode is TemporalMode.AUTO
         plan = self.planner.resolve(requested_plan)
-        atoms = self.repository.list_atoms(namespace=plan.namespace)
-        atom_lookup = {atom.atom_id: atom for atom in atoms}
-        links = self.repository.list_atom_links(namespace=plan.namespace)
-        atom_tags = self.repository.list_atom_tags(plan.namespace)
         query_tags, tag_warnings = self._query_tags(plan)
 
-        raw_tag_scores, tag_evidence = self._tag_scores(atoms, atom_tags, query_tags)
-        raw_lexical_scores, lexical_evidence = self._lexical_scores(atoms, plan.query)
-        raw_semantic_scores, semantic_evidence, semantic_warning = self._semantic_scores(
-            atoms, plan.query
+        tag_hits = self.repository.search_tag_hits(
+            namespace=plan.namespace,
+            canonical_tags=query_tags,
+            limit=self.candidate_limit,
         )
+        lexical_hits = self.repository.search_lexical_hits(
+            namespace=plan.namespace,
+            query=plan.query,
+            limit=self.candidate_limit,
+        )
+        semantic_hits, semantic_warning = self._bounded_semantic_hits(plan)
+        raw_tag_scores, tag_evidence = self._hit_maps(tag_hits)
+        raw_lexical_scores, lexical_evidence = self._hit_maps(lexical_hits)
+        raw_semantic_scores, semantic_evidence = self._hit_maps(semantic_hits)
         warnings = [*tag_warnings]
         if semantic_warning:
             warnings.append(semantic_warning)
@@ -65,16 +79,34 @@ class RetrievalService:
         lexical_scores = self._normalize(raw_lexical_scores)
         semantic_scores = self._normalize(raw_semantic_scores)
         base_candidate_ids = set(tag_scores) | set(lexical_scores) | set(semantic_scores)
-        raw_relationship_scores, relationship_evidence = self._relationship_scores(
-            atoms=atoms,
+        raw_relationship_scores, relationship_evidence = self._bounded_relationship_scores(
             namespace=plan.namespace,
             query_tags=query_tags,
             seed_atom_ids=base_candidate_ids,
-            links=links,
-            atom_tags=atom_tags,
         )
         relationship_scores = self._normalize(raw_relationship_scores)
         candidate_ids = base_candidate_ids | set(relationship_scores)
+
+        links = self.repository.get_atom_links_touching(atom_ids=tuple(candidate_ids))
+        for link in links:
+            if (
+                link.relation is AtomLinkRelation.SUPERSEDES
+                and link.to_atom_id in candidate_ids
+            ):
+                candidate_ids.add(link.from_atom_id)
+                raw_relationship_scores.setdefault(
+                    link.from_atom_id, link.weight_raw * link.confidence
+                )
+                relationship_evidence.setdefault(
+                    link.from_atom_id, (f"supersedes={link.to_atom_id}",)
+                )
+        relationship_scores = self._normalize(raw_relationship_scores)
+        context_ids = set(candidate_ids)
+        for link in links:
+            context_ids.update((link.from_atom_id, link.to_atom_id))
+        atoms = self.repository.get_atoms(tuple(sorted(context_ids)))
+        atom_lookup = {atom.atom_id: atom for atom in atoms}
+        candidate_ids.intersection_update(atom_lookup)
         assessment = self.temporal_lens.assess(
             plan=plan,
             atoms=atoms,
@@ -186,13 +218,105 @@ class RetrievalService:
         )
         return result
 
+    @staticmethod
+    def _hit_maps(
+        hits: tuple[SearchHit, ...],
+    ) -> tuple[dict[str, float], dict[str, tuple[str, ...]]]:
+        return (
+            {hit.atom_id: hit.score for hit in hits},
+            {hit.atom_id: hit.evidence for hit in hits},
+        )
+
+    def _bounded_semantic_hits(
+        self, plan: QueryPlan
+    ) -> tuple[tuple[SearchHit, ...], str | None]:
+        if self.embedder is None:
+            return (), None
+        try:
+            query_vector = self.embedder.embed_query(plan.query)
+            if not query_vector:
+                return (), "semantic_query_embedding_invalid"
+            return (
+                self.repository.search_semantic_hits(
+                    namespace=plan.namespace,
+                    provider=self.embedder.provider,
+                    model=self.embedder.model,
+                    query_vector=query_vector,
+                    limit=self.candidate_limit,
+                ),
+                None,
+            )
+        except Exception as error:  # noqa: BLE001 - retrieval must degrade safely
+            return (), f"semantic_unavailable:{type(error).__name__}"
+
+    def _bounded_relationship_scores(
+        self,
+        *,
+        namespace: str,
+        query_tags: tuple[str, ...],
+        seed_atom_ids: set[str],
+    ) -> tuple[dict[str, float], dict[str, tuple[str, ...]]]:
+        scores: dict[str, float] = defaultdict(float)
+        evidence: dict[str, list[str]] = defaultdict(list)
+        query_tag_records = self.repository.get_tags_by_canonical(
+            namespace=namespace, canonical_texts=query_tags
+        )
+        query_tag_ids = {tag.tag_id for tag in query_tag_records}
+        relations = self.repository.get_tag_relations_touching(
+            tag_ids=tuple(query_tag_ids), relation_type="co_occurs"
+        )
+        related_strength_by_id: dict[str, float] = defaultdict(float)
+        for relation in relations:
+            strength = relation.weight_raw * relation.confidence
+            if relation.source_tag_id in query_tag_ids:
+                related_strength_by_id[relation.target_tag_id] += strength
+            if relation.target_tag_id in query_tag_ids:
+                related_strength_by_id[relation.source_tag_id] += strength
+        related_tags = self.repository.get_tags(tuple(sorted(related_strength_by_id)))
+        related_strength = {
+            tag.canonical_text: related_strength_by_id[tag.tag_id] for tag in related_tags
+        }
+        related_hits = self.repository.search_tag_hits(
+            namespace=namespace,
+            canonical_tags=tuple(sorted(related_strength)),
+            limit=self.candidate_limit,
+        )
+        for hit in related_hits:
+            matched = [
+                value.removeprefix("tag=")
+                for value in hit.evidence
+                if value.startswith("tag=")
+            ]
+            strength = max((related_strength.get(value, 0.0) for value in matched), default=0.0)
+            if strength <= 0.0:
+                continue
+            scores[hit.atom_id] += hit.score * strength
+            evidence[hit.atom_id].extend(f"related_tag={value}" for value in matched)
+
+        for link in self.repository.get_atom_links_touching(
+            atom_ids=tuple(seed_atom_ids), relation=AtomLinkRelation.CO_USED
+        ):
+            strength = link.weight_raw * link.confidence
+            if link.from_atom_id in seed_atom_ids:
+                scores[link.to_atom_id] += strength
+                evidence[link.to_atom_id].append(f"co_used_with={link.from_atom_id}")
+            if link.to_atom_id in seed_atom_ids:
+                scores[link.from_atom_id] += strength
+                evidence[link.from_atom_id].append(f"co_used_with={link.to_atom_id}")
+        return dict(scores), {
+            atom_id: tuple(sorted(set(values))) for atom_id, values in evidence.items()
+        }
+
     def _query_tags(self, plan: QueryPlan) -> tuple[tuple[str, ...], list[str]]:
         tags = {normalize_tag(tag) for tag in plan.query_tags if normalize_tag(tag)}
         warnings: list[str] = []
         if self.tag_proposer:
             try:
                 catalog = tuple(
-                    tag.canonical_text for tag in self.repository.list_tags(plan.namespace)
+                    tag.canonical_text
+                    for tag in self.repository.list_tags(
+                        plan.namespace, limit=self.catalog_hint_limit
+                    )
                 )
                 proposals = self.tag_proposer.propose_tags(
                     text=plan.query,

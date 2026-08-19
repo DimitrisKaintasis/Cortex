@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import StringIO
+from typing import TextIO
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,41 +30,56 @@ class TextChunker:
         if not text or not text.strip():
             raise ValueError("text cannot be empty")
 
-        chunks: list[TextChunk] = []
-        start = 0
+        return tuple(self.iter_stream(StringIO(text)))
+
+    def iter_stream(self, stream: TextIO, *, read_size: int = 65_536):
+        """Yield deterministic chunks while keeping only a bounded text window in memory."""
+
+        if read_size < self.max_chars:
+            raise ValueError("read_size must be at least max_chars")
+
+        buffer = ""
+        buffer_start = 0
         position = 0
-        text_length = len(text)
+        exhausted = False
 
-        while start < text_length:
-            end = min(text_length, start + self.max_chars)
-            if end < text_length:
-                end = self._preferred_boundary(text, start, end)
+        while True:
+            while len(buffer) <= self.max_chars and not exhausted:
+                block = stream.read(read_size)
+                if block:
+                    buffer += block
+                else:
+                    exhausted = True
+            if not buffer and exhausted:
+                break
 
-            leading = len(text[start:end]) - len(text[start:end].lstrip())
-            trailing = len(text[start:end].rstrip())
-            content_start = start + leading
-            content_end = start + trailing
+            end = min(len(buffer), self.max_chars)
+            if not exhausted or end < len(buffer):
+                end = self._preferred_boundary(buffer, 0, end)
+
+            segment = buffer[:end]
+            leading = len(segment) - len(segment.lstrip())
+            trailing = len(segment.rstrip())
+            content_start = buffer_start + leading
+            content_end = buffer_start + trailing
 
             if content_start < content_end:
-                chunks.append(
-                    TextChunk(
-                        position=position,
-                        char_start=content_start,
-                        char_end=content_end,
-                        text=text[content_start:content_end],
-                    )
+                yield TextChunk(
+                    position=position,
+                    char_start=content_start,
+                    char_end=content_end,
+                    text=segment[leading:trailing],
                 )
                 position += 1
 
-            if end >= text_length:
+            if exhausted and end >= len(buffer):
                 break
 
             next_start = end - self.overlap_chars
-            if next_start <= start:
+            if next_start <= 0:
                 next_start = end
-            start = next_start
-
-        return tuple(chunks)
+            buffer = buffer[next_start:]
+            buffer_start += next_start
 
     def _preferred_boundary(self, text: str, start: int, proposed_end: int) -> int:
         minimum = start + (self.max_chars // 2)
