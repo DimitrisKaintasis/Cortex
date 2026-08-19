@@ -19,8 +19,10 @@ from data_retrieval.domain.models import (
     Tag,
     TagLevel,
     TagOrigin,
+    TagRelation,
     TagState,
 )
+from data_retrieval.retrieval.models import AtomEmbedding
 
 
 class SQLiteRepository:
@@ -82,6 +84,7 @@ class SQLiteRepository:
                     origin TEXT NOT NULL,
                     evidence_sources_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
                     PRIMARY KEY(atom_id, tag_id)
                 );
 
@@ -89,9 +92,50 @@ class SQLiteRepository:
                     from_atom_id TEXT NOT NULL REFERENCES atoms(atom_id),
                     to_atom_id TEXT NOT NULL REFERENCES atoms(atom_id),
                     relation TEXT NOT NULL,
+                    weight_raw REAL NOT NULL CHECK(weight_raw >= 0),
+                    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                    evidence_sources_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
                     metadata_json TEXT NOT NULL,
                     PRIMARY KEY(from_atom_id, to_atom_id, relation)
+                );
+
+                CREATE TABLE IF NOT EXISTS tag_relations (
+                    source_tag_id TEXT NOT NULL REFERENCES tags(tag_id),
+                    target_tag_id TEXT NOT NULL REFERENCES tags(tag_id),
+                    relation_type TEXT NOT NULL,
+                    weight_raw REAL NOT NULL CHECK(weight_raw >= 0),
+                    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                    evidence_sources_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(source_tag_id, target_tag_id, relation_type)
+                );
+
+                CREATE TABLE IF NOT EXISTS retrieval_events (
+                    retrieval_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS feedback_events (
+                    feedback_id TEXT PRIMARY KEY,
+                    retrieval_id TEXT NOT NULL REFERENCES retrieval_events(retrieval_id),
+                    created_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS atom_embeddings (
+                    atom_id TEXT NOT NULL REFERENCES atoms(atom_id),
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+                    vector_json TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(atom_id, provider, model)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_atoms_document_position
@@ -102,7 +146,24 @@ class SQLiteRepository:
                     ON tags(namespace, canonical_text);
                 CREATE INDEX IF NOT EXISTS idx_atom_links_to
                     ON atom_links(to_atom_id, relation);
+                CREATE INDEX IF NOT EXISTS idx_atom_embeddings_provider_model
+                    ON atom_embeddings(provider, model);
+                CREATE INDEX IF NOT EXISTS idx_tag_relations_source
+                    ON tag_relations(source_tag_id, relation_type);
+                CREATE INDEX IF NOT EXISTS idx_feedback_retrieval
+                    ON feedback_events(retrieval_id);
                 """
+            )
+            self._ensure_column("atom_tags", "updated_at", "TEXT")
+            self._ensure_column("atom_links", "weight_raw", "REAL NOT NULL DEFAULT 1.0")
+            self._ensure_column("atom_links", "confidence", "REAL NOT NULL DEFAULT 1.0")
+            self._ensure_column("atom_links", "evidence_sources_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column("atom_links", "updated_at", "TEXT")
+            self._connection.execute(
+                "UPDATE atom_tags SET updated_at = created_at WHERE updated_at IS NULL"
+            )
+            self._connection.execute(
+                "UPDATE atom_links SET updated_at = created_at WHERE updated_at IS NULL"
             )
 
     def get_document(self, document_id: str) -> Document | None:
@@ -139,6 +200,30 @@ class SQLiteRepository:
             ).fetchall()
         return tuple(self._atom_link(row) for row in rows)
 
+    def list_atom_links(
+        self,
+        *,
+        namespace: str,
+        relation: str | None = None,
+    ) -> tuple[AtomLink, ...]:
+        parameters: list[Any] = [namespace]
+        relation_clause = ""
+        if relation is not None:
+            relation_clause = "AND links.relation = ?"
+            parameters.append(relation)
+        with self._lock:
+            rows = self._connection.execute(
+                f"""
+                SELECT links.* FROM atom_links AS links
+                JOIN atoms AS source_atom
+                  ON source_atom.atom_id = links.from_atom_id
+                WHERE source_atom.namespace = ? {relation_clause}
+                ORDER BY links.relation, links.from_atom_id, links.to_atom_id
+                """,
+                parameters,
+            ).fetchall()
+        return tuple(self._atom_link(row) for row in rows)
+
     def list_tags(self, namespace: str) -> tuple[Tag, ...]:
         with self._lock:
             rows = self._connection.execute(
@@ -151,6 +236,28 @@ class SQLiteRepository:
             ).fetchall()
         return tuple(self._tag(row) for row in rows)
 
+    def list_tag_relations(
+        self, *, namespace: str, relation_type: str | None = None
+    ) -> tuple[TagRelation, ...]:
+        parameters: list[Any] = [namespace]
+        relation_clause = ""
+        if relation_type is not None:
+            relation_clause = "AND relations.relation_type = ?"
+            parameters.append(relation_type)
+        with self._lock:
+            rows = self._connection.execute(
+                f"""
+                SELECT relations.* FROM tag_relations AS relations
+                JOIN tags AS source_tag
+                  ON source_tag.tag_id = relations.source_tag_id
+                WHERE source_tag.namespace = ? {relation_clause}
+                ORDER BY relations.relation_type, relations.source_tag_id,
+                         relations.target_tag_id
+                """,
+                parameters,
+            ).fetchall()
+        return tuple(self._tag_relation(row) for row in rows)
+
     def list_atoms(
         self,
         *,
@@ -159,7 +266,7 @@ class SQLiteRepository:
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
     ) -> tuple[Atom, ...]:
-        clauses = ["namespace = ?", "occurred_at IS NOT NULL"]
+        clauses = ["namespace = ?"]
         parameters: list[Any] = [namespace]
         if kind is not None:
             clauses.append("kind = ?")
@@ -173,16 +280,92 @@ class SQLiteRepository:
         filtered = (
             atom
             for atom in atoms
-            if atom.occurred_at is not None
-            and (occurred_from is None or atom.occurred_at >= occurred_from)
-            and (occurred_to is None or atom.occurred_at < occurred_to)
+            if (
+                occurred_from is None
+                or (atom.occurred_at is not None and atom.occurred_at >= occurred_from)
+            )
+            and (
+                occurred_to is None
+                or (atom.occurred_at is not None and atom.occurred_at < occurred_to)
+            )
         )
         return tuple(
             sorted(
                 filtered,
-                key=lambda atom: (atom.occurred_at, atom.document_id, atom.position),
+                key=lambda atom: (
+                    atom.occurred_at is None,
+                    atom.occurred_at or atom.created_at,
+                    atom.document_id,
+                    atom.position,
+                ),
             )
         )
+
+    def upsert_embeddings(self, embeddings: tuple[AtomEmbedding, ...]) -> None:
+        with self._lock, self._connection:
+            self._connection.executemany(
+                """
+                INSERT INTO atom_embeddings (
+                    atom_id, provider, model, dimensions, vector_json,
+                    content_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(atom_id, provider, model) DO UPDATE SET
+                    dimensions = excluded.dimensions,
+                    vector_json = excluded.vector_json,
+                    content_hash = excluded.content_hash,
+                    created_at = excluded.created_at
+                """,
+                (
+                    (
+                        item.atom_id,
+                        item.provider,
+                        item.model,
+                        item.dimensions,
+                        self._json(item.vector),
+                        item.content_hash,
+                        item.created_at.isoformat(),
+                    )
+                    for item in embeddings
+                ),
+            )
+
+    def get_embeddings(
+        self,
+        *,
+        atom_ids: tuple[str, ...],
+        provider: str,
+        model: str,
+    ) -> dict[str, AtomEmbedding]:
+        if not atom_ids:
+            return {}
+        rows: list[sqlite3.Row] = []
+        with self._lock:
+            for offset in range(0, len(atom_ids), 500):
+                batch = atom_ids[offset : offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                parameters: list[Any] = [*batch, provider, model]
+                rows.extend(
+                    self._connection.execute(
+                        f"""
+                        SELECT * FROM atom_embeddings
+                        WHERE atom_id IN ({placeholders})
+                          AND provider = ? AND model = ?
+                        """,
+                        parameters,
+                    ).fetchall()
+                )
+        return {
+            row["atom_id"]: AtomEmbedding(
+                atom_id=row["atom_id"],
+                provider=row["provider"],
+                model=row["model"],
+                dimensions=row["dimensions"],
+                vector=tuple(float(value) for value in self._array(row["vector_json"])),
+                content_hash=row["content_hash"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        }
 
     def atom_tags_for(self, atom_id: str) -> tuple[AtomTag, ...]:
         with self._lock:
@@ -195,6 +378,70 @@ class SQLiteRepository:
                 (atom_id,),
             ).fetchall()
         return tuple(self._atom_tag(row) for row in rows)
+
+    def list_atom_tags(self, namespace: str) -> tuple[AtomTag, ...]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT edges.* FROM atom_tags AS edges
+                JOIN atoms ON atoms.atom_id = edges.atom_id
+                WHERE atoms.namespace = ?
+                ORDER BY edges.atom_id, edges.tag_id
+                """,
+                (namespace,),
+            ).fetchall()
+        return tuple(self._atom_tag(row) for row in rows)
+
+    def record_retrieval_event(self, event: dict[str, object]) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO retrieval_events (
+                    retrieval_id, namespace, created_at, payload_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    str(event["retrieval_id"]),
+                    str(event["namespace"]),
+                    str(event["created_at"]),
+                    self._json(event),
+                ),
+            )
+
+    def get_retrieval_event(self, retrieval_id: str) -> dict[str, object] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM retrieval_events WHERE retrieval_id = ?",
+                (retrieval_id,),
+            ).fetchone()
+        return self._object(row["payload_json"]) if row else None
+
+    def apply_learning_updates(
+        self,
+        *,
+        feedback_event: dict[str, object],
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        """Store one feedback event and all derived weight changes atomically."""
+        with self._lock, self._connection:
+            self._upsert_atom_tags(atom_tags)
+            self._upsert_atom_links(atom_links)
+            self._upsert_tag_relations(tag_relations)
+            self._connection.execute(
+                """
+                INSERT INTO feedback_events (
+                    feedback_id, retrieval_id, created_at, payload_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    str(feedback_event["feedback_id"]),
+                    str(feedback_event["retrieval_id"]),
+                    str(feedback_event["created_at"]),
+                    self._json(feedback_event),
+                ),
+            )
 
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         """Persist the whole bundle in one transaction or persist nothing."""
@@ -338,13 +585,14 @@ class SQLiteRepository:
             """
             INSERT INTO atom_tags (
                 atom_id, tag_id, weight_raw, confidence, origin,
-                evidence_sources_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                evidence_sources_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(atom_id, tag_id) DO UPDATE SET
                 weight_raw = excluded.weight_raw,
                 confidence = excluded.confidence,
                 origin = excluded.origin,
-                evidence_sources_json = excluded.evidence_sources_json
+                evidence_sources_json = excluded.evidence_sources_json,
+                updated_at = excluded.updated_at
             """,
             (
                 (
@@ -355,6 +603,7 @@ class SQLiteRepository:
                     edge.origin,
                     self._json(edge.evidence_sources),
                     edge.created_at.isoformat(),
+                    edge.updated_at.isoformat(),
                 )
                 for edge in atom_tags
             ),
@@ -364,9 +613,14 @@ class SQLiteRepository:
         self._connection.executemany(
             """
             INSERT INTO atom_links (
-                from_atom_id, to_atom_id, relation, created_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?)
+                from_atom_id, to_atom_id, relation, weight_raw, confidence,
+                evidence_sources_json, created_at, updated_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(from_atom_id, to_atom_id, relation) DO UPDATE SET
+                weight_raw = excluded.weight_raw,
+                confidence = excluded.confidence,
+                evidence_sources_json = excluded.evidence_sources_json,
+                updated_at = excluded.updated_at,
                 metadata_json = excluded.metadata_json
             """,
             (
@@ -374,10 +628,42 @@ class SQLiteRepository:
                     edge.from_atom_id,
                     edge.to_atom_id,
                     edge.relation,
+                    edge.weight_raw,
+                    edge.confidence,
+                    self._json(edge.evidence_sources),
                     edge.created_at.isoformat(),
+                    edge.updated_at.isoformat(),
                     self._json(edge.metadata),
                 )
                 for edge in atom_links
+            ),
+        )
+
+    def _upsert_tag_relations(self, relations: Iterable[TagRelation]) -> None:
+        self._connection.executemany(
+            """
+            INSERT INTO tag_relations (
+                source_tag_id, target_tag_id, relation_type, weight_raw,
+                confidence, evidence_sources_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_tag_id, target_tag_id, relation_type) DO UPDATE SET
+                weight_raw = excluded.weight_raw,
+                confidence = excluded.confidence,
+                evidence_sources_json = excluded.evidence_sources_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                (
+                    edge.source_tag_id,
+                    edge.target_tag_id,
+                    edge.relation_type,
+                    edge.weight_raw,
+                    edge.confidence,
+                    self._json(edge.evidence_sources),
+                    edge.created_at.isoformat(),
+                    edge.updated_at.isoformat(),
+                )
+                for edge in relations
             ),
         )
 
@@ -434,6 +720,7 @@ class SQLiteRepository:
             origin=TagOrigin(row["origin"]),
             evidence_sources=tuple(SQLiteRepository._array(row["evidence_sources_json"])),
             created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
     @staticmethod
@@ -442,9 +729,34 @@ class SQLiteRepository:
             from_atom_id=row["from_atom_id"],
             to_atom_id=row["to_atom_id"],
             relation=AtomLinkRelation(row["relation"]),
+            weight_raw=row["weight_raw"],
+            confidence=row["confidence"],
+            evidence_sources=tuple(SQLiteRepository._array(row["evidence_sources_json"])),
             created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
             metadata=SQLiteRepository._object(row["metadata_json"]),
         )
+
+    @staticmethod
+    def _tag_relation(row: sqlite3.Row) -> TagRelation:
+        return TagRelation(
+            source_tag_id=row["source_tag_id"],
+            target_tag_id=row["target_tag_id"],
+            relation_type=row["relation_type"],
+            weight_raw=row["weight_raw"],
+            confidence=row["confidence"],
+            evidence_sources=tuple(SQLiteRepository._array(row["evidence_sources_json"])),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @staticmethod
     def _json(value: Any) -> str:

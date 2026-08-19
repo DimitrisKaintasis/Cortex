@@ -27,9 +27,10 @@ The repository currently provides a dependency-free domain slice for:
   calendar-summary atoms from stored source atoms;
 - a durable SQLite repository with transactions, foreign keys, and full hydration;
 - an in-memory repository for fast tests.
-
-Semantic canonicalization, hybrid retrieval, and feedback learning are planned
-migration milestones, not hidden parts of the current code.
+- explainable tag, lexical, semantic, learned-relationship, and temporal retrieval;
+- content-hash-aware embedding enrichment through a replaceable Ollama model;
+- recorded retrieval and feedback events with bounded, atomic learning updates;
+- a versioned evaluation corpus for tag, semantic, and temporal behavior.
 
 ## Development
 
@@ -55,6 +56,8 @@ Laptop file -> raw ingestion -> laptop SQLite
                                   +-> tag enrichment ------> Ollama on Mac
                                   |
                                   +-> Temporal enrichment -> Ollama on Mac
+                                  |
+                                  +-> embedding inference -> Ollama on Mac
 ```
 
 - The laptop reads source files, creates canonical atoms, and owns SQLite.
@@ -120,6 +123,62 @@ the document; Temporal History maintains a sibling state database and reuses unc
 period summaries. Temporal topics remain summary metadata until a later calibrated step
 explicitly promotes them into the tag graph.
 
+Embed changed atoms once with the selected model. The vectors stay in laptop SQLite;
+only inference crosses the SSH tunnel:
+
+```powershell
+python -m data_retrieval enrich-embeddings `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --embedding-model qwen3-embedding:0.6b
+```
+
+The embedding identity and source content hash are stored with every vector. Repeating
+the command reuses unchanged vectors. Selecting a different model creates that model's
+vectors without making the model a code dependency.
+
+Run hybrid retrieval with explicit tags when the caller already knows them:
+
+```powershell
+python -m data_retrieval retrieve "current Docker status" `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --tag docker `
+  --timeline-id main `
+  --temporal-mode current_state `
+  --embedding-model qwen3-embedding:0.6b
+```
+
+The output includes a `retrieval_id`, per-channel scores, evidence, temporal roles, and
+atom IDs. Explicit outcome feedback can then update only learned relationships:
+
+```powershell
+python -m data_retrieval feedback <retrieval-id> `
+  --db .\data.sqlite3 `
+  --selected-atom <atom-id> `
+  --outcome positive `
+  --reason "used in the final answer"
+```
+
+Feedback never rewrites source atoms or factual `SUPERSEDES`, `SUMMARIZES`, and
+`DERIVED_FROM` links. It makes small bounded changes to atom-tag weights, learned
+`CO_USED` atom links, and tag co-occurrence relations. Summary selections pass only
+partial credit to their source lineage.
+
+Run the checked-in regression corpus with or without embeddings:
+
+```powershell
+python -m data_retrieval evaluate --db :memory:
+
+python -m data_retrieval evaluate --db :memory: `
+  --embedding-model qwen3-embedding:0.6b
+```
+
+On 2026-08-20, the no-embedding baseline scored 66.7% hit@k and failed both semantic
+paraphrase cases. The live Mac run with `qwen3-embedding:0.6b` scored 100% hit@k and
+zero temporal forbidden-result violations on all six cases. This is an integration
+baseline, not a production-quality claim; real failures should be added to the corpus.
+
 `--metadata-json` accepts source-specific fields without coupling ingestion to one chat
 or document provider. Temporal History currently recognizes fields including
 `event_type`, `recorded_at`, `actor_id`, `actor_display_name`, `actor_type`,
@@ -154,5 +213,7 @@ laptop/Mac split is recorded in
 [ADR-0004](docs/decisions/0004-laptop-storage-mac-inference.md), and the durable
 raw-ingestion/enrichment boundary in
 [ADR-0005](docs/decisions/0005-raw-ingestion-before-enrichment.md).
+The staged retrieval and conservative feedback policy are recorded in
+[ADR-0006](docs/decisions/0006-staged-retrieval-and-outcome-learning.md).
 The first real Mac model comparison and current default are recorded in the
 [tag proposal model benchmark](docs/MODEL-BENCHMARK.md).

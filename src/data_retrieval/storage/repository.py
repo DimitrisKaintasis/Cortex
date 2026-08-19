@@ -11,7 +11,9 @@ from data_retrieval.domain.models import (
     Document,
     IngestionBundle,
     Tag,
+    TagRelation,
 )
+from data_retrieval.retrieval.models import AtomEmbedding
 
 
 class Repository(Protocol):
@@ -25,7 +27,16 @@ class Repository(Protocol):
 
     def get_atom_links(self, atom_id: str) -> tuple[AtomLink, ...]: ...
 
+    def list_atom_links(
+        self,
+        *,
+        namespace: str,
+        relation: str | None = None,
+    ) -> tuple[AtomLink, ...]: ...
+
     def atom_tags_for(self, atom_id: str) -> tuple[AtomTag, ...]: ...
+
+    def list_atom_tags(self, namespace: str) -> tuple[AtomTag, ...]: ...
 
     def list_atoms(
         self,
@@ -37,6 +48,33 @@ class Repository(Protocol):
     ) -> tuple[Atom, ...]: ...
 
     def list_tags(self, namespace: str) -> tuple[Tag, ...]: ...
+
+    def list_tag_relations(
+        self, *, namespace: str, relation_type: str | None = None
+    ) -> tuple[TagRelation, ...]: ...
+
+    def upsert_embeddings(self, embeddings: tuple[AtomEmbedding, ...]) -> None: ...
+
+    def get_embeddings(
+        self,
+        *,
+        atom_ids: tuple[str, ...],
+        provider: str,
+        model: str,
+    ) -> dict[str, AtomEmbedding]: ...
+
+    def record_retrieval_event(self, event: dict[str, object]) -> None: ...
+
+    def get_retrieval_event(self, retrieval_id: str) -> dict[str, object] | None: ...
+
+    def apply_learning_updates(
+        self,
+        *,
+        feedback_event: dict[str, object],
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None: ...
 
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         """Persist a complete ingestion bundle atomically."""

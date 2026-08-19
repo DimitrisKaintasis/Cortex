@@ -41,13 +41,13 @@ class OllamaJsonClient:
                 {"role": "user", "content": user},
             ],
         }
-        response = self._post_json("/api/chat", payload)
+        response = self.post_json("/api/chat", payload)
         try:
             return self._parse_model_json(response["message"]["content"])
         except (KeyError, TypeError, json.JSONDecodeError) as error:
             raise OllamaError("Ollama returned an invalid structured response") from error
 
-    def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url.rstrip('/')}{path}"
         request = Request(
             url,

@@ -3,12 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
+from data_retrieval.evaluation import EvaluationRunner
+from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
+from data_retrieval.retrieval.ollama import OllamaEmbedder
+from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
+from data_retrieval.services.learning import LearningService
+from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
 from data_retrieval.storage.sqlite import SQLiteRepository
@@ -55,6 +63,49 @@ def build_parser() -> argparse.ArgumentParser:
     temporal.add_argument("--state", type=Path)
     temporal.add_argument("--max-workers", type=int, default=1)
     _add_ollama_options(temporal, timeout_default="240")
+
+    embeddings = commands.add_parser(
+        "enrich-embeddings", help="embed all changed atoms in one namespace"
+    )
+    embeddings.add_argument(
+        "--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3")
+    )
+    embeddings.add_argument("--namespace", required=True)
+    _add_embedding_options(embeddings)
+
+    retrieve = commands.add_parser("retrieve", help="run explainable hybrid retrieval")
+    retrieve.add_argument("query")
+    retrieve.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    retrieve.add_argument("--namespace", required=True)
+    retrieve.add_argument("--tag", action="append", default=[], dest="tags")
+    retrieve.add_argument("--top-k", type=int, default=10)
+    retrieve.add_argument("--timeline-id")
+    retrieve.add_argument(
+        "--temporal-mode",
+        choices=tuple(mode.value for mode in TemporalMode),
+        default=TemporalMode.AUTO.value,
+    )
+    retrieve.add_argument("--as-of", type=_aware_datetime)
+    retrieve.add_argument("--range-start", type=_aware_datetime)
+    retrieve.add_argument("--range-end", type=_aware_datetime)
+    _add_embedding_options(retrieve, required=False)
+
+    feedback = commands.add_parser(
+        "feedback", help="apply one explicit outcome to a recorded retrieval"
+    )
+    feedback.add_argument("retrieval_id")
+    feedback.add_argument("--db", type=Path, default=_env_path("DATA_RETRIEVAL_DB", "data.sqlite3"))
+    feedback.add_argument("--feedback-id", default=None)
+    feedback.add_argument("--selected-atom", action="append", required=True)
+    feedback.add_argument("--outcome", choices=("positive", "negative"), required=True)
+    feedback.add_argument("--reason", default="")
+
+    evaluate = commands.add_parser("evaluate", help="run the retrieval evaluation corpus")
+    evaluate.add_argument("--dataset", type=Path, default=Path("evals/retrieval_cases.json"))
+    evaluate.add_argument(
+        "--db", type=Path, default=_env_path("DATA_RETRIEVAL_EVAL_DB", "evaluation.sqlite3")
+    )
+    _add_embedding_options(evaluate, required=False)
     return parser
 
 
@@ -63,15 +114,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command in {"enrich-tags", "enrich-temporal"} and not args.ollama_model:
         parser.error("--ollama-model or OLLAMA_MODEL is required")
+    if args.command == "enrich-embeddings" and not args.embedding_model:
+        parser.error("--embedding-model or OLLAMA_EMBEDDING_MODEL is required")
 
     try:
         if args.command == "ingest":
             output = _ingest(args, parser)
         elif args.command == "enrich-tags":
             output = _enrich_tags(args)
-        else:
+        elif args.command == "enrich-temporal":
             output = _enrich_temporal(args)
-    except (OSError, UnicodeError, OllamaError, ValueError) as error:
+        elif args.command == "enrich-embeddings":
+            output = _enrich_embeddings(args)
+        elif args.command == "retrieve":
+            output = _retrieve(args)
+        elif args.command == "feedback":
+            output = _feedback(args)
+        else:
+            output = _evaluate(args)
+    except (OSError, UnicodeError, OllamaError, ValueError, sqlite3.Error) as error:
         print(f"{args.command} failed: {error}", file=sys.stderr)
         return 1
 
@@ -148,6 +209,97 @@ def _enrich_temporal(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _enrich_embeddings(args: argparse.Namespace) -> dict[str, object]:
+    embedder = _embedder(args)
+    with SQLiteRepository(args.db) as repository:
+        result = EmbeddingEnrichmentService(repository, embedder).enrich_namespace(args.namespace)
+    return {
+        "namespace": result.namespace,
+        "embedded_atom_ids": result.embedded_atom_ids,
+        "reused_atom_ids": result.reused_atom_ids,
+        "provider": embedder.provider,
+        "model": embedder.model,
+        "database": str(args.db),
+    }
+
+
+def _retrieve(args: argparse.Namespace) -> dict[str, object]:
+    embedder = _embedder(args) if args.embedding_model else None
+    plan = QueryPlan(
+        query=args.query,
+        namespace=args.namespace,
+        query_tags=tuple(args.tags),
+        top_k=args.top_k,
+        timeline_id=args.timeline_id,
+        temporal_mode=TemporalMode(args.temporal_mode),
+        as_of=args.as_of,
+        range_start=args.range_start,
+        range_end=args.range_end,
+    )
+    with SQLiteRepository(args.db) as repository:
+        result = RetrievalService(repository, embedder=embedder).retrieve(plan)
+    return {
+        "retrieval_id": result.retrieval_id,
+        "resolved_temporal_mode": result.resolved_temporal_mode.value,
+        "low_confidence": result.low_confidence,
+        "diagnostics": result.diagnostics,
+        "items": [
+            {
+                "atom_id": item.atom_id,
+                "content": item.content,
+                "kind": item.kind.value,
+                "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
+                "role": item.role,
+                "lineage_atom_ids": item.lineage_atom_ids,
+                "score": {
+                    "tag": item.score.tag,
+                    "lexical": item.score.lexical,
+                    "semantic": item.score.semantic,
+                    "relationship": item.score.relationship,
+                    "temporal": item.score.temporal,
+                    "final": item.score.final,
+                    "evidence": item.score.evidence,
+                },
+            }
+            for item in result.items
+        ],
+    }
+
+
+def _feedback(args: argparse.Namespace) -> dict[str, object]:
+    feedback_id = args.feedback_id or str(uuid4())
+    with SQLiteRepository(args.db) as repository:
+        result = LearningService(repository).apply_feedback(
+            FeedbackRequest(
+                feedback_id=feedback_id,
+                retrieval_id=args.retrieval_id,
+                selected_atom_ids=tuple(args.selected_atom),
+                outcome=args.outcome,
+                reason=args.reason,
+            )
+        )
+    return {
+        "feedback_id": result.feedback_id,
+        "credited_atom_ids": result.credited_atom_ids,
+        "atom_tag_updates": result.atom_tag_updates,
+        "atom_link_updates": result.atom_link_updates,
+        "tag_relation_updates": result.tag_relation_updates,
+        "database": str(args.db),
+    }
+
+
+def _evaluate(args: argparse.Namespace) -> dict[str, object]:
+    embedder = _embedder(args) if args.embedding_model else None
+    with SQLiteRepository(args.db) as repository:
+        report = EvaluationRunner(repository, embedder=embedder).run(args.dataset)
+    return {
+        **report.as_dict(),
+        "dataset": str(args.dataset),
+        "database": str(args.db),
+        "embedding_model": embedder.model if embedder else None,
+    }
+
+
 def _add_ollama_options(parser: argparse.ArgumentParser, *, timeout_default: str) -> None:
     parser.add_argument(
         "--ollama-url",
@@ -158,6 +310,31 @@ def _add_ollama_options(parser: argparse.ArgumentParser, *, timeout_default: str
         "--ollama-timeout",
         type=float,
         default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", timeout_default)),
+    )
+
+
+def _add_embedding_options(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
+    parser.add_argument(
+        "--ollama-url",
+        default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435"),
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=os.getenv("OLLAMA_EMBEDDING_MODEL"),
+        required=required and not os.getenv("OLLAMA_EMBEDDING_MODEL"),
+    )
+    parser.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")),
+    )
+
+
+def _embedder(args: argparse.Namespace) -> OllamaEmbedder:
+    return OllamaEmbedder(
+        base_url=args.ollama_url,
+        model_name=args.embedding_model,
+        timeout_seconds=args.ollama_timeout,
     )
 
 

@@ -1,0 +1,114 @@
+{
+  "namespace": "foundation-eval-v1",
+  "documents": [
+    {
+      "source": "architecture/atoms",
+      "text": "Atoms remain simple evidence units connected by weighted tag relationships.",
+      "tags": ["atoms", "architecture"]
+    },
+    {
+      "source": "runtime/vehicle",
+      "text": "A car engine converts fuel into motion through combustion.",
+      "tags": ["vehicles"]
+    },
+    {
+      "source": "runtime/cooking",
+      "text": "Bread requires flour, water, yeast, and heat.",
+      "tags": ["cooking"]
+    },
+    {
+      "source": "mac/docker-old",
+      "text": "Docker is not installed on the Mac Mini.",
+      "tags": ["docker", "mac mini"],
+      "occurred_at": "2026-08-01T12:00:00+00:00",
+      "metadata": {"timeline_id": "mac", "state_key": "mac-mini/docker"}
+    },
+    {
+      "source": "mac/docker-current",
+      "text": "Docker is installed and working on the Mac Mini.",
+      "tags": ["docker", "mac mini"],
+      "occurred_at": "2026-08-03T12:00:00+00:00",
+      "metadata": {"timeline_id": "mac", "state_key": "mac-mini/docker"},
+      "supersedes_source": "mac/docker-old"
+    },
+    {
+      "source": "deploy/in-range",
+      "text": "The ingestion service deployment completed successfully.",
+      "tags": ["deployment"],
+      "occurred_at": "2026-08-10T09:00:00+00:00",
+      "metadata": {"timeline_id": "project"}
+    },
+    {
+      "source": "deploy/out-of-range",
+      "text": "The later deployment review identified no regressions.",
+      "tags": ["deployment"],
+      "occurred_at": "2026-08-15T09:00:00+00:00",
+      "metadata": {"timeline_id": "project"}
+    },
+    {
+      "source": "storage/sqlite",
+      "text": "The laptop keeps canonical records in a durable SQLite database.",
+      "tags": ["storage", "sqlite"]
+    }
+  ],
+  "cases": [
+    {
+      "id": "explicit-tag",
+      "category": "tag",
+      "query": "How are the evidence units structured?",
+      "query_tags": ["atoms"],
+      "expected_sources": ["architecture/atoms"],
+      "top_k": 3
+    },
+    {
+      "id": "semantic-paraphrase-vehicle",
+      "category": "semantic",
+      "query": "automobile powertrain",
+      "expected_sources": ["runtime/vehicle"],
+      "top_k": 3
+    },
+    {
+      "id": "semantic-paraphrase-storage",
+      "category": "semantic",
+      "query": "persistent local data repository",
+      "expected_sources": ["storage/sqlite"],
+      "top_k": 3
+    },
+    {
+      "id": "current-state",
+      "category": "temporal",
+      "query": "current docker status",
+      "query_tags": ["docker"],
+      "timeline_id": "mac",
+      "temporal_mode": "current_state",
+      "expected_sources": ["mac/docker-current"],
+      "forbidden_sources": ["mac/docker-old"],
+      "top_k": 3
+    },
+    {
+      "id": "as-of-state",
+      "category": "temporal",
+      "query": "docker status at that time",
+      "query_tags": ["docker"],
+      "timeline_id": "mac",
+      "temporal_mode": "as_of",
+      "as_of": "2026-08-02T12:00:00+00:00",
+      "expected_sources": ["mac/docker-old"],
+      "forbidden_sources": ["mac/docker-current"],
+      "top_k": 3
+    },
+    {
+      "id": "bounded-range",
+      "category": "temporal",
+      "query": "deployment",
+      "query_tags": ["deployment"],
+      "timeline_id": "project",
+      "temporal_mode": "range",
+      "range_start": "2026-08-09T00:00:00+00:00",
+      "range_end": "2026-08-11T00:00:00+00:00",
+      "expected_sources": ["deploy/in-range"],
+      "forbidden_sources": ["deploy/out-of-range"],
+      "top_k": 3
+    }
+  ]
+}

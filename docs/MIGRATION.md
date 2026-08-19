@@ -23,7 +23,7 @@ application code belong in this repository.
 - Idempotent text ingestion
 - Provider-independent raw persistence before enrichment
 
-### 2. Temporal atom projection — in progress
+### 2. Temporal atom projection — initial slice complete
 
 - Timestamped atoms mapped to Temporal History events
 - Calendar summaries mapped back into atoms
@@ -31,7 +31,8 @@ application code belong in this repository.
 - Deterministic mock-provider integration and resumable state
 - Ollama summarizer and stored-atom range projection
 - Full structured Temporal summary metadata and lineage preservation
-- Next: thread scopes, pressure compaction, and context-frontier retrieval
+- Conditional current-state, as-of, range, and history retrieval lens
+- Next: thread scopes and pressure compaction when real use requires them
 
 ### 3. Canonical persistence — initial adapter complete
 
@@ -54,18 +55,22 @@ application code belong in this repository.
 
 ### 5. Retrieval
 
-- Query tag generation
-- Direct tag, lexical, and semantic candidate channels
-- Query-aware traversal of weighted tag relationships
-- Versioned scoring with a complete score breakdown
-- Reliable adjacency based on document position
+- Direct tag, lexical, and replaceable semantic candidate channels
+- Query-aware traversal of learned tag and atom relationships
+- Conditional temporal filtering and scoring rather than a flat time score
+- Complete per-channel score and evidence breakdown
+- Content-hash-aware embedding reuse by provider and model
+- Retrieval audit events for downstream feedback attribution
+- Next: measured candidate limits and adjacency only if the evaluation corpus needs them
 
 ### 6. Learning and evaluation
 
-- Feedback events and bounded updates
-- Learned `HAS_TAG` and `RELATED_TO` weights
-- Honest direct-tag and semantic baselines
-- Small labeled dataset before advanced group-tag behavior
+- Feedback events and bounded, atomic updates
+- Learned `HAS_TAG`, tag co-occurrence, and atom `CO_USED` weights
+- Reduced source credit when a derived summary is selected
+- Honest no-embedding and semantic baselines
+- Six-case labeled dataset before advanced group-tag behavior
+- Next: grow the dataset from real misses and add negative/outcome calibration
 
 ## Explicitly deferred
 
