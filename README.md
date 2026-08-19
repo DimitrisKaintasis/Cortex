@@ -224,3 +224,8 @@ The first real Mac model comparison and current default are recorded in the
 [tag proposal model benchmark](docs/MODEL-BENCHMARK.md).
 The current semantic model choice and its reproducibility caveats are recorded in the
 [embedding model benchmark](docs/EMBEDDING-BENCHMARK.md).
+
+The first live test of the complete ingestion, Tags, Temporal History, hybrid retrieval,
+and explicit-feedback loop passed all eight project-history scenarios. See the
+[project-history acceptance report](docs/PROJECT-HISTORY-ACCEPTANCE.md) for what it proves,
+how to reproduce it, and the answer-packing limitation it exposed.

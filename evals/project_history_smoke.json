@@ -1,0 +1,154 @@
+{
+  "namespace": "project-history-smoke-v1",
+  "timeline_id": "main",
+  "timezone": "Europe/Bucharest",
+  "range_start": "2026-08-10T00:00:00+00:00",
+  "range_end": "2026-08-17T00:00:00+00:00",
+  "events": [
+    {
+      "source": "history/original-tag-logic",
+      "occurred_at": "2026-08-10T09:00:00+00:00",
+      "text": "The original Tags idea retrieves knowledge through explicit weighted atom-tag and tag-tag relationships. Useful outcomes can strengthen learned weights while every atom remains independently retrievable.",
+      "tags": ["original tags logic", "tag relationships", "weighted retrieval", "atoms"],
+      "ai_tag_enrichment": true,
+      "metadata": {"event_type": "architecture_decision", "actor_display_name": "Dimitris", "actor_type": "human"}
+    },
+    {
+      "source": "history/original-unordered-atoms",
+      "occurred_at": "2026-08-10T13:00:00+00:00",
+      "text": "Atoms encode associative weighted relationships but do not contain a fixed procedural order. Any apparent sequence comes from retrieval context rather than an ordered-step object.",
+      "tags": ["atoms", "ordered steps", "associative graph"],
+      "metadata": {"event_type": "architecture_state", "state_key": "architecture/ordered-steps"}
+    },
+    {
+      "source": "history/raw-first-ingestion",
+      "occurred_at": "2026-08-11T10:00:00+00:00",
+      "text": "Raw source content must be persisted before optional AI enrichment so a model or network failure can never discard canonical evidence.",
+      "tags": ["ingestion", "canonical evidence", "failure safety"],
+      "metadata": {"event_type": "architecture_decision"}
+    },
+    {
+      "source": "history/separate-order-addon",
+      "occurred_at": "2026-08-12T11:00:00+00:00",
+      "text": "Keep the simple atoms unchanged. If ordered problem-solving steps are later distilled by AI, store them in a separate add-on structure that references atoms instead of changing the atom graph.",
+      "tags": ["atoms", "ordered steps", "architecture", "step distillation"],
+      "supersedes_source": "history/original-unordered-atoms",
+      "metadata": {"event_type": "architecture_update", "state_key": "architecture/ordered-steps"}
+    },
+    {
+      "source": "history/temporal-layer",
+      "occurred_at": "2026-08-13T09:30:00+00:00",
+      "text": "Temporal History is integrated as a derived projection. Calendar summaries become auditable summary atoms with lineage to source atoms, while current-state, as-of, range, and history are conditional retrieval modes.",
+      "tags": ["temporal history", "temporal retrieval", "summary lineage", "derived atoms"],
+      "ai_tag_enrichment": true,
+      "metadata": {"event_type": "architecture_decision"}
+    },
+    {
+      "source": "history/laptop-storage",
+      "occurred_at": "2026-08-14T08:00:00+00:00",
+      "text": "For the current test phase the laptop owns canonical SQLite storage. The Mac Mini performs inference and stores model files, but it does not own the ingested corpus.",
+      "tags": ["canonical storage", "sqlite", "laptop", "mac inference"],
+      "metadata": {"event_type": "deployment_decision", "state_key": "deployment/storage"}
+    },
+    {
+      "source": "history/qwen-embedding",
+      "occurred_at": "2026-08-14T15:00:00+00:00",
+      "text": "Qwen3 Embedding 0.6B is selected as the initial configurable semantic embedding model because it is small and directly supported by Ollama.",
+      "tags": ["embedding model", "qwen3 embedding", "semantic retrieval"],
+      "metadata": {"event_type": "model_decision", "state_key": "models/embedding"}
+    },
+    {
+      "source": "history/staged-retrieval",
+      "occurred_at": "2026-08-15T10:00:00+00:00",
+      "text": "Retrieval is staged: tags, lexical overlap, and embeddings generate candidates; learned relationships expand them; then the temporal lens applies the requested time semantics before evidence packing.",
+      "tags": ["retrieval pipeline", "hybrid retrieval", "temporal retrieval"],
+      "metadata": {"event_type": "architecture_decision"}
+    },
+    {
+      "source": "history/outcome-learning",
+      "occurred_at": "2026-08-15T14:00:00+00:00",
+      "text": "Relationship weights change only after explicit retrieval outcomes. Returning an atom is not evidence that it was useful, and behavioral feedback must never rewrite factual lineage or supersession links.",
+      "tags": ["feedback learning", "relationship weights", "retrieval outcomes", "provenance"],
+      "metadata": {"event_type": "architecture_decision"}
+    },
+    {
+      "source": "history/harrier-embedding",
+      "occurred_at": "2026-08-16T10:00:00+00:00",
+      "text": "Harrier OSS v1 0.6B F16 replaces Qwen3 as the default embedding model. Documents remain plain, queries receive a versioned retrieval instruction, and the preprocessing profile is part of the stored vector identity.",
+      "tags": ["embedding model", "harrier", "semantic retrieval", "model versioning"],
+      "supersedes_source": "history/qwen-embedding",
+      "metadata": {"event_type": "model_update", "state_key": "models/embedding"}
+    }
+  ],
+  "queries": [
+    {
+      "id": "original-tag-idea",
+      "query": "How was the original tag and weight retrieval idea supposed to work?",
+      "query_tags": ["original tags logic"],
+      "temporal_mode": "none",
+      "expected_sources": ["history/original-tag-logic"],
+      "top_k": 3
+    },
+    {
+      "id": "current-order-design",
+      "query": "Should ordered problem-solving steps be stored inside atoms now?",
+      "query_tags": ["ordered steps"],
+      "temporal_mode": "current_state",
+      "expected_sources": ["history/separate-order-addon"],
+      "forbidden_sources": ["history/original-unordered-atoms"],
+      "top_k": 3
+    },
+    {
+      "id": "as-of-order-design",
+      "query": "How was atom ordering represented before the add-on decision?",
+      "query_tags": ["ordered steps"],
+      "temporal_mode": "as_of",
+      "as_of": "2026-08-11T12:00:00+00:00",
+      "expected_sources": ["history/original-unordered-atoms"],
+      "forbidden_sources": ["history/separate-order-addon"],
+      "top_k": 3
+    },
+    {
+      "id": "current-embedding-model",
+      "query": "What embedding model and query preprocessing do we currently use?",
+      "query_tags": ["embedding model"],
+      "temporal_mode": "current_state",
+      "expected_sources": ["history/harrier-embedding"],
+      "forbidden_sources": ["history/qwen-embedding"],
+      "top_k": 3
+    },
+    {
+      "id": "as-of-embedding-model",
+      "query": "Which embedding model had been selected by August 15?",
+      "query_tags": ["embedding model"],
+      "temporal_mode": "as_of",
+      "as_of": "2026-08-15T12:00:00+00:00",
+      "expected_sources": ["history/qwen-embedding"],
+      "forbidden_sources": ["history/harrier-embedding"],
+      "top_k": 3
+    },
+    {
+      "id": "canonical-storage",
+      "query": "Where is canonical ingested data stored during the current testing phase?",
+      "query_tags": ["canonical storage"],
+      "temporal_mode": "current_state",
+      "expected_sources": ["history/laptop-storage"],
+      "top_k": 3
+    },
+    {
+      "id": "embedding-history",
+      "query": "Show the history of embedding model decisions from Qwen to Harrier.",
+      "query_tags": ["embedding model"],
+      "temporal_mode": "history",
+      "expected_sources": ["history/qwen-embedding", "history/harrier-embedding"],
+      "top_k": 8
+    },
+    {
+      "id": "temporal-continuity",
+      "query": "Summarize the important architecture and deployment decisions across the week.",
+      "temporal_mode": "history",
+      "require_kind": "temporal_summary",
+      "top_k": 8
+    }
+  ]
+}
