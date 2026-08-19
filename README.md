@@ -100,6 +100,17 @@ adapters should create many reasonably sized documents and run tag enrichment pe
 and Temporal enrichment per bounded time window, rather than treating a whole benchmark
 archive as one document.
 
+LongMemEval now has that dedicated adapter:
+
+```powershell
+python -m data_retrieval ingest-longmemeval `
+  .\data\benchmarks\longmemeval\longmemeval_s_cleaned.json `
+  --dataset-id cleaned-s-2025-09
+```
+
+See the [LongMemEval ingestion report](docs/LONGMEMEVAL.md) for the representation, label
+leakage controls, exact dataset hashes, capacity measurements, and current quality boundary.
+
 The Docker definition is a development deployment, not the final always-online database.
 Before production use, choose hosted storage, require TLS, restrict network access, store
 the DSN in a secret manager, schedule `pg_dump`/provider backups, and test restoration. The
@@ -108,10 +119,11 @@ to the public internet.
 
 ### Laptop storage with Mac inference
 
-The current runtime deliberately has no background worker:
+The current runtime deliberately has no background ingestion worker. PostgreSQL itself is a
+Docker service so stored data remains available while Docker Desktop is running:
 
 ```text
-Laptop file -> raw ingestion -> laptop SQLite
+Laptop file -> raw ingestion -> laptop SQLite or PostgreSQL volume
                                   |
                                   +-> tag enrichment ------> Ollama on Mac
                                   |
@@ -120,7 +132,8 @@ Laptop file -> raw ingestion -> laptop SQLite
                                   +-> embedding inference -> Ollama on Mac
 ```
 
-- The laptop reads source files, creates canonical atoms, and owns SQLite.
+- The laptop reads source files, creates canonical atoms, and owns SQLite or the PostgreSQL
+  Docker volume.
 - The Mac runs Ollama for optional tag proposals and Temporal summaries.
 - The SSH tunnel protects the network connection; it does not make the friend's Mac a
   private machine. Do not send data there unless it is acceptable for that machine's

@@ -230,6 +230,19 @@ class PostgreSQLRepository:
         )
         return self._document(row) if row else None
 
+    def get_documents(self, document_ids: tuple[str, ...]) -> tuple[Document, ...]:
+        if not document_ids:
+            return ()
+        rows = self._fetchall(
+            f"SELECT * FROM {SCHEMA}.documents "
+            "WHERE document_id = ANY(%s) AND ingestion_status = 'complete'",
+            (list(document_ids),),
+        )
+        found = {row["document_id"]: self._document(row) for row in rows}
+        return tuple(
+            found[document_id] for document_id in document_ids if document_id in found
+        )
+
     def get_atoms_for_document(self, document_id: str) -> tuple[Atom, ...]:
         rows = self._fetchall(
             f"""

@@ -178,6 +178,21 @@ class SQLiteRepository:
             ).fetchone()
         return self._document(row) if row else None
 
+    def get_documents(self, document_ids: tuple[str, ...]) -> tuple[Document, ...]:
+        if not document_ids:
+            return ()
+        found: dict[str, Document] = {}
+        with self._lock:
+            for batch in self._batches(document_ids):
+                placeholders = ",".join("?" for _ in batch)
+                rows = self._connection.execute(
+                    f"SELECT * FROM documents WHERE document_id IN ({placeholders})", batch
+                ).fetchall()
+                found.update((row["document_id"], self._document(row)) for row in rows)
+        return tuple(
+            found[document_id] for document_id in document_ids if document_id in found
+        )
+
     def get_atoms_for_document(self, document_id: str) -> tuple[Atom, ...]:
         with self._lock:
             rows = self._connection.execute(

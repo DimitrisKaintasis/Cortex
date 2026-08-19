@@ -41,6 +41,14 @@ class InMemoryRepository:
         with self._lock:
             return self._documents.get(document_id)
 
+    def get_documents(self, document_ids: tuple[str, ...]) -> tuple[Document, ...]:
+        with self._lock:
+            return tuple(
+                self._documents[document_id]
+                for document_id in document_ids
+                if document_id in self._documents
+            )
+
     def get_atoms_for_document(self, document_id: str) -> tuple[Atom, ...]:
         with self._lock:
             atoms = (atom for atom in self._atoms.values() if atom.document_id == document_id)

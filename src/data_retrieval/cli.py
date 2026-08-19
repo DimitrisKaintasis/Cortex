@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import psycopg
 
+from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
@@ -49,6 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
         default={},
         help="additional source metadata as one JSON object",
     )
+
+    longmemeval = commands.add_parser(
+        "ingest-longmemeval",
+        help="stream an official LongMemEval JSON dataset into isolated question namespaces",
+    )
+    longmemeval.add_argument("path", type=Path)
+    _add_storage_options(longmemeval)
+    longmemeval.add_argument("--namespace-prefix", default="longmemeval")
+    longmemeval.add_argument("--dataset-id")
+    longmemeval.add_argument("--timezone", default="UTC", dest="timezone_name")
+    longmemeval.add_argument("--max-cases", type=int)
 
     tags = commands.add_parser(
         "enrich-tags", help="add Ollama tag proposals to an ingested document"
@@ -126,6 +138,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "ingest":
             output = _ingest(args, parser)
+        elif args.command == "ingest-longmemeval":
+            output = _ingest_longmemeval(args, parser)
         elif args.command == "enrich-tags":
             output = _enrich_tags(args)
         elif args.command == "enrich-temporal":
@@ -191,6 +205,32 @@ def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[s
         "atom_count": atom_count,
         "tag_ids": result.tag_ids,
         "idempotent": result.idempotent,
+        "database": _database_label(args),
+    }
+
+
+def _ingest_longmemeval(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.path.is_file():
+        parser.error(f"input file does not exist: {args.path}")
+    with _open_repository(args) as repository:
+        result = LongMemEvalIngestService(repository).ingest_path(
+            path=args.path,
+            namespace_prefix=args.namespace_prefix,
+            dataset_id=args.dataset_id,
+            timezone_name=args.timezone_name,
+            max_cases=args.max_cases,
+        )
+    return {
+        "dataset_id": result.dataset_id,
+        "dataset_hash": result.dataset_hash,
+        "case_count": result.case_count,
+        "session_count": result.session_count,
+        "inserted_session_count": result.inserted_session_count,
+        "reused_session_count": result.reused_session_count,
+        "atom_count": result.atom_count,
+        "namespace_prefix": args.namespace_prefix,
         "database": _database_label(args),
     }
 
