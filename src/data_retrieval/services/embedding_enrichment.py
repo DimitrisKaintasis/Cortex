@@ -46,7 +46,7 @@ class EmbeddingEnrichmentService:
         generated: list[AtomEmbedding] = []
         for offset in range(0, len(pending), self.batch_size):
             batch = pending[offset : offset + self.batch_size]
-            vectors = self.embedder.embed(tuple(atom.content for atom in batch))
+            vectors = self.embedder.embed_documents(tuple(atom.content for atom in batch))
             if len(vectors) != len(batch):
                 raise ValueError("embedder returned the wrong number of vectors")
             generated.extend(

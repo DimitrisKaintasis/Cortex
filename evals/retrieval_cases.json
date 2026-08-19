@@ -17,6 +17,11 @@
       "tags": ["cooking"]
     },
     {
+      "source": "runtime/search-engine",
+      "text": "A search engine indexes web pages and ranks matching results.",
+      "tags": ["search", "indexing"]
+    },
+    {
       "source": "mac/docker-old",
       "text": "Docker is not installed on the Mac Mini.",
       "tags": ["docker", "mac mini"],
@@ -49,6 +54,21 @@
       "source": "storage/sqlite",
       "text": "The laptop keeps canonical records in a durable SQLite database.",
       "tags": ["storage", "sqlite"]
+    },
+    {
+      "source": "network/ssh-tunnel",
+      "text": "SSH local port forwarding protects the connection from the laptop to the remote inference server.",
+      "tags": ["ssh", "networking"]
+    },
+    {
+      "source": "code/retry",
+      "text": "The retry helper catches transient network failures and waits with exponential backoff before trying the request again.",
+      "tags": ["python", "retries"]
+    },
+    {
+      "source": "code/database",
+      "text": "The transaction helper commits database writes atomically and rolls back when an operation fails.",
+      "tags": ["python", "database"]
     }
   ],
   "cases": [
@@ -65,14 +85,35 @@
       "category": "semantic",
       "query": "automobile powertrain",
       "expected_sources": ["runtime/vehicle"],
-      "top_k": 3
+      "top_k": 1
     },
     {
       "id": "semantic-paraphrase-storage",
       "category": "semantic",
-      "query": "persistent local data repository",
+      "query": "persistent data repository",
       "expected_sources": ["storage/sqlite"],
-      "top_k": 3
+      "top_k": 1
+    },
+    {
+      "id": "cross-language-greek",
+      "category": "multilingual",
+      "query": "Πού αποθηκεύονται οι μόνιμες εγγραφές του συστήματος;",
+      "expected_sources": ["storage/sqlite"],
+      "top_k": 1
+    },
+    {
+      "id": "cross-language-romanian",
+      "category": "multilingual",
+      "query": "Cum este protejată conexiunea laptopului către serverul de inferență?",
+      "expected_sources": ["network/ssh-tunnel"],
+      "top_k": 1
+    },
+    {
+      "id": "code-retrieval",
+      "category": "code",
+      "query": "helper for retrying failed requests with increasing delays",
+      "expected_sources": ["code/retry"],
+      "top_k": 1
     },
     {
       "id": "current-state",

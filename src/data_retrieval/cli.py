@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
-from data_retrieval.retrieval.ollama import OllamaEmbedder
+from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
@@ -324,6 +324,11 @@ def _add_embedding_options(parser: argparse.ArgumentParser, *, required: bool = 
         required=required and not os.getenv("OLLAMA_EMBEDDING_MODEL"),
     )
     parser.add_argument(
+        "--embedding-profile",
+        choices=tuple(EMBEDDING_PROFILES),
+        default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
+    )
+    parser.add_argument(
         "--ollama-timeout",
         type=float,
         default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")),
@@ -335,6 +340,7 @@ def _embedder(args: argparse.Namespace) -> OllamaEmbedder:
         base_url=args.ollama_url,
         model_name=args.embedding_model,
         timeout_seconds=args.ollama_timeout,
+        profile_name=args.embedding_profile,
     )
 
 

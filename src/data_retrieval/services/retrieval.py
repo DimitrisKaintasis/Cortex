@@ -261,8 +261,8 @@ class RetrievalService:
         if self.embedder is None or not atoms:
             return {}, {}, None
         try:
-            query_vectors = self.embedder.embed((query,))
-            if len(query_vectors) != 1:
+            query_vector = self.embedder.embed_query(query)
+            if not query_vector:
                 return {}, {}, "semantic_query_embedding_invalid"
             embeddings = self.repository.get_embeddings(
                 atom_ids=tuple(atom.atom_id for atom in atoms),
@@ -277,7 +277,7 @@ class RetrievalService:
             embedding = embeddings.get(atom.atom_id)
             if embedding is None or embedding.content_hash != atom.content_hash:
                 continue
-            similarity = max(0.0, cosine_similarity(query_vectors[0], embedding.vector))
+            similarity = max(0.0, cosine_similarity(query_vector, embedding.vector))
             if similarity > 0.0:
                 scores[atom.atom_id] = similarity
                 evidence[atom.atom_id] = (f"semantic={similarity:.4f}",)

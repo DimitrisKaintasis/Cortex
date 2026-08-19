@@ -57,6 +57,25 @@ class EmbeddingEnrichmentTests(unittest.TestCase):
         payload = json.loads(mock_open.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(payload["input"], ["Embedding enrichment is derived data."])
 
+    @patch("data_retrieval.tagging.ollama.urlopen")
+    def test_harrier_profile_distinguishes_query_from_document_input(self, mock_open) -> None:
+        mock_open.return_value = FakeResponse({"embeddings": [[0.4, 0.5]]})
+        embedder = OllamaEmbedder(
+            base_url="http://127.0.0.1:11435",
+            model_name="harrier-test",
+            profile_name="harrier-retrieval-v1",
+        )
+
+        embedder.embed_documents(("Stored evidence",))
+        document_payload = json.loads(mock_open.call_args.args[0].data.decode("utf-8"))
+        embedder.embed_query("Where is the evidence?")
+        query_payload = json.loads(mock_open.call_args.args[0].data.decode("utf-8"))
+
+        self.assertEqual(document_payload["input"], ["Stored evidence"])
+        self.assertIn("Instruct:", query_payload["input"][0])
+        self.assertTrue(query_payload["input"][0].endswith("Where is the evidence?"))
+        self.assertEqual(embedder.model, "harrier-test::harrier-retrieval-v1")
+
 
 if __name__ == "__main__":
     unittest.main()

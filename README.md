@@ -130,7 +130,8 @@ only inference crosses the SSH tunnel:
 python -m data_retrieval enrich-embeddings `
   --db .\data.sqlite3 `
   --namespace personal `
-  --embedding-model qwen3-embedding:0.6b
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1
 ```
 
 The embedding identity and source content hash are stored with every vector. Repeating
@@ -146,7 +147,8 @@ python -m data_retrieval retrieve "current Docker status" `
   --tag docker `
   --timeline-id main `
   --temporal-mode current_state `
-  --embedding-model qwen3-embedding:0.6b
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1
 ```
 
 The output includes a `retrieval_id`, per-channel scores, evidence, temporal roles, and
@@ -171,13 +173,16 @@ Run the checked-in regression corpus with or without embeddings:
 python -m data_retrieval evaluate --db :memory:
 
 python -m data_retrieval evaluate --db :memory: `
-  --embedding-model qwen3-embedding:0.6b
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1
 ```
 
-On 2026-08-20, the no-embedding baseline scored 66.7% hit@k and failed both semantic
-paraphrase cases. The live Mac run with `qwen3-embedding:0.6b` scored 100% hit@k and
-zero temporal forbidden-result violations on all six cases. This is an integration
-baseline, not a production-quality claim; real failures should be added to the corpus.
+On 2026-08-20, the expanded nine-case no-embedding baseline scored 55.6% hit@1.
+Harrier F16 and `qwen3-embedding:0.6b` both scored 100% hit@1 with zero temporal
+forbidden-result violations. Harrier completed the small warmed run in 2.37 seconds
+versus Qwen's 3.01 seconds and is the current default because its upstream model has
+the stronger current multilingual benchmark. This is an integration baseline, not a
+production-quality claim; real failures should be added to the corpus.
 
 `--metadata-json` accepts source-specific fields without coupling ingestion to one chat
 or document provider. Temporal History currently recognizes fields including
@@ -217,3 +222,5 @@ The staged retrieval and conservative feedback policy are recorded in
 [ADR-0006](docs/decisions/0006-staged-retrieval-and-outcome-learning.md).
 The first real Mac model comparison and current default are recorded in the
 [tag proposal model benchmark](docs/MODEL-BENCHMARK.md).
+The current semantic model choice and its reproducibility caveats are recorded in the
+[embedding model benchmark](docs/EMBEDDING-BENCHMARK.md).

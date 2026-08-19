@@ -16,8 +16,11 @@ class StubEmbedder:
     def __init__(self, vectors: dict[str, tuple[float, ...]]) -> None:
         self.vectors = vectors
 
-    def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+    def embed_documents(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
         return tuple(self.vectors[text] for text in texts)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return self.vectors[text]
 
 
 class RetrievalServiceTests(unittest.TestCase):
