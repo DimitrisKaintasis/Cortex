@@ -56,6 +56,9 @@ class ImportedLongMemEvalCase:
     question_date: datetime
     answer_session_ids: tuple[str, ...]
     evidence_atom_ids: tuple[str, ...]
+    document_ids: tuple[str, ...]
+    history_start: datetime
+    history_end: datetime
     session_count: int
     atom_count: int
 
@@ -168,6 +171,7 @@ class LongMemEvalIngestService:
             f"{namespace_prefix}:{dataset_id}:{dataset_hash[:12]}:{case.question_id}"
         )
         evidence_atom_ids: list[str] = []
+        document_ids: list[str] = []
         inserted = 0
         reused = 0
         case_atom_count = 0
@@ -194,6 +198,7 @@ class LongMemEvalIngestService:
         }
 
         for session, document, atoms in prepared_sessions:
+            document_ids.append(document.document_id)
             case_atom_count += len(atoms)
             evidence_atom_ids.extend(
                 atom.atom_id
@@ -223,6 +228,9 @@ class LongMemEvalIngestService:
                 question_date=case.question_date,
                 answer_session_ids=case.answer_session_ids,
                 evidence_atom_ids=tuple(evidence_atom_ids),
+                document_ids=tuple(document_ids),
+                history_start=min(session.occurred_at for session in case.sessions),
+                history_end=max(session.occurred_at for session in case.sessions),
                 session_count=len(case.sessions),
                 atom_count=case_atom_count,
             ),

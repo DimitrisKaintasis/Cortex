@@ -9,6 +9,7 @@ from data_retrieval.benchmarks.longmemeval import (
     LongMemEvalIngestService,
     iter_longmemeval_cases,
 )
+from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.storage.memory import InMemoryRepository
 
 
@@ -43,6 +44,62 @@ def _case() -> dict[str, object]:
 
 
 class LongMemEvalTests(unittest.TestCase):
+    def test_pipeline_report_scores_retrieved_evidence(self) -> None:
+        case = _case()
+        case["question"] = "Where did I move to Athens?"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pipeline.json"
+            path.write_text(json.dumps([case]), encoding="utf-8")
+            report = LongMemEvalPipelineRunner(InMemoryRepository()).run(
+                dataset_path=path,
+                dataset_id="pipeline-test",
+                top_k=5,
+            )
+
+        self.assertEqual(report.evaluated_case_count, 1)
+        self.assertEqual(report.session_hit_at_k, 1.0)
+        self.assertEqual(report.turn_hit_at_k, 1.0)
+        self.assertGreater(report.mean_reciprocal_rank, 0.0)
+        self.assertEqual(report.direct_session_hit_at_k, 1.0)
+        self.assertEqual(report.direct_turn_hit_at_k, 1.0)
+        self.assertGreater(report.direct_mean_reciprocal_rank, 0.0)
+        self.assertIn("metric_semantics", report.as_dict())
+
+    def test_pipeline_excludes_abstention_suffix_from_retrieval_metrics(self) -> None:
+        case = _case()
+        case["question_id"] = "question-1_abs"
+        case["question"] = "Where did I move to Athens?"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "abstention-pipeline.json"
+            path.write_text(json.dumps([case]), encoding="utf-8")
+            report = LongMemEvalPipelineRunner(InMemoryRepository()).run(
+                dataset_path=path,
+                dataset_id="pipeline-test",
+            )
+
+        self.assertEqual(report.evaluated_case_count, 0)
+        self.assertEqual(report.abstention_case_count, 1)
+
+    def test_pipeline_parallel_results_preserve_dataset_order(self) -> None:
+        first = _case()
+        second = _case()
+        second["question_id"] = "question-2"
+        second["question"] = "Which city was my previous home?"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "parallel-pipeline.json"
+            path.write_text(json.dumps([first, second]), encoding="utf-8")
+            report = LongMemEvalPipelineRunner(InMemoryRepository()).run(
+                dataset_path=path,
+                dataset_id="pipeline-parallel-test",
+                max_workers=2,
+            )
+
+        self.assertEqual(report.case_count, 2)
+        self.assertEqual(
+            [case["question_id"] for case in report.cases],
+            ["question-1", "question-2"],
+        )
+
     def test_streams_cases_and_preserves_session_structure_without_label_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "oracle.json"

@@ -81,3 +81,52 @@ A natural-language question with no shared lexical terms returned no raw-only re
 next quality stage requires semantic embeddings and/or tag enrichment, followed by an
 official recall evaluation. LongMemEval-M is 2,737,100,077 raw bytes and was deliberately
 not downloaded yet; its embedding runtime and projected storage should be estimated first.
+
+## Full Oracle pipeline
+
+`run-longmemeval` runs resumable tag enrichment, Temporal History projection, embedding
+enrichment, AI-assisted query tagging, hybrid retrieval, and evidence evaluation. Generative
+inference can use Ollama or OpenRouter; embeddings remain on Ollama so the two providers can
+be compared without changing the vector representation.
+
+OpenRouter credentials are read only from `OPENROUTER_API_KEY`. For the 2026-08-20 run,
+GPT-5.6 Luna generated tags and Temporal summaries while Harrier OSS 0.6B F16 generated
+1024-dimensional embeddings on the remote Mac through the local SSH tunnel:
+
+```powershell
+python -m data_retrieval.cli run-longmemeval `
+  .\data\benchmarks\longmemeval\longmemeval_oracle.json `
+  --dataset-id longmemeval-oracle `
+  --max-cases 500 `
+  --max-workers 64 `
+  --top-k 10 `
+  --inference-provider openrouter `
+  --tag-model openai/gpt-5.6-luna `
+  --temporal-model openai/gpt-5.6-luna `
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1 `
+  --ollama-url http://127.0.0.1:11435
+```
+
+Parallel runs isolate Temporal state by question. PostgreSQL access remains protected by the
+repository lock, while provider calls overlap. Enrichment markers make retries idempotent.
+Evaluation results are currently accumulated in memory and are rebuilt after a process
+restart; checkpointing those results is the next scaling improvement.
+
+The final report is ignored local data at
+`data/results/longmemeval-oracle-openrouter-full.json`. It evaluates 470 answer-bearing cases
+and identifies 30 abstention cases by their official `_abs` question-ID suffix.
+
+| Top-10 metric | Temporal lineage | Exact raw atoms |
+| --- | ---: | ---: |
+| Session hit | 100.00% | 99.79% |
+| Session recall | 99.56% | 94.07% |
+| Turn hit | 100.00% | 94.04% |
+| Turn recall | 98.34% | 82.04% |
+| Mean reciprocal rank | 1.000 | 0.796 |
+
+Lineage metrics credit source atoms covered by a retrieved Temporal summary. Exact metrics
+credit only raw source atoms that themselves appear in the top ten. Reporting both avoids
+mistaking broad summary provenance for direct answer-evidence retrieval. Total key usage was
+$7.21 across smoke tests, interrupted concurrency experiments, and repeated evaluation
+passes; it is not a clean estimate for one uninterrupted production run.

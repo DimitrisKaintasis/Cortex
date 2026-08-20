@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,3 +34,16 @@ class TagProposer(Protocol):
         namespace: str,
         existing_tags: tuple[str, ...],
     ) -> tuple[TagProposal, ...]: ...
+
+
+@runtime_checkable
+class BatchTagProposer(TagProposer, Protocol):
+    """Optional capability for providers that classify several atoms per request."""
+
+    def propose_tags_batch(
+        self,
+        *,
+        texts: tuple[str, ...],
+        namespace: str,
+        existing_tags: tuple[str, ...],
+    ) -> tuple[tuple[TagProposal, ...], ...]: ...

@@ -14,7 +14,7 @@ from data_retrieval.domain.models import (
 )
 from data_retrieval.storage.repository import Repository
 from data_retrieval.tagging.normalization import normalize_tag
-from data_retrieval.tagging.proposals import TagProposer
+from data_retrieval.tagging.proposals import BatchTagProposer, TagProposer
 
 MARKER_ROOT = "data_retrieval_enrichments"
 
@@ -74,13 +74,24 @@ class TagEnrichmentService:
             for edge in self.repository.atom_tags_for(atom.atom_id)
         }
 
-        for atom in atoms:
-            existing_tags = tuple(sorted(set(catalog) | set(tags_by_canonical)))
-            proposals = self.proposer.propose_tags(
-                text=atom.content,
+        existing_tags = tuple(sorted(catalog))
+        if isinstance(self.proposer, BatchTagProposer):
+            proposed_by_atom = self.proposer.propose_tags_batch(
+                texts=tuple(atom.content for atom in atoms),
                 namespace=document.namespace,
                 existing_tags=existing_tags,
             )
+        else:
+            proposed_by_atom = tuple(
+                self.proposer.propose_tags(
+                    text=atom.content,
+                    namespace=document.namespace,
+                    existing_tags=existing_tags,
+                )
+                for atom in atoms
+            )
+
+        for atom, proposals in zip(atoms, proposed_by_atom, strict=True):
             best: dict[str, tuple[str, float]] = {}
             for proposal in proposals:
                 canonical = normalize_tag(proposal.text)

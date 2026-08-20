@@ -31,7 +31,18 @@ class OllamaTagProposerTests(unittest.TestCase):
                 "message": {
                     "content": (
                         "```json\n"
-                        + json.dumps({"tags": [{"text": "Data Retrieval", "confidence": 0.91}]})
+                        + json.dumps(
+                            {
+                                "items": [
+                                    {
+                                        "atom_id": "item_0",
+                                        "tags": [
+                                            {"text": "Data Retrieval", "confidence": 0.91}
+                                        ],
+                                    }
+                                ]
+                            }
+                        )
                         + "\n```"
                     )
                 }

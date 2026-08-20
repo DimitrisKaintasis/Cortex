@@ -40,7 +40,48 @@ class FailingTagProposer:
         raise RuntimeError("provider unavailable")
 
 
+class StubBatchTagProposer(StubTagProposer):
+    def __init__(self, responses: tuple[tuple[TagProposal, ...], ...]) -> None:
+        super().__init__(responses)
+        self.batch_calls: list[tuple[tuple[str, ...], str, tuple[str, ...]]] = []
+
+    def propose_tags_batch(
+        self,
+        *,
+        texts: tuple[str, ...],
+        namespace: str,
+        existing_tags: tuple[str, ...],
+    ) -> tuple[tuple[TagProposal, ...], ...]:
+        self.batch_calls.append((texts, namespace, existing_tags))
+        return self.responses
+
+
 class AiIngestionTests(unittest.TestCase):
+    def test_batch_provider_classifies_one_document_in_one_call(self) -> None:
+        repository = InMemoryRepository()
+        proposer = StubBatchTagProposer(
+            responses=(
+                (TagProposal("database", 0.9),),
+                (TagProposal("remote inference", 0.8),),
+            )
+        )
+        result = IngestService(
+            repository, chunker=TextChunker(max_chars=100, overlap_chars=0)
+        ).ingest_text(
+            namespace="project-a",
+            source="batch.txt",
+            text=(
+                "PostgreSQL stores canonical atoms and weighted tags.\n\n"
+                "The Mac provides remote model inference over an SSH tunnel."
+            ),
+        )
+
+        TagEnrichmentService(repository, proposer).enrich_document(result.document_id)
+
+        self.assertEqual(len(proposer.batch_calls), 1)
+        self.assertEqual(len(proposer.batch_calls[0][0]), 2)
+        self.assertEqual(len(repository.list_tags("project-a")), 2)
+
     def test_model_tags_are_atom_specific_normalized_and_traceable(self) -> None:
         repository = InMemoryRepository()
         proposer = StubTagProposer(

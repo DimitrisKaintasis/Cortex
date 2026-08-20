@@ -13,7 +13,9 @@ from uuid import uuid4
 import psycopg
 
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
+from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.evaluation import EvaluationRunner
+from data_retrieval.inference.openrouter import OpenRouterError
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
@@ -27,8 +29,10 @@ from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.repository import Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
 from data_retrieval.tagging.ollama import OllamaError, OllamaTagProposer
+from data_retrieval.tagging.openrouter import OpenRouterTagProposer
 from data_retrieval.temporal import TemporalBridge
 from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
+from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,6 +65,62 @@ def build_parser() -> argparse.ArgumentParser:
     longmemeval.add_argument("--dataset-id")
     longmemeval.add_argument("--timezone", default="UTC", dest="timezone_name")
     longmemeval.add_argument("--max-cases", type=int)
+
+    pipeline = commands.add_parser(
+        "run-longmemeval",
+        help="run resumable LongMemEval enrichment and evidence-retrieval evaluation",
+    )
+    pipeline.add_argument("path", type=Path)
+    _add_storage_options(pipeline)
+    pipeline.add_argument("--dataset-id", required=True)
+    pipeline.add_argument("--namespace-prefix", default="longmemeval")
+    pipeline.add_argument("--timezone", default="UTC", dest="timezone_name")
+    pipeline.add_argument("--max-cases", type=int)
+    pipeline.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help="bounded number of LongMemEval cases processed concurrently",
+    )
+    pipeline.add_argument("--top-k", type=int, default=10)
+    pipeline.add_argument("--skip-tags", action="store_true")
+    pipeline.add_argument("--skip-temporal", action="store_true")
+    pipeline.add_argument("--skip-embeddings", action="store_true")
+    pipeline.add_argument(
+        "--inference-provider",
+        choices=("ollama", "openrouter"),
+        default="ollama",
+        help="provider for tag proposals and Temporal summaries; embeddings remain on Ollama",
+    )
+    pipeline.add_argument("--tag-model")
+    pipeline.add_argument("--temporal-model")
+    pipeline.add_argument(
+        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
+    )
+    pipeline.add_argument(
+        "--embedding-profile",
+        choices=tuple(EMBEDDING_PROFILES),
+        default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
+    )
+    pipeline.add_argument(
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+    )
+    pipeline.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "240")),
+    )
+    pipeline.add_argument(
+        "--openrouter-url",
+        default=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+    )
+    pipeline.add_argument(
+        "--openrouter-timeout",
+        type=float,
+        default=float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "180")),
+    )
+    pipeline.add_argument("--temporal-state", type=Path)
+    pipeline.add_argument("--report", type=Path)
 
     tags = commands.add_parser(
         "enrich-tags", help="add Ollama tag proposals to an ingested document"
@@ -140,6 +200,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _ingest(args, parser)
         elif args.command == "ingest-longmemeval":
             output = _ingest_longmemeval(args, parser)
+        elif args.command == "run-longmemeval":
+            output = _run_longmemeval(args, parser)
         elif args.command == "enrich-tags":
             output = _enrich_tags(args)
         elif args.command == "enrich-temporal":
@@ -156,6 +218,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         OSError,
         UnicodeError,
         OllamaError,
+        OpenRouterError,
         ValueError,
         sqlite3.Error,
         psycopg.Error,
@@ -231,6 +294,114 @@ def _ingest_longmemeval(
         "reused_session_count": result.reused_session_count,
         "atom_count": result.atom_count,
         "namespace_prefix": args.namespace_prefix,
+        "database": _database_label(args),
+    }
+
+
+def _run_longmemeval(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.path.is_file():
+        parser.error(f"input file does not exist: {args.path}")
+    tag_model = _inference_model(args.inference_provider, args.tag_model)
+    temporal_model = _inference_model(args.inference_provider, args.temporal_model)
+    if not args.skip_tags and not tag_model:
+        parser.error("--tag-model or the selected provider's model environment is required")
+    if not args.skip_temporal and not temporal_model:
+        parser.error("--temporal-model or the selected provider's model environment is required")
+    if not args.skip_embeddings and not args.embedding_model:
+        parser.error(
+            "--embedding-model or OLLAMA_EMBEDDING_MODEL is required unless "
+            "--skip-embeddings is used"
+        )
+
+    api_key = (
+        _openrouter_api_key(parser)
+        if args.inference_provider == "openrouter"
+        and (not args.skip_tags or not args.skip_temporal)
+        else None
+    )
+    if args.skip_tags:
+        tag_proposer = None
+    elif args.inference_provider == "openrouter":
+        assert api_key is not None and tag_model is not None
+        tag_proposer = OpenRouterTagProposer(
+            api_key=api_key,
+            model=tag_model,
+            base_url=args.openrouter_url,
+            timeout_seconds=args.openrouter_timeout,
+        )
+    else:
+        assert tag_model is not None
+        tag_proposer = OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+    embedder = None if args.skip_embeddings else _embedder(args)
+    if args.skip_temporal:
+        temporal_bridge = None
+    elif args.inference_provider == "openrouter":
+        assert api_key is not None and temporal_model is not None
+        temporal_bridge = TemporalBridge(
+            OpenRouterTemporalSummarizer(
+                api_key=api_key,
+                model=temporal_model,
+                base_url=args.openrouter_url,
+                timeout_seconds=args.openrouter_timeout,
+            )
+        )
+    else:
+        assert temporal_model is not None
+        temporal_bridge = TemporalBridge(
+            OllamaTemporalSummarizer(
+                base_url=args.ollama_url,
+                model=temporal_model,
+                timeout_seconds=args.ollama_timeout,
+            )
+        )
+    temporal_state = args.temporal_state or Path(
+        f"data/state/{args.dataset_id}-temporal.sqlite3"
+    )
+    report_path = args.report or Path(
+        f"data/results/{args.dataset_id}-pipeline-report.json"
+    )
+
+    def progress(index: int, total: int, stage: str) -> None:
+        if stage == "enriching" and (index == 1 or index % 10 == 0 or index == total):
+            print(f"LongMemEval case {index}/{total}", file=sys.stderr, flush=True)
+
+    with _open_repository(args) as repository:
+        report = LongMemEvalPipelineRunner(
+            repository,
+            tag_proposer=tag_proposer,
+            embedder=embedder,
+            temporal_bridge=temporal_bridge,
+        ).run(
+            dataset_path=args.path,
+            dataset_id=args.dataset_id,
+            temporal_state_path=temporal_state,
+            namespace_prefix=args.namespace_prefix,
+            timezone_name=args.timezone_name,
+            max_cases=args.max_cases,
+            top_k=args.top_k,
+            enrich_tags=not args.skip_tags,
+            enrich_temporal=not args.skip_temporal,
+            enrich_embeddings=not args.skip_embeddings,
+            max_workers=args.max_workers,
+            progress=progress,
+        )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report.as_dict(), indent=2), encoding="utf-8", newline="\n"
+    )
+    return {
+        **report.as_dict(include_cases=False),
+        "inference_provider": args.inference_provider,
+        "tag_model": tag_model if not args.skip_tags else None,
+        "temporal_model": temporal_model if not args.skip_temporal else None,
+        "embedding_model": embedder.model if embedder else None,
+        "report": str(report_path),
         "database": _database_label(args),
     }
 
@@ -447,6 +618,21 @@ def _embedder(args: argparse.Namespace) -> OllamaEmbedder:
 
 def _env_path(name: str, default: str) -> Path:
     return Path(os.getenv(name, default))
+
+
+def _inference_model(provider: str, explicit_model: str | None) -> str | None:
+    if explicit_model:
+        return explicit_model
+    if provider == "openrouter":
+        return os.getenv("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
+    return os.getenv("OLLAMA_MODEL")
+
+
+def _openrouter_api_key(parser: argparse.ArgumentParser) -> str:
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        parser.error("OPENROUTER_API_KEY is required for --inference-provider openrouter")
+    return api_key
 
 
 def _aware_datetime(value: str) -> datetime:
