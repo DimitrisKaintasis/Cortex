@@ -12,6 +12,7 @@ from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.mem0 import (
     Mem0BootstrapService,
     Mem0ImportService,
+    Mem0PythonProcessor,
     Mem0Record,
     load_mem0_records,
 )
@@ -24,8 +25,14 @@ from data_retrieval.storage.sqlite import SQLiteRepository
 
 
 class _FakeMem0Processor:
-    def __init__(self, results: tuple[dict[str, object], ...]) -> None:
+    def __init__(
+        self,
+        results: tuple[dict[str, object], ...],
+        *,
+        profile_id: str = "test-profile-v1",
+    ) -> None:
         self.results = results
+        self.profile_id = profile_id
         self.calls: list[dict[str, object]] = []
 
     def add(
@@ -48,6 +55,29 @@ class _FakeMem0Processor:
 
 
 class CalibrationAndMem0Tests(unittest.TestCase):
+    def test_mem0_fact_objects_are_normalized_for_small_models(self) -> None:
+        response = json.dumps(
+            {
+                "facts": [
+                    {"fact": "The event lasted two hours."},
+                    "The meeting is Tuesday.",
+                    {"unsupported": "ignored"},
+                ]
+            }
+        )
+
+        normalized = Mem0PythonProcessor._normalize_fact_response(response)
+
+        self.assertEqual(
+            json.loads(normalized),
+            {
+                "facts": [
+                    "The event lasted two hours.",
+                    "The meeting is Tuesday.",
+                ]
+            },
+        )
+
     def test_mem0_bootstrap_processes_documents_chronologically(self) -> None:
         repository = InMemoryRepository()
         IngestService(repository).ingest_text(
@@ -146,6 +176,33 @@ class CalibrationAndMem0Tests(unittest.TestCase):
 
         self.assertEqual(resumed.batches_resumed, 1)
         self.assertEqual(len(processor.calls), 1)
+
+    def test_mem0_profile_change_reprocesses_completed_batch(self) -> None:
+        repository = InMemoryRepository()
+        IngestService(repository).ingest_text(
+            namespace="project-a", source="profiled", text="The release is Friday."
+        )
+        first_processor = _FakeMem0Processor(
+            ({"id": "memory-1", "memory": "The release is Friday."},),
+            profile_id="test-profile-v1",
+        )
+        second_processor = _FakeMem0Processor(
+            ({"id": "memory-2", "memory": "The release is scheduled for Friday."},),
+            profile_id="test-profile-v2",
+        )
+
+        Mem0BootstrapService(repository, first_processor).run(namespace="project-a")
+        rerun = Mem0BootstrapService(repository, second_processor).run(
+            namespace="project-a"
+        )
+
+        self.assertEqual(rerun.batches_resumed, 0)
+        self.assertEqual(rerun.batches_processed, 1)
+        self.assertEqual(len(second_processor.calls), 1)
+        self.assertEqual(
+            second_processor.calls[0]["metadata"]["processor_profile"],
+            "test-profile-v2",
+        )
 
     def test_source_adjacency_can_recover_neighboring_context(self) -> None:
         repository = InMemoryRepository()

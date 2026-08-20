@@ -44,6 +44,22 @@ def _case() -> dict[str, object]:
 
 
 class LongMemEvalTests(unittest.TestCase):
+    def test_ingest_can_select_question_ids_without_ingesting_other_cases(self) -> None:
+        first = _case()
+        second = _case()
+        second["question_id"] = "question-2"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selected.json"
+            path.write_text(json.dumps([first, second]), encoding="utf-8")
+            repository = InMemoryRepository()
+
+            result = LongMemEvalIngestService(repository).ingest_path(
+                path=path, question_ids=("question-2",)
+            )
+
+        self.assertEqual(tuple(case.question_id for case in result.cases), ("question-2",))
+        self.assertEqual(repository.list_namespaces(), (result.cases[0].namespace,))
+
     def test_pipeline_report_scores_retrieved_evidence(self) -> None:
         case = _case()
         case["question"] = "Where did I move to Athens?"
@@ -99,6 +115,22 @@ class LongMemEvalTests(unittest.TestCase):
             [case["question_id"] for case in report.cases],
             ["question-1", "question-2"],
         )
+
+    def test_pipeline_can_select_question_ids(self) -> None:
+        first = _case()
+        second = _case()
+        second["question_id"] = "question-2"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selected-pipeline.json"
+            path.write_text(json.dumps([first, second]), encoding="utf-8")
+            report = LongMemEvalPipelineRunner(InMemoryRepository()).run(
+                dataset_path=path,
+                dataset_id="pipeline-selected-test",
+                question_ids=("question-2",),
+            )
+
+        self.assertEqual(report.case_count, 1)
+        self.assertEqual(report.cases[0]["question_id"], "question-2")
 
     def test_streams_cases_and_preserves_session_structure_without_label_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

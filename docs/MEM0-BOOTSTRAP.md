@@ -78,6 +78,19 @@ The bridge never sends arbitrary source metadata. This is particularly important
 data: expected answers and evidence labels stay outside the Mem0 prompt. Mem0 output documents
 are also excluded from later runs, preventing recursive generation.
 
+The adapter supplies a Data Retrieval extraction policy by default. Unlike Mem0's personal-memory
+default, it retains objective claims, entity roles, events, decisions, state changes, and exact
+temporal or numeric details from both sides of a conversation. A config file can override it with
+`custom_fact_extraction_prompt`. The Mem0 version, LLM model, and extraction/update prompts are
+fingerprinted into completion markers, so changing extraction behavior safely reprocesses source
+batches instead of silently reusing stale calibration.
+
+For Ollama, the adapter disables the model's hidden thinking channel during Mem0 calls. These calls
+need short JSON rather than a chain of thought; with reasoning models such as Qwen 3.5, leaving the
+channel enabled can consume Mem0's output-token budget and produce an empty JSON response.
+The boundary also normalizes a common small-model variation where each extracted fact is wrapped
+as `{"fact": "..."}` instead of being returned as a plain string.
+
 Documents are processed by occurrence time, not by their hashed IDs. All documents in one native
 namespace share one isolated Mem0 `user_id` and omit `run_id`, allowing a later session to be
 compared with earlier memories. Different namespaces cannot share this state; a custom

@@ -111,6 +111,7 @@ class LongMemEvalPipelineRunner:
         namespace_prefix: str = "longmemeval",
         timezone_name: str = "UTC",
         max_cases: int | None = None,
+        question_ids: tuple[str, ...] | None = None,
         top_k: int = 10,
         enrich_tags: bool = False,
         enrich_temporal: bool = False,
@@ -137,6 +138,7 @@ class LongMemEvalPipelineRunner:
             dataset_id=dataset_id,
             timezone_name=timezone_name,
             max_cases=max_cases,
+            question_ids=question_ids,
         )
         total = imported.case_count
         results: list[dict[str, Any] | None] = [None] * total

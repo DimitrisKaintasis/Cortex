@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     longmemeval.add_argument("--dataset-id")
     longmemeval.add_argument("--timezone", default="UTC", dest="timezone_name")
     longmemeval.add_argument("--max-cases", type=int)
+    longmemeval.add_argument(
+        "--question-id",
+        action="append",
+        dest="question_ids",
+        help="ingest only selected question IDs; repeat for multiple cases",
+    )
 
     pipeline = commands.add_parser(
         "run-longmemeval",
@@ -85,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--namespace-prefix", default="longmemeval")
     pipeline.add_argument("--timezone", default="UTC", dest="timezone_name")
     pipeline.add_argument("--max-cases", type=int)
+    pipeline.add_argument(
+        "--question-id",
+        action="append",
+        dest="question_ids",
+        help="run only selected question IDs; repeat for multiple cases",
+    )
     pipeline.add_argument(
         "--max-workers",
         type=int,
@@ -401,6 +413,7 @@ def _ingest_longmemeval(
             dataset_id=args.dataset_id,
             timezone_name=args.timezone_name,
             max_cases=args.max_cases,
+            question_ids=tuple(args.question_ids) if args.question_ids else None,
         )
     return {
         "dataset_id": result.dataset_id,
@@ -501,6 +514,7 @@ def _run_longmemeval(
             namespace_prefix=args.namespace_prefix,
             timezone_name=args.timezone_name,
             max_cases=args.max_cases,
+            question_ids=tuple(args.question_ids) if args.question_ids else None,
             top_k=args.top_k,
             enrich_tags=not args.skip_tags,
             enrich_temporal=not args.skip_temporal,

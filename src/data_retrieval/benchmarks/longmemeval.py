@@ -114,6 +114,7 @@ class LongMemEvalIngestService:
         dataset_id: str | None = None,
         timezone_name: str = "UTC",
         max_cases: int | None = None,
+        question_ids: tuple[str, ...] | None = None,
     ) -> LongMemEvalImportResult:
         if not path.is_file():
             raise ValueError(f"input file does not exist: {path}")
@@ -125,6 +126,14 @@ class LongMemEvalIngestService:
             raise ValueError("dataset_id cannot be empty")
         if max_cases is not None and max_cases <= 0:
             raise ValueError("max_cases must be positive")
+        selected_ids = frozenset(question_ids or ())
+        if question_ids is not None:
+            if not selected_ids or any(not question_id.strip() for question_id in question_ids):
+                raise ValueError("question_ids must contain non-empty IDs")
+            if len(selected_ids) != len(question_ids):
+                raise ValueError("question_ids cannot contain duplicates")
+            if max_cases is not None and max_cases < len(selected_ids):
+                raise ValueError("max_cases cannot be smaller than the question_ids selection")
 
         dataset_hash = _file_hash(path)
         imported_cases: list[ImportedLongMemEvalCase] = []
@@ -134,8 +143,11 @@ class LongMemEvalIngestService:
 
         cases = iter_longmemeval_cases(path, timezone_name=timezone_name)
         try:
-            for case_index, case in enumerate(cases):
-                if max_cases is not None and case_index >= max_cases:
+            found_ids: set[str] = set()
+            for case in cases:
+                if selected_ids and case.question_id not in selected_ids:
+                    continue
+                if max_cases is not None and len(imported_cases) >= max_cases:
                     break
                 imported, inserted, reused = self._ingest_case(
                     case=case,
@@ -147,8 +159,16 @@ class LongMemEvalIngestService:
                 inserted_session_count += inserted
                 reused_session_count += reused
                 atom_count += imported.atom_count
+                found_ids.add(case.question_id)
+                if selected_ids and found_ids == selected_ids:
+                    break
         except ijson.JSONError as error:
             raise ValueError(f"invalid LongMemEval JSON: {error}") from error
+        missing_ids = selected_ids.difference(found_ids)
+        if missing_ids:
+            raise ValueError(
+                "LongMemEval question IDs were not found: " + ", ".join(sorted(missing_ids))
+            )
 
         return LongMemEvalImportResult(
             dataset_id=resolved_dataset_id,
