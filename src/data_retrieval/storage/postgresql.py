@@ -20,6 +20,7 @@ from data_retrieval.domain.models import (
     AtomLink,
     AtomLinkRelation,
     AtomTag,
+    CalibrationSignal,
     Document,
     IngestionBundle,
     Tag,
@@ -195,6 +196,28 @@ class PostgreSQLRepository:
                 )
                 """
             )
+            self._connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {SCHEMA}.calibration_signals (
+                    signal_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    related_id TEXT,
+                    relation_type TEXT,
+                    signal_type TEXT NOT NULL,
+                    value DOUBLE PRECISION NOT NULL CHECK(value >= 0 AND value <= 1),
+                    confidence DOUBLE PRECISION NOT NULL
+                        CHECK(confidence >= 0 AND confidence <= 1),
+                    multiplier DOUBLE PRECISION NOT NULL CHECK(multiplier > 0),
+                    provider TEXT NOT NULL,
+                    profile_version TEXT NOT NULL,
+                    source_reference TEXT,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb
+                )
+                """
+            )
             for statement in (
                 f"CREATE INDEX IF NOT EXISTS idx_documents_namespace_status "
                 f"ON {SCHEMA}.documents(namespace, ingestion_status)",
@@ -218,6 +241,8 @@ class PostgreSQLRepository:
                 f"ON {SCHEMA}.atom_embeddings(provider, model, dimensions)",
                 f"CREATE INDEX IF NOT EXISTS idx_feedback_retrieval "
                 f"ON {SCHEMA}.feedback_events(retrieval_id)",
+                f"CREATE INDEX IF NOT EXISTS idx_calibration_target "
+                f"ON {SCHEMA}.calibration_signals(namespace, target_type, target_id)",
             ):
                 self._connection.execute(statement)
         register_vector(self._connection)
@@ -229,6 +254,21 @@ class PostgreSQLRepository:
             (document_id,),
         )
         return self._document(row) if row else None
+
+    def list_namespaces(self, prefix: str | None = None) -> tuple[str, ...]:
+        if prefix is None:
+            rows = self._fetchall(
+                f"SELECT DISTINCT namespace FROM {SCHEMA}.documents "
+                "WHERE ingestion_status = 'complete' ORDER BY namespace"
+            )
+        else:
+            rows = self._fetchall(
+                f"SELECT DISTINCT namespace FROM {SCHEMA}.documents "
+                "WHERE ingestion_status = 'complete' AND namespace LIKE %s "
+                "ORDER BY namespace",
+                (f"{self._escape_like(prefix)}%",),
+            )
+        return tuple(str(row["namespace"]) for row in rows)
 
     def get_documents(self, document_ids: tuple[str, ...]) -> tuple[Document, ...]:
         if not document_ids:
@@ -243,6 +283,74 @@ class PostgreSQLRepository:
             found[document_id] for document_id in document_ids if document_id in found
         )
 
+    def find_documents_by_content_hash(
+        self, *, namespace: str, content_hash: str
+    ) -> tuple[Document, ...]:
+        rows = self._fetchall(
+            f"""
+            SELECT * FROM {SCHEMA}.documents
+            WHERE namespace = %s AND content_hash = %s AND ingestion_status = 'complete'
+            ORDER BY document_id
+            """,
+            (namespace, content_hash),
+        )
+        return tuple(self._document(row) for row in rows)
+
+    def iter_document_ids(
+        self, *, namespace: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        after = ""
+        while True:
+            rows = self._fetchall(
+                f"""
+                SELECT document_id FROM {SCHEMA}.documents
+                WHERE namespace = %s AND ingestion_status = 'complete' AND document_id > %s
+                ORDER BY document_id LIMIT %s
+                """,
+                (namespace, after, batch_size),
+            )
+            batch = tuple(str(row["document_id"]) for row in rows)
+            if not batch:
+                break
+            yield batch
+            after = batch[-1]
+
+    def iter_document_ids_chronological(
+        self, *, namespace: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        after_time: datetime | None = None
+        after_id = ""
+        while True:
+            rows = self._fetchall(
+                f"""
+                WITH ordered AS (
+                    SELECT documents.document_id,
+                           COALESCE(MIN(atoms.occurred_at), documents.created_at) AS sort_time
+                    FROM {SCHEMA}.documents AS documents
+                    LEFT JOIN {SCHEMA}.atoms AS atoms USING(document_id)
+                    WHERE documents.namespace = %s
+                      AND documents.ingestion_status = 'complete'
+                    GROUP BY documents.document_id, documents.created_at
+                )
+                SELECT document_id, sort_time FROM ordered
+                WHERE %s::timestamptz IS NULL
+                   OR (sort_time, document_id) > (%s::timestamptz, %s)
+                ORDER BY sort_time, document_id
+                LIMIT %s
+                """,
+                (namespace, after_time, after_time, after_id, batch_size),
+            )
+            batch = tuple(str(row["document_id"]) for row in rows)
+            if not batch:
+                break
+            yield batch
+            after_time = rows[-1]["sort_time"]
+            after_id = batch[-1]
+
     def get_atoms_for_document(self, document_id: str) -> tuple[Atom, ...]:
         rows = self._fetchall(
             f"""
@@ -254,6 +362,30 @@ class PostgreSQLRepository:
             (document_id,),
         )
         return tuple(self._atom(row) for row in rows)
+
+    def iter_atom_ids_for_document(
+        self, *, document_id: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        after = -1
+        while True:
+            rows = self._fetchall(
+                f"""
+                SELECT atoms.atom_id, atoms.position
+                FROM {SCHEMA}.atoms AS atoms
+                JOIN {SCHEMA}.documents AS documents USING(document_id)
+                WHERE atoms.document_id = %s AND atoms.position > %s
+                  AND documents.ingestion_status = 'complete'
+                ORDER BY atoms.position LIMIT %s
+                """,
+                (document_id, after, batch_size),
+            )
+            batch = tuple(str(row["atom_id"]) for row in rows)
+            if not batch:
+                break
+            yield batch
+            after = int(rows[-1]["position"])
 
     def get_document_atom_count(self, document_id: str) -> int:
         row = self._fetchone(
@@ -283,6 +415,21 @@ class PostgreSQLRepository:
         )
         found = {row["atom_id"]: self._atom(row) for row in rows}
         return tuple(found[atom_id] for atom_id in atom_ids if atom_id in found)
+
+    def find_atoms_by_content_hash(
+        self, *, namespace: str, content_hash: str
+    ) -> tuple[Atom, ...]:
+        rows = self._fetchall(
+            f"""
+            SELECT atoms.* FROM {SCHEMA}.atoms AS atoms
+            JOIN {SCHEMA}.documents AS documents USING(document_id)
+            WHERE atoms.namespace = %s AND atoms.content_hash = %s
+              AND documents.ingestion_status = 'complete'
+            ORDER BY atoms.document_id, atoms.position
+            """,
+            (namespace, content_hash),
+        )
+        return tuple(self._atom(row) for row in rows)
 
     def get_atom_links(self, atom_id: str) -> tuple[AtomLink, ...]:
         rows = self._fetchall(
@@ -694,6 +841,58 @@ class PostgreSQLRepository:
         )
         return dict(row["payload_json"]) if row else None
 
+    def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]:
+        if not signal_ids:
+            return frozenset()
+        rows = self._fetchall(
+            f"SELECT signal_id FROM {SCHEMA}.calibration_signals "
+            "WHERE signal_id = ANY(%s)",
+            (list(signal_ids),),
+        )
+        return frozenset(str(row["signal_id"]) for row in rows)
+
+    def apply_calibration_updates(
+        self,
+        *,
+        signals: tuple[CalibrationSignal, ...],
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        with self._lock, self._connection.transaction():
+            self._executemany(
+                f"""
+                INSERT INTO {SCHEMA}.calibration_signals (
+                    signal_id, namespace, target_type, target_id, related_id,
+                    relation_type, signal_type, value, confidence, multiplier,
+                    provider, profile_version, source_reference, created_at, metadata_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    (
+                        signal.signal_id,
+                        signal.namespace,
+                        signal.target_type.value,
+                        signal.target_id,
+                        signal.related_id,
+                        signal.relation_type,
+                        signal.signal_type,
+                        signal.value,
+                        signal.confidence,
+                        signal.multiplier,
+                        signal.provider,
+                        signal.profile_version,
+                        signal.source_reference,
+                        signal.created_at,
+                        Jsonb(self._json_value(signal.metadata)),
+                    )
+                    for signal in signals
+                ),
+            )
+            self._upsert_atom_tags(atom_tags)
+            self._upsert_atom_links(atom_links)
+            self._upsert_tag_relations(tag_relations)
+
     def apply_learning_updates(
         self,
         *,
@@ -1098,3 +1297,7 @@ class PostgreSQLRepository:
     @staticmethod
     def _json_value(value: Any) -> Any:
         return json.loads(json.dumps(value, sort_keys=True, default=str))
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

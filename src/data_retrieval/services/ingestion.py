@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from data_retrieval.calibration.teachers import TeacherCalibrationService
 from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import (
     Atom,
+    AtomKind,
     AtomTag,
     Document,
     IngestionBundle,
@@ -46,6 +48,7 @@ class IngestService:
         explicit_tags: tuple[str, ...] = (),
         occurred_at: datetime | None = None,
         metadata: dict[str, Any] | None = None,
+        atom_kind: AtomKind = AtomKind.SOURCE,
     ) -> IngestResult:
         namespace = namespace.strip()
         source = source.strip()
@@ -61,6 +64,7 @@ class IngestService:
         existing_document = self.repository.get_document(document_id)
         if existing_document:
             atoms = self.repository.get_atoms_for_document(document_id)
+            TeacherCalibrationService(self.repository).calibrate_document(document_id)
             return IngestResult(
                 document_id=document_id,
                 atom_ids=tuple(atom.atom_id for atom in atoms),
@@ -93,6 +97,7 @@ class IngestService:
                 char_end=chunk.char_end,
                 content=chunk.text,
                 content_hash=content_hash(chunk.text),
+                kind=atom_kind,
                 occurred_at=occurred_at,
                 metadata={**source_metadata, "source": source},
             )
@@ -168,6 +173,7 @@ class IngestService:
                 atom_tags=atom_tags,
             )
         )
+        TeacherCalibrationService(self.repository).calibrate_document(document_id)
         return IngestResult(
             document_id=document_id,
             atom_ids=tuple(atom.atom_id for atom in atoms),

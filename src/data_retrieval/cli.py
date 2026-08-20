@@ -16,10 +16,18 @@ from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.inference.openrouter import OpenRouterError
+from data_retrieval.mem0 import (
+    Mem0BootstrapService,
+    Mem0ImportService,
+    Mem0PythonProcessor,
+    load_mem0_records,
+)
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
+from data_retrieval.services.calibration_backfill import CalibrationBackfillService
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
+from data_retrieval.services.interactions import InteractionService
 from data_retrieval.services.large_ingestion import LargeFileIngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
@@ -28,6 +36,7 @@ from data_retrieval.services.temporal_enrichment import TemporalEnrichmentServic
 from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.repository import Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
+from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.ollama import OllamaError, OllamaTagProposer
 from data_retrieval.tagging.openrouter import OpenRouterTagProposer
 from data_retrieval.temporal import TemporalBridge
@@ -128,6 +137,14 @@ def build_parser() -> argparse.ArgumentParser:
     tags.add_argument("document_id")
     _add_storage_options(tags)
     _add_ollama_options(tags, timeout_default="120")
+    tags.add_argument(
+        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
+    )
+    tags.add_argument(
+        "--embedding-profile",
+        choices=tuple(EMBEDDING_PROFILES),
+        default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
+    )
 
     temporal = commands.add_parser(
         "enrich-temporal", help="create Temporal History summary atoms from stored atoms"
@@ -149,6 +166,91 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings.add_argument("--namespace", required=True)
     _add_embedding_options(embeddings)
 
+    mem0 = commands.add_parser(
+        "import-mem0",
+        help="import a Mem0 JSON/JSONL export as native, boosted calibration evidence",
+    )
+    mem0.add_argument("path", type=Path)
+    _add_storage_options(mem0)
+    mem0.add_argument("--namespace", required=True)
+    mem0.add_argument(
+        "--tag-model",
+        default=os.getenv("OLLAMA_MODEL"),
+        help="optional Ollama model used to tag records that do not contain tags",
+    )
+    _add_embedding_options(mem0, required=False)
+
+    mem0_bootstrap = commands.add_parser(
+        "bootstrap-mem0",
+        help="distill existing atoms through self-hosted Mem0 and calibrate native evidence",
+    )
+    _add_storage_options(mem0_bootstrap)
+    mem0_scope = mem0_bootstrap.add_mutually_exclusive_group(required=True)
+    mem0_scope.add_argument("--namespace")
+    mem0_scope.add_argument("--namespace-prefix")
+    mem0_scope.add_argument("--all-namespaces", action="store_true")
+    mem0_bootstrap.add_argument(
+        "--mem0-config",
+        type=Path,
+        help="Mem0 OSS JSON config; provider secrets should come from environment variables",
+    )
+    mem0_bootstrap.add_argument(
+        "--mem0-user-id",
+        help="optional Mem0 identity; by default each native namespace is isolated",
+    )
+    mem0_bootstrap.add_argument("--atom-batch-size", type=int, default=32)
+    mem0_bootstrap.add_argument("--max-batch-chars", type=int, default=24_000)
+    mem0_bootstrap.add_argument(
+        "--accept-empty",
+        action="store_true",
+        help="mark empty Mem0 results complete; default leaves them retryable",
+    )
+    mem0_bootstrap.add_argument(
+        "--max-documents",
+        type=int,
+        help="global safety cap across all selected namespaces",
+    )
+    mem0_bootstrap.add_argument(
+        "--tag-model",
+        default=None,
+        help="optional Ollama model for tagging Mem0 outputs without inherited tags",
+    )
+    _add_embedding_options(mem0_bootstrap, required=False)
+
+    calibration = commands.add_parser(
+        "backfill-calibration",
+        help="replay missing teacher priors and initial relationships without re-embedding",
+    )
+    _add_storage_options(calibration)
+    calibration_scope = calibration.add_mutually_exclusive_group(required=True)
+    calibration_scope.add_argument("--namespace")
+    calibration_scope.add_argument("--namespace-prefix")
+    calibration_scope.add_argument("--all-namespaces", action="store_true")
+    calibration.add_argument("--document-batch-size", type=int, default=250)
+    calibration.add_argument("--atom-batch-size", type=int, default=1_000)
+    calibration.add_argument(
+        "--max-documents",
+        type=int,
+        help="global safety cap across the selected namespace scope",
+    )
+
+    interaction = commands.add_parser(
+        "record-interaction",
+        help="store one user/assistant turn and optionally apply attributable outcome learning",
+    )
+    _add_storage_options(interaction)
+    interaction.add_argument("--namespace", required=True)
+    interaction.add_argument("--conversation-id", required=True)
+    interaction.add_argument("--turn-id", required=True)
+    interaction.add_argument("--user-text", required=True)
+    interaction.add_argument("--assistant-text", required=True)
+    interaction.add_argument("--retrieval-id")
+    interaction.add_argument("--used-atom", action="append", default=[])
+    interaction.add_argument("--outcome", choices=("positive", "negative"))
+    interaction.add_argument("--reason", default="")
+    interaction.add_argument("--used-mem0", action="store_true")
+    interaction.add_argument("--tag", action="append", default=[])
+
     retrieve = commands.add_parser("retrieve", help="run explainable hybrid retrieval")
     retrieve.add_argument("query")
     _add_storage_options(retrieve)
@@ -164,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     retrieve.add_argument("--as-of", type=_aware_datetime)
     retrieve.add_argument("--range-start", type=_aware_datetime)
     retrieve.add_argument("--range-end", type=_aware_datetime)
+    retrieve.add_argument("--reference-time", type=_aware_datetime)
     _add_embedding_options(retrieve, required=False)
 
     feedback = commands.add_parser(
@@ -175,6 +278,11 @@ def build_parser() -> argparse.ArgumentParser:
     feedback.add_argument("--selected-atom", action="append", required=True)
     feedback.add_argument("--outcome", choices=("positive", "negative"), required=True)
     feedback.add_argument("--reason", default="")
+    feedback.add_argument(
+        "--used-mem0",
+        action="store_true",
+        help="apply the accepted Mem0 2x training-signal multiplier",
+    )
 
     evaluate = commands.add_parser("evaluate", help="run the retrieval evaluation corpus")
     evaluate.add_argument("--dataset", type=Path, default=Path("evals/retrieval_cases.json"))
@@ -208,6 +316,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _enrich_temporal(args)
         elif args.command == "enrich-embeddings":
             output = _enrich_embeddings(args)
+        elif args.command == "import-mem0":
+            output = _import_mem0(args, parser)
+        elif args.command == "bootstrap-mem0":
+            output = _bootstrap_mem0(args, parser)
+        elif args.command == "backfill-calibration":
+            output = _backfill_calibration(args)
+        elif args.command == "record-interaction":
+            output = _record_interaction(args)
         elif args.command == "retrieve":
             output = _retrieve(args)
         elif args.command == "feedback":
@@ -268,6 +384,7 @@ def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[s
         "atom_count": atom_count,
         "tag_ids": result.tag_ids,
         "idempotent": result.idempotent,
+        "calibration_signals": getattr(result, "calibration_signals", None),
         "database": _database_label(args),
     }
 
@@ -413,7 +530,12 @@ def _enrich_tags(args: argparse.Namespace) -> dict[str, object]:
         timeout_seconds=args.ollama_timeout,
     )
     with _open_repository(args) as repository:
-        result = TagEnrichmentService(repository, proposer).enrich_document(args.document_id)
+        canonicalizer = (
+            SemanticTagCanonicalizer(_embedder(args)) if args.embedding_model else None
+        )
+        result = TagEnrichmentService(
+            repository, proposer, canonicalizer=canonicalizer
+        ).enrich_document(args.document_id)
     return {
         "document_id": result.document_id,
         "tag_ids": result.tag_ids,
@@ -471,6 +593,204 @@ def _enrich_embeddings(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _import_mem0(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.path.is_file():
+        parser.error(f"input file does not exist: {args.path}")
+    records = load_mem0_records(args.path)
+    embedder = _embedder(args) if args.embedding_model else None
+    tag_proposer = (
+        OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=args.tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+        if args.tag_model
+        else None
+    )
+    imported = 0
+    exact_duplicates = 0
+    semantic_duplicates = 0
+    conflict_links = 0
+    source_lineage_links = 0
+    calibration_signals = 0
+    with _open_repository(args) as repository:
+        service = Mem0ImportService(
+            repository,
+            embedder=embedder,
+            tag_proposer=tag_proposer,
+        )
+        for offset in range(0, len(records), 500):
+            result = service.import_records(
+                namespace=args.namespace,
+                records=records[offset : offset + 500],
+            )
+            imported += len(result.imported_record_ids)
+            exact_duplicates += len(result.exact_duplicate_record_ids)
+            semantic_duplicates += len(result.semantic_duplicate_record_ids)
+            conflict_links += result.conflict_links_created
+            source_lineage_links += result.source_lineage_links_created
+            calibration_signals += result.calibration_signals_created
+    return {
+        "record_count": len(records),
+        "imported": imported,
+        "exact_duplicates": exact_duplicates,
+        "semantic_duplicates": semantic_duplicates,
+        "conflict_links_created": conflict_links,
+        "source_lineage_links_created": source_lineage_links,
+        "calibration_signals_created": calibration_signals,
+        "database": _database_label(args),
+    }
+
+
+def _bootstrap_mem0(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if args.mem0_user_id and not args.namespace:
+        parser.error("--mem0-user-id requires one exact --namespace")
+    if args.mem0_config and not args.mem0_config.is_file():
+        parser.error(f"Mem0 config does not exist: {args.mem0_config}")
+    config = _load_json_object(args.mem0_config) if args.mem0_config else None
+    processor = Mem0PythonProcessor(config)
+    embedder = _embedder(args) if args.embedding_model else None
+    tag_proposer = (
+        OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=args.tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+        if args.tag_model
+        else None
+    )
+    with _open_repository(args) as repository:
+        namespaces = (
+            (args.namespace,)
+            if args.namespace
+            else repository.list_namespaces(prefix=args.namespace_prefix)
+        )
+        results = []
+        remaining = args.max_documents
+        for index, namespace in enumerate(namespaces, start=1):
+            if remaining is not None and remaining <= 0:
+                break
+            print(
+                f"Mem0 bootstrap namespace {index}/{len(namespaces)}: {namespace}",
+                file=sys.stderr,
+                flush=True,
+            )
+            importer = Mem0ImportService(
+                repository,
+                embedder=embedder,
+                tag_proposer=tag_proposer,
+            )
+            result = Mem0BootstrapService(
+                repository,
+                processor,
+                importer=importer,
+                atom_batch_size=args.atom_batch_size,
+                max_batch_chars=args.max_batch_chars,
+                accept_empty=args.accept_empty,
+            ).run(
+                namespace=namespace,
+                user_id=args.mem0_user_id,
+                max_documents=remaining,
+            )
+            results.append(result)
+            if remaining is not None:
+                remaining -= result.documents_examined
+    return {
+        "namespace_count": len(results),
+        "documents_examined": sum(result.documents_examined for result in results),
+        "batches_processed": sum(result.batches_processed for result in results),
+        "batches_resumed": sum(result.batches_resumed for result in results),
+        "source_atoms_processed": sum(
+            result.source_atoms_processed for result in results
+        ),
+        "source_atoms_resumed": sum(result.source_atoms_resumed for result in results),
+        "memories_returned": sum(result.memories_returned for result in results),
+        "empty_batches": sum(result.empty_batches for result in results),
+        "memories_imported": sum(result.memories_imported for result in results),
+        "exact_duplicates": sum(result.exact_duplicates for result in results),
+        "semantic_duplicates": sum(result.semantic_duplicates for result in results),
+        "source_lineage_links_created": sum(
+            result.source_lineage_links_created for result in results
+        ),
+        "calibration_signals_created": sum(
+            result.calibration_signals_created for result in results
+        ),
+        "scope_truncated": len(results) < len(namespaces)
+        or any(result.truncated for result in results),
+        "database": _database_label(args),
+    }
+
+
+def _backfill_calibration(args: argparse.Namespace) -> dict[str, object]:
+    with _open_repository(args) as repository:
+        service = CalibrationBackfillService(
+            repository,
+            document_batch_size=args.document_batch_size,
+            atom_batch_size=args.atom_batch_size,
+        )
+        namespaces = (
+            (args.namespace,)
+            if args.namespace
+            else repository.list_namespaces(prefix=args.namespace_prefix)
+        )
+        collected = []
+        remaining = args.max_documents
+        for namespace in namespaces:
+            if remaining is not None and remaining <= 0:
+                break
+            result = service.run(namespace=namespace, max_documents=remaining)
+            collected.append(result)
+            if remaining is not None:
+                remaining -= result.documents_examined
+        results = tuple(collected)
+    return {
+        "namespace_count": len(results),
+        "documents_examined": sum(result.documents_examined for result in results),
+        "documents_changed": sum(result.documents_changed for result in results),
+        "signals_created": sum(result.signals_created for result in results),
+        "atom_tag_updates": sum(result.atom_tag_updates for result in results),
+        "atom_link_updates": sum(result.atom_link_updates for result in results),
+        "tag_relation_updates": sum(result.tag_relation_updates for result in results),
+        "truncated_namespaces": tuple(
+            result.namespace for result in results if result.truncated
+        ),
+        "scope_truncated": len(results) < len(namespaces) or any(
+            result.truncated for result in results
+        ),
+        "database": _database_label(args),
+    }
+
+
+def _record_interaction(args: argparse.Namespace) -> dict[str, object]:
+    with _open_repository(args) as repository:
+        result = InteractionService(repository).record_turn(
+            namespace=args.namespace,
+            conversation_id=args.conversation_id,
+            turn_id=args.turn_id,
+            user_text=args.user_text,
+            assistant_text=args.assistant_text,
+            retrieval_id=args.retrieval_id,
+            used_atom_ids=tuple(args.used_atom),
+            outcome=args.outcome,
+            reason=args.reason,
+            used_mem0=args.used_mem0,
+            tags=tuple(args.tag),
+        )
+    return {
+        "conversation_id": result.conversation_id,
+        "turn_id": result.turn_id,
+        "user_atom_ids": result.user_atom_ids,
+        "assistant_atom_ids": result.assistant_atom_ids,
+        "evidence_link_count": result.evidence_link_count,
+        "feedback_id": result.feedback.feedback_id if result.feedback else None,
+        "database": _database_label(args),
+    }
+
+
 def _retrieve(args: argparse.Namespace) -> dict[str, object]:
     embedder = _embedder(args) if args.embedding_model else None
     plan = QueryPlan(
@@ -483,6 +803,7 @@ def _retrieve(args: argparse.Namespace) -> dict[str, object]:
         as_of=args.as_of,
         range_start=args.range_start,
         range_end=args.range_end,
+        reference_time=args.reference_time,
     )
     with _open_repository(args) as repository:
         result = RetrievalService(repository, embedder=embedder).retrieve(plan)
@@ -524,6 +845,7 @@ def _feedback(args: argparse.Namespace) -> dict[str, object]:
                 selected_atom_ids=tuple(args.selected_atom),
                 outcome=args.outcome,
                 reason=args.reason,
+                used_mem0=args.used_mem0,
             )
         )
     return {
@@ -532,6 +854,7 @@ def _feedback(args: argparse.Namespace) -> dict[str, object]:
         "atom_tag_updates": result.atom_tag_updates,
         "atom_link_updates": result.atom_link_updates,
         "tag_relation_updates": result.tag_relation_updates,
+        "learning_multiplier": result.learning_multiplier,
         "database": _database_label(args),
     }
 
@@ -653,6 +976,16 @@ def _json_object(value: str) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise argparse.ArgumentTypeError("metadata must be a JSON object")
     return parsed
+
+
+def _load_json_object(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Mem0 config is not valid JSON: {path}") from error
+    if not isinstance(payload, dict):
+        raise ValueError("Mem0 config must contain one JSON object")
+    return payload
 
 
 if __name__ == "__main__":

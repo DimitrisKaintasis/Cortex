@@ -11,6 +11,7 @@ from data_retrieval.domain.models import (
     AtomKind,
     AtomLink,
     AtomTag,
+    CalibrationSignal,
     Document,
     IngestionBundle,
     Tag,
@@ -35,11 +36,24 @@ class InMemoryRepository:
         self._tag_relations: dict[tuple[str, str, str], TagRelation] = {}
         self._retrieval_events: dict[str, dict[str, object]] = {}
         self._feedback_events: dict[str, dict[str, object]] = {}
+        self._calibration_signals: dict[str, CalibrationSignal] = {}
         self._lock = RLock()
 
     def get_document(self, document_id: str) -> Document | None:
         with self._lock:
             return self._documents.get(document_id)
+
+    def list_namespaces(self, prefix: str | None = None) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    {
+                        document.namespace
+                        for document in self._documents.values()
+                        if prefix is None or document.namespace.startswith(prefix)
+                    }
+                )
+            )
 
     def get_documents(self, document_ids: tuple[str, ...]) -> tuple[Document, ...]:
         with self._lock:
@@ -49,10 +63,74 @@ class InMemoryRepository:
                 if document_id in self._documents
             )
 
+    def find_documents_by_content_hash(
+        self, *, namespace: str, content_hash: str
+    ) -> tuple[Document, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    (
+                        document
+                        for document in self._documents.values()
+                        if document.namespace == namespace
+                        and document.content_hash == content_hash
+                    ),
+                    key=lambda document: document.document_id,
+                )
+            )
+
+    def iter_document_ids(
+        self, *, namespace: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        with self._lock:
+            document_ids = tuple(
+                sorted(
+                    document.document_id
+                    for document in self._documents.values()
+                    if document.namespace == namespace
+                )
+            )
+        for offset in range(0, len(document_ids), batch_size):
+            yield document_ids[offset : offset + batch_size]
+
+    def iter_document_ids_chronological(
+        self, *, namespace: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        with self._lock:
+            ordered = []
+            for document in self._documents.values():
+                if document.namespace != namespace:
+                    continue
+                occurred = tuple(
+                    atom.occurred_at
+                    for atom in self._atoms.values()
+                    if atom.document_id == document.document_id
+                    and atom.occurred_at is not None
+                )
+                ordered.append(
+                    (min(occurred) if occurred else document.created_at, document.document_id)
+                )
+            document_ids = tuple(document_id for _, document_id in sorted(ordered))
+        for offset in range(0, len(document_ids), batch_size):
+            yield document_ids[offset : offset + batch_size]
+
     def get_atoms_for_document(self, document_id: str) -> tuple[Atom, ...]:
         with self._lock:
             atoms = (atom for atom in self._atoms.values() if atom.document_id == document_id)
             return tuple(sorted(atoms, key=lambda atom: atom.position))
+
+    def iter_atom_ids_for_document(
+        self, *, document_id: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        atom_ids = tuple(atom.atom_id for atom in self.get_atoms_for_document(document_id))
+        for offset in range(0, len(atom_ids), batch_size):
+            yield atom_ids[offset : offset + batch_size]
 
     def get_document_atom_count(self, document_id: str) -> int:
         with self._lock:
@@ -65,6 +143,21 @@ class InMemoryRepository:
     def get_atoms(self, atom_ids: tuple[str, ...]) -> tuple[Atom, ...]:
         with self._lock:
             return tuple(self._atoms[atom_id] for atom_id in atom_ids if atom_id in self._atoms)
+
+    def find_atoms_by_content_hash(
+        self, *, namespace: str, content_hash: str
+    ) -> tuple[Atom, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    (
+                        atom
+                        for atom in self._atoms.values()
+                        if atom.namespace == namespace and atom.content_hash == content_hash
+                    ),
+                    key=lambda atom: (atom.document_id, atom.position),
+                )
+            )
 
     def get_atom_links(self, atom_id: str) -> tuple[AtomLink, ...]:
         with self._lock:
@@ -358,6 +451,49 @@ class InMemoryRepository:
         with self._lock:
             event = self._retrieval_events.get(retrieval_id)
             return dict(event) if event else None
+
+    def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]:
+        with self._lock:
+            return frozenset(
+                signal_id
+                for signal_id in signal_ids
+                if signal_id in self._calibration_signals
+            )
+
+    def apply_calibration_updates(
+        self,
+        *,
+        signals: tuple[CalibrationSignal, ...],
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        """Atomically persist idempotent calibration evidence and absolute edge states."""
+        with self._lock:
+            duplicate_ids = {
+                signal.signal_id
+                for signal in signals
+                if signal.signal_id in self._calibration_signals
+            }
+            if duplicate_ids:
+                raise ValueError(f"calibration signal already exists: {sorted(duplicate_ids)[0]}")
+            updated_signals = dict(self._calibration_signals)
+            updated_signals.update((signal.signal_id, signal) for signal in signals)
+            updated_atom_tags = dict(self._atom_tags)
+            updated_atom_tags.update(((edge.atom_id, edge.tag_id), edge) for edge in atom_tags)
+            updated_links = dict(self._atom_links)
+            updated_links.update(
+                ((edge.from_atom_id, edge.to_atom_id, edge.relation), edge) for edge in atom_links
+            )
+            updated_relations = dict(self._tag_relations)
+            updated_relations.update(
+                ((edge.source_tag_id, edge.target_tag_id, edge.relation_type), edge)
+                for edge in tag_relations
+            )
+            self._calibration_signals = updated_signals
+            self._atom_tags = updated_atom_tags
+            self._atom_links = updated_links
+            self._tag_relations = updated_relations
 
     def apply_learning_updates(
         self,

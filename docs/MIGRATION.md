@@ -75,11 +75,21 @@ application code belong in this repository.
 - Six-case labeled dataset before advanced group-tag behavior
 - Next: grow the dataset from real misses and add negative/outcome calibration
 
+### 7. Calibration and Mem0 — initial slice complete
+
+- Versioned deterministic teacher signals for entity density, code structure, and rarity
+- Replay-safe atom-tag priors, tag co-occurrence, hierarchy, and source adjacency
+- Mem0 JSON/JSONL bridge with native atoms, 0.92 semantic dedupe, lineage, conflicts, and 2x learning
+- Batched calibration backfill without embedding regeneration
+- First-class interaction atoms and selected-evidence attribution
+
+See [ADR-0008](decisions/0008-replayable-calibration-and-mem0.md) and the
+[context ledger](CONTEXT_LEDGER.md).
+
 ## Explicitly deferred
 
 - HTTP API and authentication
 - Background scheduler
-- Mem0 integration
 - Webhooks and dead-letter queues
 - Adaptive channel weights
 - Group-tag promotion and skill distillation

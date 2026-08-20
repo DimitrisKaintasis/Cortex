@@ -78,3 +78,21 @@ Thinking must remain disabled for this classification call. With thinking enable
 models were much slower and intermittently failed to put valid JSON in the final content
 field. Setting Ollama's `think` request field to `false` made both models produce 6/6 valid
 responses.
+
+## Mem0 extraction contract smoke test
+
+On 2026-08-20, the same Gemma models were tested through Mem0 OSS 1.0.1 rather than the
+project's purpose-built tag prompt. This is a different interface: Mem0 owns the extraction
+prompt and JSON parser, so our tag proposer's `think=false` and schema handling do not apply.
+
+| Model | Mem0 result | Approximate one-batch latency |
+| --- | --- | ---: |
+| `gemma4:e2b-mlx` | malformed extraction JSON; zero memories | 24 s |
+| `gemma4:12b-mlx` | malformed extraction JSON; zero memories | over 3 min |
+| `qwen3.5:4b` | valid; two distilled memories with native lineage | 70 s cold |
+
+`qwen3.5:4b` also returned valid JSON in a direct Ollama format-constrained check and occupies
+about 3.4 GB on the Mac. It is therefore the current Mem0 extraction model, while
+`gemma4:12b-mlx` remains the tag-proposal default. This is only a compatibility smoke test;
+throughput, warm latency, and memory quality still require a representative multi-session
+benchmark before a large backfill.

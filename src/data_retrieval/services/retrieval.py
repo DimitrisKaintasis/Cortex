@@ -18,6 +18,7 @@ from data_retrieval.retrieval.models import (
 from data_retrieval.retrieval.planning import QueryPlanner
 from data_retrieval.retrieval.temporal_lens import TemporalLens
 from data_retrieval.storage.repository import Repository
+from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.normalization import normalize_tag
 from data_retrieval.tagging.proposals import TagProposer
 
@@ -38,6 +39,7 @@ class RetrievalService:
         low_confidence_threshold: float = 0.20,
         candidate_limit: int = 500,
         catalog_hint_limit: int = 500,
+        tag_canonicalizer: SemanticTagCanonicalizer | None = None,
     ) -> None:
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
@@ -51,6 +53,9 @@ class RetrievalService:
         self.low_confidence_threshold = low_confidence_threshold
         self.candidate_limit = candidate_limit
         self.catalog_hint_limit = catalog_hint_limit
+        self.tag_canonicalizer = tag_canonicalizer or (
+            SemanticTagCanonicalizer(embedder) if embedder is not None else None
+        )
 
     def retrieve(self, requested_plan: QueryPlan) -> RetrievalResult:
         auto_temporal = requested_plan.temporal_mode is TemporalMode.AUTO
@@ -262,19 +267,31 @@ class RetrievalService:
             namespace=namespace, canonical_texts=query_tags
         )
         query_tag_ids = {tag.tag_id for tag in query_tag_records}
-        relations = self.repository.get_tag_relations_touching(
-            tag_ids=tuple(query_tag_ids), relation_type="co_occurs"
-        )
+        relations = self.repository.get_tag_relations_touching(tag_ids=tuple(query_tag_ids))
         related_strength_by_id: dict[str, float] = defaultdict(float)
+        related_evidence_by_id: dict[str, str] = {}
         for relation in relations:
             strength = relation.weight_raw * relation.confidence
-            if relation.source_tag_id in query_tag_ids:
-                related_strength_by_id[relation.target_tag_id] += strength
-            if relation.target_tag_id in query_tag_ids:
-                related_strength_by_id[relation.source_tag_id] += strength
+            if relation.relation_type == "co_occurs":
+                if relation.source_tag_id in query_tag_ids:
+                    related_strength_by_id[relation.target_tag_id] += strength
+                    related_evidence_by_id[relation.target_tag_id] = "related_tag"
+                if relation.target_tag_id in query_tag_ids:
+                    related_strength_by_id[relation.source_tag_id] += strength
+                    related_evidence_by_id[relation.source_tag_id] = "related_tag"
+            elif relation.relation_type == "parent_of":
+                if relation.source_tag_id in query_tag_ids:
+                    related_strength_by_id[relation.target_tag_id] += strength * 0.8
+                    related_evidence_by_id[relation.target_tag_id] = "specific_tag"
+                if relation.target_tag_id in query_tag_ids:
+                    related_strength_by_id[relation.source_tag_id] += strength * 0.5
+                    related_evidence_by_id[relation.source_tag_id] = "broad_tag"
         related_tags = self.repository.get_tags(tuple(sorted(related_strength_by_id)))
         related_strength = {
             tag.canonical_text: related_strength_by_id[tag.tag_id] for tag in related_tags
+        }
+        related_evidence = {
+            tag.canonical_text: related_evidence_by_id[tag.tag_id] for tag in related_tags
         }
         related_hits = self.repository.search_tag_hits(
             namespace=namespace,
@@ -291,7 +308,9 @@ class RetrievalService:
             if strength <= 0.0:
                 continue
             scores[hit.atom_id] += hit.score * strength
-            evidence[hit.atom_id].extend(f"related_tag={value}" for value in matched)
+            evidence[hit.atom_id].extend(
+                f"{related_evidence.get(value, 'related_tag')}={value}" for value in matched
+            )
 
         for link in self.repository.get_atom_links_touching(
             atom_ids=tuple(seed_atom_ids), relation=AtomLinkRelation.CO_USED
@@ -303,6 +322,16 @@ class RetrievalService:
             if link.to_atom_id in seed_atom_ids:
                 scores[link.from_atom_id] += strength
                 evidence[link.from_atom_id].append(f"co_used_with={link.to_atom_id}")
+        for link in self.repository.get_atom_links_touching(
+            atom_ids=tuple(seed_atom_ids), relation=AtomLinkRelation.ADJACENT_TO
+        ):
+            strength = 0.35 * link.weight_raw * link.confidence
+            if link.from_atom_id in seed_atom_ids:
+                scores[link.to_atom_id] += strength
+                evidence[link.to_atom_id].append(f"adjacent_to={link.from_atom_id}")
+            if link.to_atom_id in seed_atom_ids:
+                scores[link.from_atom_id] += strength
+                evidence[link.from_atom_id].append(f"adjacent_to={link.to_atom_id}")
         return dict(scores), {
             atom_id: tuple(sorted(set(values))) for atom_id, values in evidence.items()
         }
@@ -330,6 +359,20 @@ class RetrievalService:
                 )
             except Exception as error:  # noqa: BLE001 - retrieval must degrade safely
                 warnings.append(f"tag_proposer_unavailable:{type(error).__name__}")
+        if tags and self.tag_canonicalizer is not None:
+            try:
+                catalog = self.repository.list_tags(
+                    plan.namespace, limit=self.catalog_hint_limit
+                )
+                exact = {tag.canonical_text for tag in catalog}
+                matches = self.tag_canonicalizer.resolve(
+                    candidates=tuple(sorted(tags - exact)), catalog=catalog
+                )
+                tags = {
+                    matches[tag].tag.canonical_text if tag in matches else tag for tag in tags
+                }
+            except Exception as error:  # noqa: BLE001 - retrieval must degrade safely
+                warnings.append(f"tag_canonicalizer_unavailable:{type(error).__name__}")
         return tuple(sorted(tags)), warnings
 
     def _tag_scores(

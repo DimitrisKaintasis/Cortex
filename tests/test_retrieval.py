@@ -24,6 +24,35 @@ class StubEmbedder:
 
 
 class RetrievalServiceTests(unittest.TestCase):
+    def test_relative_time_uses_query_reference_time(self) -> None:
+        repository = InMemoryRepository()
+        ingestion = IngestService(repository)
+        start = datetime(2026, 8, 1, tzinfo=UTC)
+        old = ingestion.ingest_text(
+            namespace="project-a",
+            source="old",
+            text="Deployment status was pending.",
+            occurred_at=start + timedelta(days=2),
+        )
+        recent = ingestion.ingest_text(
+            namespace="project-a",
+            source="recent",
+            text="Deployment status was completed.",
+            occurred_at=start + timedelta(days=8),
+        )
+
+        retrieved = RetrievalService(repository).retrieve(
+            QueryPlan(
+                query="What was the deployment status five days ago?",
+                namespace="project-a",
+                reference_time=start + timedelta(days=10),
+            )
+        )
+
+        self.assertEqual(retrieved.resolved_temporal_mode, TemporalMode.AS_OF)
+        self.assertIn(old.atom_ids[0], {item.atom_id for item in retrieved.items})
+        self.assertNotIn(recent.atom_ids[0], {item.atom_id for item in retrieved.items})
+
     def test_retrieves_untimed_atom_by_explicit_tag_with_explanation(self) -> None:
         repository = InMemoryRepository()
         result = IngestService(repository).ingest_text(

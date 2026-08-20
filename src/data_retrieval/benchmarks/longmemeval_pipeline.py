@@ -21,6 +21,7 @@ from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
 from data_retrieval.storage.repository import Repository
+from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.proposals import TagProposer
 from data_retrieval.temporal.bridge import TemporalBridge
 
@@ -208,7 +209,15 @@ class LongMemEvalPipelineRunner:
         enrich_embeddings: bool,
     ) -> None:
         tag_service = (
-            TagEnrichmentService(self.repository, self.tag_proposer)
+            TagEnrichmentService(
+                self.repository,
+                self.tag_proposer,
+                canonicalizer=(
+                    SemanticTagCanonicalizer(self.embedder)
+                    if self.embedder is not None
+                    else None
+                ),
+            )
             if enrich_tags and self.tag_proposer is not None
             else None
         )
@@ -256,6 +265,7 @@ class LongMemEvalPipelineRunner:
                 top_k=top_k,
                 timeline_id=case.question_id,
                 temporal_mode=TemporalMode.AUTO,
+                reference_time=case.question_date,
             )
         )
         latency_ms = (time.perf_counter() - started) * 1_000

@@ -19,6 +19,10 @@ dependencies = [
 data-retrieval = "data_retrieval.cli:main"
 
 [project.optional-dependencies]
+mem0 = [
+    "mem0ai>=1,<4",
+    "ollama>=0.6,<1",
+]
 dev = [
     "pytest>=8,<10",
     "ruff>=0.9,<1",

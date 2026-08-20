@@ -4,6 +4,7 @@ from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.storage.memory import InMemoryRepository
+from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.proposals import TagProposal
 
 
@@ -40,6 +41,21 @@ class FailingTagProposer:
         raise RuntimeError("provider unavailable")
 
 
+class StubTagEmbedder:
+    provider = "stub"
+    model = "tag-vectors"
+
+    def embed_documents(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+        vectors = {
+            "database": (1.0, 0.0),
+            "postgres storage": (0.99, 0.05),
+        }
+        return tuple(vectors.get(text, (0.0, 1.0)) for text in texts)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return self.embed_documents((text,))[0]
+
+
 class StubBatchTagProposer(StubTagProposer):
     def __init__(self, responses: tuple[tuple[TagProposal, ...], ...]) -> None:
         super().__init__(responses)
@@ -57,6 +73,36 @@ class StubBatchTagProposer(StubTagProposer):
 
 
 class AiIngestionTests(unittest.TestCase):
+    def test_semantic_catalog_match_reuses_canonical_tag_and_records_alias(self) -> None:
+        repository = InMemoryRepository()
+        ingestion = IngestService(repository)
+        ingestion.ingest_text(
+            namespace="project-a",
+            source="catalog",
+            text="Database catalog entry.",
+            explicit_tags=("database",),
+        )
+        target = ingestion.ingest_text(
+            namespace="project-a",
+            source="target",
+            text="PostgreSQL persists the atoms.",
+        )
+        proposer = StubTagProposer(
+            responses=((TagProposal("Postgres Storage", 0.95),),)
+        )
+
+        TagEnrichmentService(
+            repository,
+            proposer,
+            canonicalizer=SemanticTagCanonicalizer(StubTagEmbedder()),
+        ).enrich_document(target.document_id)
+
+        tags = repository.list_tags("project-a")
+        self.assertEqual([tag.canonical_text for tag in tags], ["database"])
+        self.assertEqual(tags[0].aliases, ("postgres storage",))
+        edge = repository.atom_tags_for(target.atom_ids[0])[0]
+        self.assertIn("semantic-catalog:stub:tag-vectors", edge.evidence_sources)
+
     def test_batch_provider_classifies_one_document_in_one_call(self) -> None:
         repository = InMemoryRepository()
         proposer = StubBatchTagProposer(

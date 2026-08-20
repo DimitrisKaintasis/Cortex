@@ -9,6 +9,7 @@ from data_retrieval.domain.models import (
     AtomKind,
     AtomLink,
     AtomTag,
+    CalibrationSignal,
     Document,
     IngestionBundle,
     Tag,
@@ -22,15 +23,37 @@ class Repository(Protocol):
 
     def get_document(self, document_id: str) -> Document | None: ...
 
+    def list_namespaces(self, prefix: str | None = None) -> tuple[str, ...]: ...
+
     def get_documents(self, document_ids: tuple[str, ...]) -> tuple[Document, ...]: ...
 
+    def find_documents_by_content_hash(
+        self, *, namespace: str, content_hash: str
+    ) -> tuple[Document, ...]: ...
+
+    def iter_document_ids(
+        self, *, namespace: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]: ...
+
+    def iter_document_ids_chronological(
+        self, *, namespace: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]: ...
+
     def get_atoms_for_document(self, document_id: str) -> tuple[Atom, ...]: ...
+
+    def iter_atom_ids_for_document(
+        self, *, document_id: str, batch_size: int = 1_000
+    ) -> Iterator[tuple[str, ...]]: ...
 
     def get_document_atom_count(self, document_id: str) -> int: ...
 
     def get_atom(self, atom_id: str) -> Atom | None: ...
 
     def get_atoms(self, atom_ids: tuple[str, ...]) -> tuple[Atom, ...]: ...
+
+    def find_atoms_by_content_hash(
+        self, *, namespace: str, content_hash: str
+    ) -> tuple[Atom, ...]: ...
 
     def get_atom_links(self, atom_id: str) -> tuple[AtomLink, ...]: ...
 
@@ -127,6 +150,17 @@ class Repository(Protocol):
     def record_retrieval_event(self, event: dict[str, object]) -> None: ...
 
     def get_retrieval_event(self, retrieval_id: str) -> dict[str, object] | None: ...
+
+    def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]: ...
+
+    def apply_calibration_updates(
+        self,
+        *,
+        signals: tuple[CalibrationSignal, ...],
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None: ...
 
     def apply_learning_updates(
         self,

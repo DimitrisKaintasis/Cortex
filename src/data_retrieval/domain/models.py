@@ -28,6 +28,8 @@ class TagOrigin(StrEnum):
 class AtomKind(StrEnum):
     SOURCE = "source"
     TEMPORAL_SUMMARY = "temporal_summary"
+    INTERACTION = "interaction"
+    UNCERTAINTY = "uncertainty"
 
 
 class AtomLinkRelation(StrEnum):
@@ -35,6 +37,17 @@ class AtomLinkRelation(StrEnum):
     DERIVED_FROM = "derived_from"
     SUPERSEDES = "supersedes"
     CO_USED = "co_used"
+    CONFLICTS_WITH = "conflicts_with"
+    ADJACENT_TO = "adjacent_to"
+
+
+class CalibrationTarget(StrEnum):
+    """Native object whose prior or relationship is informed by a signal."""
+
+    ATOM = "atom"
+    ATOM_TAG = "atom_tag"
+    TAG_RELATION = "tag_relation"
+    ATOM_LINK = "atom_link"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +145,55 @@ class TagRelation:
             raise ValueError("weight_raw must be non-negative")
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("confidence must be between 0 and 1")
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationSignal:
+    """Immutable, replay-safe evidence used to initialize or adjust graph weights."""
+
+    signal_id: str
+    namespace: str
+    target_type: CalibrationTarget
+    target_id: str
+    signal_type: str
+    value: float
+    confidence: float
+    multiplier: float
+    provider: str
+    profile_version: str
+    related_id: str | None = None
+    relation_type: str | None = None
+    source_reference: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("signal_id", self.signal_id),
+            ("namespace", self.namespace),
+            ("target_id", self.target_id),
+            ("signal_type", self.signal_type),
+            ("provider", self.provider),
+            ("profile_version", self.profile_version),
+        ):
+            if not value.strip():
+                raise ValueError(f"{name} cannot be empty")
+        if not 0.0 <= self.value <= 1.0:
+            raise ValueError("value must be between 0 and 1")
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("confidence must be between 0 and 1")
+        if self.multiplier <= 0.0:
+            raise ValueError("multiplier must be positive")
+        if self.target_type in {
+            CalibrationTarget.ATOM_TAG,
+            CalibrationTarget.TAG_RELATION,
+            CalibrationTarget.ATOM_LINK,
+        }:
+            if not self.related_id:
+                raise ValueError("related_id is required for an edge calibration signal")
+        if self.target_type in {CalibrationTarget.TAG_RELATION, CalibrationTarget.ATOM_LINK}:
+            if not self.relation_type:
+                raise ValueError("relation_type is required for a relationship signal")
 
 
 @dataclass(frozen=True, slots=True)

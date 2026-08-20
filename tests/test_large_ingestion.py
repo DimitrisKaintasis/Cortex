@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from data_retrieval.domain.models import IngestionBundle
+from data_retrieval.domain.models import AtomLinkRelation, IngestionBundle
 from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.large_ingestion import LargeFileIngestService
@@ -72,6 +72,16 @@ class LargeFileIngestionTests(unittest.TestCase):
         self.assertEqual(result.atom_count, len(expected.atom_ids))
         self.assertTrue(repository.batch_sizes)
         self.assertTrue(all(size <= 3 for size in repository.batch_sizes))
+        adjacent = repository.list_atom_links(
+            namespace="large", relation=AtomLinkRelation.ADJACENT_TO
+        )
+        adjacent_pairs = {(link.from_atom_id, link.to_atom_id) for link in adjacent}
+        self.assertTrue(
+            all(
+                (stored[index].atom_id, stored[index + 1].atom_id) in adjacent_pairs
+                for index in range(len(stored) - 1)
+            )
+        )
 
     def test_repeated_large_ingestion_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

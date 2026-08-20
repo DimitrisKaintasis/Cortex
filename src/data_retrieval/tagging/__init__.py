@@ -12,3 +12,9 @@ __all__ = [
     "deduplicate_tags",
     "normalize_tag",
 ]
+from data_retrieval.tagging.canonicalization import (
+    CanonicalTagMatch,
+    SemanticTagCanonicalizer,
+)
+
+__all__ = ["CanonicalTagMatch", "SemanticTagCanonicalizer"]

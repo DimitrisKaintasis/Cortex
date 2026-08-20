@@ -33,6 +33,8 @@ The repository currently provides a dependency-free domain slice for:
 - explainable tag, lexical, semantic, learned-relationship, and temporal retrieval;
 - content-hash-aware embedding enrichment through a replaceable Ollama model;
 - recorded retrieval and feedback events with bounded, atomic learning updates;
+- replay-safe teacher calibration and a first-class Mem0 bootstrap/training bridge;
+- interaction atoms with selected-evidence lineage and attributable outcome learning;
 - a versioned evaluation corpus for tag, semantic, and temporal behavior.
 
 ## Development
@@ -240,6 +242,62 @@ Feedback never rewrites source atoms or factual `SUPERSEDES`, `SUMMARIZES`, and
 `CO_USED` atom links, and tag co-occurrence relations. Summary selections pass only
 partial credit to their source lineage.
 
+Import a Mem0 JSON/JSONL export. Records become native atoms; the embedding model enables
+the accepted 0.92 semantic near-duplicate check, and the optional tag model enriches records
+that do not already contain tags:
+
+```powershell
+python -m data_retrieval import-mem0 .\mem0-export.json `
+  --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `
+  --namespace personal `
+  --embedding-model $env:OLLAMA_EMBEDDING_MODEL `
+  --tag-model $env:OLLAMA_MODEL
+```
+
+Existing native atoms can also be distilled through self-hosted Mem0. The job reads one
+bounded batch at a time, sends only conversation content plus internal lineage identifiers,
+imports the distilled memories, creates `DERIVED_FROM` links to every source atom, and writes
+stable completion signals. A rerun resumes completed batches without calling Mem0 or changing
+weights again:
+
+```powershell
+python -m pip install -e ".[mem0]"
+
+python -m data_retrieval bootstrap-mem0 `
+  --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `
+  --namespace-prefix "longmemeval:" `
+  --mem0-config .\config\mem0.local.json `
+  --max-documents 10 `
+  --embedding-model $env:OLLAMA_EMBEDDING_MODEL
+```
+
+Use a small cap first. The Mem0 configuration chooses its LLM, embedder, and temporary working
+store; provider credentials belong in environment variables, not the JSON file. In the current
+laptop/Mac arrangement, this command and both canonical stores run on the laptop while the Mem0
+LLM/embedder URLs point through the SSH tunnel to Mac Ollama. Thus the Mac performs inference but
+does not become the authoritative data store. See
+[the Mem0 bootstrap runbook](docs/MEM0-BOOTSTRAP.md).
+
+Backfill data ingested before calibration was enabled. This does not regenerate embeddings:
+
+```powershell
+python -m data_retrieval backfill-calibration `
+  --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `
+  --namespace-prefix longmemeval: `
+  --max-documents 100
+```
+
+Record a turn and an attributable successful outcome:
+
+```powershell
+python -m data_retrieval record-interaction `
+  --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `
+  --namespace <namespace> `
+  --conversation-id <conversation> --turn-id <turn> `
+  --user-text "..." --assistant-text "..." `
+  --retrieval-id <retrieval-id> --used-atom <atom-id> --outcome positive
+```
+
 Run the checked-in regression corpus with or without embeddings:
 
 ```powershell
@@ -299,6 +357,8 @@ The first real Mac model comparison and current default are recorded in the
 [tag proposal model benchmark](docs/MODEL-BENCHMARK.md).
 The current semantic model choice and its reproducibility caveats are recorded in the
 [embedding model benchmark](docs/EMBEDDING-BENCHMARK.md).
+The replay-safe Mem0 calibration boundary and reverse bridge are recorded in
+[ADR-0008](docs/decisions/0008-replayable-calibration-and-mem0.md).
 
 The first live test of the complete ingestion, Tags, Temporal History, hybrid retrieval,
 and explicit-feedback loop passed all eight project-history scenarios. See the

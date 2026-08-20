@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from data_retrieval.calibration.teachers import TeacherCalibrationService
 from data_retrieval.core.identifiers import stable_id
 from data_retrieval.domain.models import (
     AtomTag,
@@ -13,6 +14,7 @@ from data_retrieval.domain.models import (
     utc_now,
 )
 from data_retrieval.storage.repository import Repository
+from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.normalization import normalize_tag
 from data_retrieval.tagging.proposals import BatchTagProposer, TagProposer
 
@@ -36,12 +38,14 @@ class TagEnrichmentService:
         proposer: TagProposer,
         *,
         catalog_hint_limit: int = 500,
+        canonicalizer: SemanticTagCanonicalizer | None = None,
     ) -> None:
         if catalog_hint_limit <= 0:
             raise ValueError("catalog_hint_limit must be positive")
         self.repository = repository
         self.proposer = proposer
         self.catalog_hint_limit = catalog_hint_limit
+        self.canonicalizer = canonicalizer
 
     def enrich_document(self, document_id: str) -> TagEnrichmentResult:
         document = self.repository.get_document(document_id)
@@ -52,6 +56,7 @@ class TagEnrichmentService:
         markers = dict(document.metadata.get(MARKER_ROOT, {}))
         tag_markers = dict(markers.get("tag_proposals", {}))
         if marker_key in tag_markers:
+            TeacherCalibrationService(self.repository).calibrate_document(document_id)
             return TagEnrichmentResult(
                 document_id=document_id,
                 tag_ids=tuple(tag_markers[marker_key].get("tag_ids", ())),
@@ -91,6 +96,20 @@ class TagEnrichmentService:
                 for atom in atoms
             )
 
+        semantic_matches = (
+            self.canonicalizer.resolve(
+                candidates=tuple(
+                    proposal.text
+                    for proposals in proposed_by_atom
+                    for proposal in proposals
+                    if normalize_tag(proposal.text) not in catalog
+                ),
+                catalog=tuple(catalog.values()),
+            )
+            if self.canonicalizer is not None
+            else {}
+        )
+
         for atom, proposals in zip(atoms, proposed_by_atom, strict=True):
             best: dict[str, tuple[str, float]] = {}
             for proposal in proposals:
@@ -112,6 +131,13 @@ class TagEnrichmentService:
             )
 
             for canonical, (display, confidence) in best.items():
+                semantic_match = semantic_matches.get(canonical)
+                semantic_alias: str | None = None
+                if semantic_match is not None:
+                    semantic_alias = canonical
+                    canonical = semantic_match.tag.canonical_text
+                    display = semantic_match.tag.display_text
+                    confidence = min(confidence, semantic_match.similarity)
                 tag = tags_by_canonical.get(canonical) or catalog.get(canonical)
                 if tag is None:
                     tag = Tag(
@@ -122,11 +148,15 @@ class TagEnrichmentService:
                         level=(TagLevel.SPECIFIC if " " in canonical else TagLevel.BROAD),
                         state=TagState.PROPOSED_NEW,
                     )
+                elif semantic_alias and semantic_alias not in tag.aliases:
+                    tag = replace(tag, aliases=tuple(sorted((*tag.aliases, semantic_alias))))
                 tags_by_canonical[canonical] = tag
                 key = (atom.atom_id, tag.tag_id)
                 existing = all_edges.get(key)
                 evidence = set(existing.evidence_sources if existing else ())
                 evidence.add(self.proposer.evidence_source)
+                if semantic_alias and self.canonicalizer is not None:
+                    evidence.add(self.canonicalizer.evidence_source)
                 all_edges[key] = AtomTag(
                     atom_id=atom.atom_id,
                     tag_id=tag.tag_id,
@@ -167,6 +197,7 @@ class TagEnrichmentService:
                 atom_tags=tuple(all_edges.values()),
             )
         )
+        TeacherCalibrationService(self.repository).calibrate_document(document_id)
         return TagEnrichmentResult(
             document_id=document_id,
             tag_ids=tag_ids,

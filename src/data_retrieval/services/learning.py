@@ -22,6 +22,7 @@ class FeedbackResult:
     atom_tag_updates: int
     atom_link_updates: int
     tag_relation_updates: int
+    learning_multiplier: float
 
 
 class LearningService:
@@ -58,6 +59,7 @@ class LearningService:
         namespace = str(event["namespace"])
         sign = 1.0 if request.outcome == "positive" else -1.0
         credit = self._source_credit(namespace, selected_ids)
+        learning_multiplier = self._learning_multiplier(request, tuple(credit))
         query_tags = {str(value) for value in event.get("query_tags", [])}
 
         edges_by_atom = {
@@ -85,7 +87,8 @@ class LearningService:
                     replace(
                         edge,
                         weight_raw=self._bounded(
-                            edge.weight_raw + sign * self.atom_tag_step * factor
+                            edge.weight_raw
+                            + sign * self.atom_tag_step * factor * learning_multiplier
                         ),
                         evidence_sources=self._with_evidence(
                             edge.evidence_sources, request.feedback_id
@@ -99,6 +102,7 @@ class LearningService:
             atom_ids=tuple(sorted(credit))[: self.maximum_relationship_nodes],
             sign=sign,
             feedback_id=request.feedback_id,
+            multiplier=learning_multiplier,
         )
         query_tag_ids = {
             tag.tag_id
@@ -115,6 +119,7 @@ class LearningService:
             tag_ids=tuple(relationship_tag_ids[: self.maximum_relationship_nodes]),
             sign=sign,
             feedback_id=request.feedback_id,
+            multiplier=learning_multiplier,
         )
         now = utc_now()
         feedback_event: dict[str, object] = {
@@ -125,6 +130,8 @@ class LearningService:
             "reason": request.reason,
             "selected_atom_ids": sorted(selected_ids),
             "credited_atom_ids": sorted(credit),
+            "used_mem0": request.used_mem0,
+            "learning_multiplier": learning_multiplier,
             "created_at": now.isoformat(),
         }
         self.repository.apply_learning_updates(
@@ -139,6 +146,7 @@ class LearningService:
             atom_tag_updates=len(atom_tag_updates),
             atom_link_updates=len(atom_link_updates),
             tag_relation_updates=len(tag_relation_updates),
+            learning_multiplier=learning_multiplier,
         )
 
     def _source_credit(self, namespace: str, selected_ids: set[str]) -> dict[str, float]:
@@ -181,6 +189,7 @@ class LearningService:
         atom_ids: tuple[str, ...],
         sign: float,
         feedback_id: str,
+        multiplier: float,
     ) -> tuple[AtomLink, ...]:
         existing = {
             (link.from_atom_id, link.to_atom_id): link
@@ -200,7 +209,7 @@ class LearningService:
                         from_atom_id=key[0],
                         to_atom_id=key[1],
                         relation=AtomLinkRelation.CO_USED,
-                        weight_raw=self.relationship_step,
+                        weight_raw=self.relationship_step * multiplier,
                         evidence_sources=(feedback_id,),
                         metadata={"learned": True},
                     )
@@ -209,7 +218,9 @@ class LearningService:
             updates.append(
                 replace(
                     edge,
-                    weight_raw=self._bounded(edge.weight_raw + sign * self.relationship_step),
+                    weight_raw=self._bounded(
+                        edge.weight_raw + sign * self.relationship_step * multiplier
+                    ),
                     evidence_sources=self._with_evidence(edge.evidence_sources, feedback_id),
                     updated_at=utc_now(),
                 )
@@ -223,6 +234,7 @@ class LearningService:
         tag_ids: tuple[str, ...],
         sign: float,
         feedback_id: str,
+        multiplier: float,
     ) -> tuple[TagRelation, ...]:
         existing = {
             (edge.source_tag_id, edge.target_tag_id): edge
@@ -242,7 +254,7 @@ class LearningService:
                         source_tag_id=key[0],
                         target_tag_id=key[1],
                         relation_type="co_occurs",
-                        weight_raw=self.relationship_step,
+                        weight_raw=self.relationship_step * multiplier,
                         confidence=1.0,
                         evidence_sources=(feedback_id,),
                     )
@@ -251,7 +263,9 @@ class LearningService:
             updates.append(
                 replace(
                     edge,
-                    weight_raw=self._bounded(edge.weight_raw + sign * self.relationship_step),
+                    weight_raw=self._bounded(
+                        edge.weight_raw + sign * self.relationship_step * multiplier
+                    ),
                     evidence_sources=self._with_evidence(edge.evidence_sources, feedback_id),
                     updated_at=utc_now(),
                 )
@@ -260,6 +274,16 @@ class LearningService:
 
     def _bounded(self, value: float) -> float:
         return min(self.maximum_weight, max(0.0, value))
+
+    def _learning_multiplier(
+        self, request: FeedbackRequest, credited_atom_ids: tuple[str, ...]
+    ) -> float:
+        if request.used_mem0:
+            return 2.0
+        for atom in self.repository.get_atoms(credited_atom_ids):
+            if atom.metadata.get("source_system") == "mem0":
+                return 2.0
+        return 1.0
 
     @staticmethod
     def _with_evidence(existing: tuple[str, ...], feedback_id: str) -> tuple[str, ...]:

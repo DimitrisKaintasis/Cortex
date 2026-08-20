@@ -28,6 +28,7 @@ class QueryPlan:
     as_of: datetime | None = None
     range_start: datetime | None = None
     range_end: datetime | None = None
+    reference_time: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.query.strip():
@@ -40,6 +41,7 @@ class QueryPlan:
             ("as_of", self.as_of),
             ("range_start", self.range_start),
             ("range_end", self.range_end),
+            ("reference_time", self.reference_time),
         ):
             if value is not None and (value.tzinfo is None or value.utcoffset() is None):
                 raise ValueError(f"{name} must include a timezone")
@@ -125,6 +127,7 @@ class FeedbackRequest:
     selected_atom_ids: tuple[str, ...]
     outcome: str
     reason: str = ""
+    used_mem0: bool = False
 
     def __post_init__(self) -> None:
         if not self.feedback_id.strip() or not self.retrieval_id.strip():

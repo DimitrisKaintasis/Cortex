@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from data_retrieval.calibration import TeacherCalibrationService
 from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import (
     Atom,
@@ -27,6 +28,7 @@ class LargeIngestResult:
     atom_count: int
     tag_ids: tuple[str, ...]
     idempotent: bool
+    calibration_signals: int = 0
 
 
 class LargeFileIngestService:
@@ -72,11 +74,15 @@ class LargeFileIngestService:
         document_id = stable_id("doc", namespace, source, document_hash)
         existing = self.repository.get_document(document_id)
         if existing is not None:
+            calibration = TeacherCalibrationService(
+                self.repository
+            ).calibrate_document_batched(document_id, batch_size=max(3, self.batch_size))
             return LargeIngestResult(
                 document_id=document_id,
                 atom_count=self.repository.get_document_atom_count(document_id),
                 tag_ids=(),
                 idempotent=True,
+                calibration_signals=calibration.signal_count,
             )
 
         source_metadata = dict(metadata or {})
@@ -114,11 +120,15 @@ class LargeFileIngestService:
             tags.append(tag)
 
         if not self.repository.begin_staged_ingestion(document=document, tags=tuple(tags)):
+            calibration = TeacherCalibrationService(
+                self.repository
+            ).calibrate_document_batched(document_id, batch_size=max(3, self.batch_size))
             return LargeIngestResult(
                 document_id=document_id,
                 atom_count=self.repository.get_document_atom_count(document_id),
                 tag_ids=(),
                 idempotent=True,
+                calibration_signals=calibration.signal_count,
             )
 
         atom_batch: list[Atom] = []
@@ -160,11 +170,15 @@ class LargeFileIngestService:
         self.repository.complete_staged_ingestion(
             document_id=document_id, atom_count=atom_count
         )
+        calibration = TeacherCalibrationService(
+            self.repository
+        ).calibrate_document_batched(document_id, batch_size=max(3, self.batch_size))
         return LargeIngestResult(
             document_id=document_id,
             atom_count=atom_count,
             tag_ids=tuple(tag.tag_id for tag in tags),
             idempotent=False,
+            calibration_signals=calibration.signal_count,
         )
 
     def _flush(self, atoms: list[Atom], edges: list[AtomTag]) -> None:
