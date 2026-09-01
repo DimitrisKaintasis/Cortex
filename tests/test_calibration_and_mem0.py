@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from data_retrieval.calibration import TeacherCalibrationService
-from data_retrieval.domain.models import AtomLinkRelation
+from data_retrieval.domain.models import AtomLinkRelation, AtomRole
 from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.mem0 import (
     Mem0BootstrapService,
@@ -323,6 +323,7 @@ class CalibrationAndMem0Tests(unittest.TestCase):
             ),
         )
         atom_id = imported.record_atom_ids["memory-1"][0]
+        self.assertEqual(repository.get_atom(atom_id).role, AtomRole.DERIVED)
         retrieval = RetrievalService(repository).retrieve(
             QueryPlan(query="docker", namespace="project-a", query_tags=("docker",))
         )

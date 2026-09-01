@@ -1,5 +1,9 @@
 # Data Retrieval
 
+The authoritative component boundaries, processor contracts, and isolated capability-testing
+order are documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Mem0 and Temporal
+History are replaceable processors; Data Retrieval owns canonical evidence and final retrieval.
+
 Data Retrieval is a clean successor to the original `Tags-Project`. It is a
 tag-centric retrieval engine that keeps source order, tag provenance, and
 retrieval scoring explainable.

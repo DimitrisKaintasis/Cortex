@@ -60,6 +60,22 @@ class LongMemEvalTests(unittest.TestCase):
         self.assertEqual(tuple(case.question_id for case in result.cases), ("question-2",))
         self.assertEqual(repository.list_namespaces(), (result.cases[0].namespace,))
 
+    def test_ingest_supports_global_namespace(self) -> None:
+        first = _case()
+        second = _case()
+        second["question_id"] = "question-2"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "global_ns.json"
+            path.write_text(json.dumps([first, second]), encoding="utf-8")
+            repository = InMemoryRepository()
+
+            result = LongMemEvalIngestService(repository).ingest_path(
+                path=path, use_global_namespace=True
+            )
+
+        self.assertEqual(len(repository.list_namespaces()), 1)
+        self.assertEqual(result.cases[0].namespace, result.cases[1].namespace)
+
     def test_pipeline_report_scores_retrieved_evidence(self) -> None:
         case = _case()
         case["question"] = "Where did I move to Athens?"

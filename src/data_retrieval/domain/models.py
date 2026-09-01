@@ -26,10 +26,32 @@ class TagOrigin(StrEnum):
 
 
 class AtomKind(StrEnum):
+    """Legacy processing kind retained for storage and API compatibility."""
+
     SOURCE = "source"
     TEMPORAL_SUMMARY = "temporal_summary"
     INTERACTION = "interaction"
     UNCERTAINTY = "uncertainty"
+
+
+class AtomRole(StrEnum):
+    """Architectural role an atom plays in the evidence graph."""
+
+    SOURCE = "source"
+    DERIVED = "derived"
+    INTERACTION = "interaction"
+    UNCERTAINTY = "uncertainty"
+
+
+class PayloadModality(StrEnum):
+    """Form of the payload; independent from its architectural role."""
+
+    TEXT = "text"
+    CODE = "code"
+    EVENT = "event"
+    IMAGE = "image"
+    AUDIO = "audio"
+    BINARY_REFERENCE = "binary_reference"
 
 
 class AtomLinkRelation(StrEnum):
@@ -71,9 +93,22 @@ class Atom:
     content: str
     content_hash: str
     kind: AtomKind = AtomKind.SOURCE
+    role: AtomRole | None = None
+    modality: PayloadModality = PayloadModality.TEXT
     occurred_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.role is not None:
+            return
+        inferred_roles = {
+            AtomKind.SOURCE: AtomRole.SOURCE,
+            AtomKind.TEMPORAL_SUMMARY: AtomRole.DERIVED,
+            AtomKind.INTERACTION: AtomRole.INTERACTION,
+            AtomKind.UNCERTAINTY: AtomRole.UNCERTAINTY,
+        }
+        object.__setattr__(self, "role", inferred_roles[self.kind])
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,7 +3,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from data_retrieval.domain.models import AtomKind, AtomLinkRelation
+from data_retrieval.domain.models import AtomKind, AtomLinkRelation, AtomRole
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.storage.memory import InMemoryRepository
 from data_retrieval.temporal import TemporalBridge
@@ -53,6 +53,7 @@ class TemporalBridgeTests(unittest.TestCase):
             self.assertTrue(
                 all(atom.kind is AtomKind.TEMPORAL_SUMMARY for atom in projection.bundle.atoms)
             )
+            self.assertTrue(all(atom.role is AtomRole.DERIVED for atom in projection.bundle.atoms))
 
             six_hour = next(
                 atom

@@ -23,6 +23,7 @@ from data_retrieval.domain.models import (
     AtomKind,
     AtomLink,
     AtomLinkRelation,
+    AtomRole,
     Document,
     IngestionBundle,
 )
@@ -277,6 +278,7 @@ class TemporalBridge:
                 content=summary.summary_text,
                 content_hash=content_hash(summary.summary_text),
                 kind=AtomKind.TEMPORAL_SUMMARY,
+                role=AtomRole.DERIVED,
                 occurred_at=summary.utc_end,
                 created_at=summary.generated_at,
                 metadata={

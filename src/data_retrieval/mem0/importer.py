@@ -11,8 +11,10 @@ from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import (
     AtomLink,
     AtomLinkRelation,
+    AtomRole,
     CalibrationSignal,
     CalibrationTarget,
+    PayloadModality,
 )
 from data_retrieval.retrieval.embedding import Embedder
 from data_retrieval.retrieval.models import AtomEmbedding
@@ -128,6 +130,8 @@ class Mem0ImportService:
                         text=record.content,
                         explicit_tags=record.tags,
                         occurred_at=record.occurred_at,
+                        atom_role=AtomRole.DERIVED,
+                        payload_modality=PayloadModality.TEXT,
                         metadata={
                             **record.metadata,
                             "source_system": "mem0",

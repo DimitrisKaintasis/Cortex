@@ -15,10 +15,12 @@ from data_retrieval.domain.models import (
     AtomKind,
     AtomLink,
     AtomLinkRelation,
+    AtomRole,
     AtomTag,
     CalibrationSignal,
     Document,
     IngestionBundle,
+    PayloadModality,
     Tag,
     TagLevel,
     TagOrigin,
@@ -64,6 +66,8 @@ class SQLiteRepository:
                     content TEXT NOT NULL,
                     content_hash TEXT NOT NULL,
                     kind TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'source',
+                    modality TEXT NOT NULL DEFAULT 'text',
                     occurred_at TEXT,
                     created_at TEXT NOT NULL,
                     metadata_json TEXT NOT NULL,
@@ -185,6 +189,33 @@ class SQLiteRepository:
             self._ensure_column("atom_links", "confidence", "REAL NOT NULL DEFAULT 1.0")
             self._ensure_column("atom_links", "evidence_sources_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column("atom_links", "updated_at", "TEXT")
+            self._ensure_column("atoms", "role", "TEXT NOT NULL DEFAULT 'source'")
+            self._ensure_column("atoms", "modality", "TEXT NOT NULL DEFAULT 'text'")
+            self._connection.execute(
+                """
+                UPDATE atoms
+                SET role = CASE
+                    WHEN json_extract(metadata_json, '$.source_system') = 'mem0'
+                        THEN 'derived'
+                    WHEN kind = 'temporal_summary' THEN 'derived'
+                    WHEN kind = 'interaction' THEN 'interaction'
+                    WHEN kind = 'uncertainty' THEN 'uncertainty'
+                    ELSE 'source'
+                END
+                WHERE role IS NULL
+                   OR (
+                        role = 'source'
+                        AND (
+                            kind <> 'source'
+                            OR json_extract(metadata_json, '$.source_system') = 'mem0'
+                        )
+                   )
+                """
+            )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_atoms_namespace_role "
+                "ON atoms(namespace, role)"
+            )
             self._connection.execute(
                 "UPDATE atom_tags SET updated_at = created_at WHERE updated_at IS NULL"
             )
@@ -570,12 +601,16 @@ class SQLiteRepository:
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> tuple[Atom, ...]:
         clauses = ["namespace = ?"]
         parameters: list[Any] = [namespace]
         if kind is not None:
             clauses.append("kind = ?")
             parameters.append(kind.value)
+        if role is not None:
+            clauses.append("role = ?")
+            parameters.append(role.value)
         if occurred_from is not None:
             clauses.append("julianday(occurred_at) >= julianday(?)")
             parameters.append(occurred_from.isoformat())
@@ -607,6 +642,7 @@ class SQLiteRepository:
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> Iterator[tuple[Atom, ...]]:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -615,6 +651,9 @@ class SQLiteRepository:
         if kind is not None:
             clauses.append("kind = ?")
             parameters.append(kind.value)
+        if role is not None:
+            clauses.append("role = ?")
+            parameters.append(role.value)
         if occurred_from is not None:
             clauses.append("julianday(occurred_at) >= julianday(?)")
             parameters.append(occurred_from.isoformat())
@@ -673,20 +712,37 @@ class SQLiteRepository:
         query_terms = set(TOKEN_PATTERN.findall(query.casefold()))
         if not query_terms or limit <= 0:
             return ()
+        
+        # Fast SQL LIKE candidate pre-filtering in C engine
+        like_clauses = []
+        params: list[Any] = [namespace]
+        for term in query_terms:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like_clauses.append("content LIKE ? ESCAPE '\\'")
+            params.append(f"%{escaped}%")
+
+        query_sql = f"""
+            SELECT atom_id, content FROM atoms
+            WHERE namespace = ? AND ({" OR ".join(like_clauses)})
+        """
+        with self._lock:
+            rows = self._connection.execute(query_sql, params).fetchall()
+
         hits: list[SearchHit] = []
-        for batch in self.iter_atoms(namespace=namespace):
-            for atom in batch:
-                matches = sorted(
-                    query_terms.intersection(TOKEN_PATTERN.findall(atom.content.casefold()))
-                )
-                if matches:
-                    hits.append(
-                        SearchHit(
-                            atom.atom_id,
-                            len(matches) / len(query_terms),
-                            tuple(f"lexical={term}" for term in matches[:5]),
-                        )
+        for row in rows:
+            content_lower = str(row["content"]).casefold()
+            matches = sorted(
+                query_terms.intersection(TOKEN_PATTERN.findall(content_lower))
+            )
+            if matches:
+                hits.append(
+                    SearchHit(
+                        str(row["atom_id"]),
+                        len(matches) / len(query_terms),
+                        tuple(f"lexical={term}" for term in matches[:5]),
                     )
+                )
+
         hits.sort(key=lambda hit: (hit.score, hit.atom_id), reverse=True)
         return tuple(hits[:limit])
 
@@ -1008,8 +1064,9 @@ class SQLiteRepository:
             """
             INSERT INTO atoms (
                 atom_id, document_id, namespace, position, char_start, char_end,
-                content, content_hash, kind, occurred_at, created_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                content, content_hash, kind, role, modality, occurred_at, created_at,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(atom_id) DO UPDATE SET
                 document_id = excluded.document_id,
                 namespace = excluded.namespace,
@@ -1019,6 +1076,8 @@ class SQLiteRepository:
                 content = excluded.content,
                 content_hash = excluded.content_hash,
                 kind = excluded.kind,
+                role = excluded.role,
+                modality = excluded.modality,
                 occurred_at = excluded.occurred_at,
                 metadata_json = excluded.metadata_json
             """,
@@ -1033,6 +1092,8 @@ class SQLiteRepository:
                     atom.content,
                     atom.content_hash,
                     atom.kind,
+                    atom.role if atom.role is not None else AtomRole.SOURCE,
+                    atom.modality,
                     atom.occurred_at.isoformat() if atom.occurred_at else None,
                     atom.created_at.isoformat(),
                     self._json(atom.metadata),
@@ -1181,6 +1242,8 @@ class SQLiteRepository:
             content=row["content"],
             content_hash=row["content_hash"],
             kind=AtomKind(row["kind"]),
+            role=AtomRole(row["role"]),
+            modality=PayloadModality(row["modality"]),
             occurred_at=(
                 datetime.fromisoformat(row["occurred_at"]) if row["occurred_at"] else None
             ),

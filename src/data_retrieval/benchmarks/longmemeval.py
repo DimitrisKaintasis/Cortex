@@ -115,6 +115,7 @@ class LongMemEvalIngestService:
         timezone_name: str = "UTC",
         max_cases: int | None = None,
         question_ids: tuple[str, ...] | None = None,
+        use_global_namespace: bool = False,
     ) -> LongMemEvalImportResult:
         if not path.is_file():
             raise ValueError(f"input file does not exist: {path}")
@@ -154,6 +155,7 @@ class LongMemEvalIngestService:
                     namespace_prefix=namespace_prefix,
                     dataset_id=resolved_dataset_id,
                     dataset_hash=dataset_hash,
+                    use_global_namespace=use_global_namespace,
                 )
                 imported_cases.append(imported)
                 inserted_session_count += inserted
@@ -186,10 +188,14 @@ class LongMemEvalIngestService:
         namespace_prefix: str,
         dataset_id: str,
         dataset_hash: str,
+        use_global_namespace: bool = False,
     ) -> tuple[ImportedLongMemEvalCase, int, int]:
-        namespace = (
-            f"{namespace_prefix}:{dataset_id}:{dataset_hash[:12]}:{case.question_id}"
-        )
+        if use_global_namespace:
+            namespace = f"{namespace_prefix}:{dataset_id}:{dataset_hash[:12]}"
+        else:
+            namespace = (
+                f"{namespace_prefix}:{dataset_id}:{dataset_hash[:12]}:{case.question_id}"
+            )
         evidence_atom_ids: list[str] = []
         document_ids: list[str] = []
         inserted = 0

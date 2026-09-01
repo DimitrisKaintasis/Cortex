@@ -10,8 +10,10 @@ from data_retrieval.domain.models import (
     AtomKind,
     AtomLink,
     AtomLinkRelation,
+    AtomRole,
     Document,
     IngestionBundle,
+    PayloadModality,
 )
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.storage.sqlite import SQLiteRepository
@@ -88,9 +90,73 @@ class SQLiteRepositoryTests(unittest.TestCase):
             six_hour = reopened.get_atom(six_hour_id)
             links = reopened.get_atom_links(six_hour_id)
             self.assertEqual(six_hour.kind, AtomKind.TEMPORAL_SUMMARY)
+            self.assertEqual(six_hour.role, AtomRole.DERIVED)
+            self.assertEqual(six_hour.modality, PayloadModality.TEXT)
             self.assertEqual({link.to_atom_id for link in links}, set(source.atom_ids))
             self.assertTrue(all(link.relation is AtomLinkRelation.SUMMARIZES for link in links))
             reopened.close()
+
+    def test_migrates_legacy_atom_kind_to_role_and_modality(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                """
+                CREATE TABLE documents (
+                    document_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL
+                );
+                CREATE TABLE atoms (
+                    atom_id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL REFERENCES documents(document_id),
+                    namespace TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    char_start INTEGER NOT NULL,
+                    char_end INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    occurred_at TEXT,
+                    created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    UNIQUE(document_id, position)
+                );
+                INSERT INTO documents VALUES (
+                    'doc-legacy', 'project-a', 'legacy', 'doc-hash',
+                    '2026-08-19T12:00:00+00:00', '{}'
+                );
+                INSERT INTO atoms VALUES (
+                    'atom-legacy', 'doc-legacy', 'project-a', 0, 0, 7,
+                    'summary', 'atom-hash', 'temporal_summary', NULL,
+                    '2026-08-19T12:00:00+00:00', '{}'
+                );
+                INSERT INTO atoms VALUES (
+                    'atom-mem0', 'doc-legacy', 'project-a', 1, 8, 19,
+                    'memory fact', 'mem0-hash', 'source', NULL,
+                    '2026-08-19T12:00:00+00:00', '{"source_system":"mem0"}'
+                );
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            with SQLiteRepository(path) as repository:
+                atom = repository.get_atom("atom-legacy")
+                self.assertEqual(atom.role, AtomRole.DERIVED)
+                self.assertEqual(atom.modality, PayloadModality.TEXT)
+                self.assertEqual(
+                    {
+                        item.atom_id
+                        for item in repository.list_atoms(
+                            namespace="project-a", role=AtomRole.DERIVED
+                        )
+                    },
+                    {"atom-legacy", "atom-mem0"},
+                )
 
     def test_foreign_key_failure_rolls_back_the_complete_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

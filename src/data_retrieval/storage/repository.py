@@ -8,6 +8,7 @@ from data_retrieval.domain.models import (
     Atom,
     AtomKind,
     AtomLink,
+    AtomRole,
     AtomTag,
     CalibrationSignal,
     Document,
@@ -84,6 +85,7 @@ class Repository(Protocol):
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> tuple[Atom, ...]: ...
 
     def iter_atoms(
@@ -94,6 +96,7 @@ class Repository(Protocol):
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> Iterator[tuple[Atom, ...]]: ...
 
     def list_tags(self, namespace: str, limit: int | None = None) -> tuple[Tag, ...]: ...

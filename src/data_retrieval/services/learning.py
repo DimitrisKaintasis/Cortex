@@ -4,9 +4,9 @@ from dataclasses import dataclass, replace
 from itertools import combinations
 
 from data_retrieval.domain.models import (
-    AtomKind,
     AtomLink,
     AtomLinkRelation,
+    AtomRole,
     AtomTag,
     TagRelation,
     utc_now,
@@ -155,7 +155,7 @@ class LearningService:
             atom = self.repository.get_atom(selected_id)
             if atom is None:
                 continue
-            if atom.kind is AtomKind.SOURCE:
+            if atom.role is AtomRole.SOURCE:
                 credit[selected_id] = 1.0
                 continue
             stack = [
@@ -165,14 +165,16 @@ class LearningService:
                 in {AtomLinkRelation.SUMMARIZES, AtomLinkRelation.DERIVED_FROM}
             ]
             visited: set[str] = set()
+            credited_source = False
             while stack:
                 atom_id = stack.pop()
                 if atom_id in visited:
                     continue
                 visited.add(atom_id)
                 descendant = self.repository.get_atom(atom_id)
-                if descendant is not None and descendant.kind is AtomKind.SOURCE:
+                if descendant is not None and descendant.role is AtomRole.SOURCE:
                     credit[atom_id] = max(credit.get(atom_id, 0.0), self.summary_credit)
+                    credited_source = True
                 else:
                     stack.extend(
                         link.to_atom_id
@@ -180,6 +182,10 @@ class LearningService:
                         if link.relation
                         in {AtomLinkRelation.SUMMARIZES, AtomLinkRelation.DERIVED_FROM}
                     )
+            if not credited_source:
+                # A useful derived artifact without raw lineage must still be able to learn.
+                # Its role remains derived; this is feedback credit, not source authority.
+                credit[selected_id] = 1.0
         return credit
 
     def _co_used_updates(

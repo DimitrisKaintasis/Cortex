@@ -19,10 +19,12 @@ from data_retrieval.domain.models import (
     AtomKind,
     AtomLink,
     AtomLinkRelation,
+    AtomRole,
     AtomTag,
     CalibrationSignal,
     Document,
     IngestionBundle,
+    PayloadModality,
     Tag,
     TagLevel,
     TagOrigin,
@@ -81,6 +83,8 @@ class PostgreSQLRepository:
                     content TEXT NOT NULL,
                     content_hash TEXT NOT NULL,
                     kind TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'source',
+                    modality TEXT NOT NULL DEFAULT 'text',
                     occurred_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL,
                     metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
@@ -218,6 +222,42 @@ class PostgreSQLRepository:
                 )
                 """
             )
+            self._connection.execute(
+                f"ALTER TABLE {SCHEMA}.atoms ADD COLUMN IF NOT EXISTS role TEXT"
+            )
+            self._connection.execute(
+                f"ALTER TABLE {SCHEMA}.atoms ADD COLUMN IF NOT EXISTS modality TEXT"
+            )
+            self._connection.execute(
+                f"""
+                UPDATE {SCHEMA}.atoms
+                SET role = CASE
+                    WHEN metadata_json ->> 'source_system' = 'mem0' THEN 'derived'
+                    WHEN kind = 'temporal_summary' THEN 'derived'
+                    WHEN kind = 'interaction' THEN 'interaction'
+                    WHEN kind = 'uncertainty' THEN 'uncertainty'
+                    ELSE 'source'
+                END
+                WHERE role IS NULL
+                   OR (
+                        role = 'source'
+                        AND (
+                            kind <> 'source'
+                            OR metadata_json ->> 'source_system' = 'mem0'
+                        )
+                   )
+                """
+            )
+            self._connection.execute(
+                f"UPDATE {SCHEMA}.atoms SET modality = 'text' WHERE modality IS NULL"
+            )
+            for statement in (
+                f"ALTER TABLE {SCHEMA}.atoms ALTER COLUMN role SET DEFAULT 'source'",
+                f"ALTER TABLE {SCHEMA}.atoms ALTER COLUMN role SET NOT NULL",
+                f"ALTER TABLE {SCHEMA}.atoms ALTER COLUMN modality SET DEFAULT 'text'",
+                f"ALTER TABLE {SCHEMA}.atoms ALTER COLUMN modality SET NOT NULL",
+            ):
+                self._connection.execute(statement)
             for statement in (
                 f"CREATE INDEX IF NOT EXISTS idx_documents_namespace_status "
                 f"ON {SCHEMA}.documents(namespace, ingestion_status)",
@@ -227,6 +267,8 @@ class PostgreSQLRepository:
                 f"ON {SCHEMA}.atoms(namespace, occurred_at)",
                 f"CREATE INDEX IF NOT EXISTS idx_atoms_namespace_kind "
                 f"ON {SCHEMA}.atoms(namespace, kind)",
+                f"CREATE INDEX IF NOT EXISTS idx_atoms_namespace_role "
+                f"ON {SCHEMA}.atoms(namespace, role)",
                 f"CREATE INDEX IF NOT EXISTS idx_atoms_search_vector "
                 f"ON {SCHEMA}.atoms USING GIN(search_vector)",
                 f"CREATE INDEX IF NOT EXISTS idx_tags_namespace_canonical "
@@ -512,6 +554,7 @@ class PostgreSQLRepository:
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> tuple[Atom, ...]:
         return tuple(
             atom
@@ -520,6 +563,7 @@ class PostgreSQLRepository:
                 occurred_from=occurred_from,
                 occurred_to=occurred_to,
                 kind=kind,
+                role=role,
             )
             for atom in batch
         )
@@ -532,6 +576,7 @@ class PostgreSQLRepository:
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> Iterator[tuple[Atom, ...]]:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -540,6 +585,9 @@ class PostgreSQLRepository:
         if kind is not None:
             clauses.append("atoms.kind = %s")
             parameters.append(kind.value)
+        if role is not None:
+            clauses.append("atoms.role = %s")
+            parameters.append(role.value)
         if occurred_from is not None:
             clauses.append("atoms.occurred_at >= %s")
             parameters.append(occurred_from)
@@ -1039,8 +1087,9 @@ class PostgreSQLRepository:
             f"""
             INSERT INTO {SCHEMA}.atoms (
                 atom_id, document_id, namespace, position, char_start, char_end,
-                content, content_hash, kind, occurred_at, created_at, metadata_json
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                content, content_hash, kind, role, modality, occurred_at, created_at,
+                metadata_json
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT(atom_id) DO UPDATE SET
                 document_id = EXCLUDED.document_id,
                 namespace = EXCLUDED.namespace,
@@ -1050,6 +1099,8 @@ class PostgreSQLRepository:
                 content = EXCLUDED.content,
                 content_hash = EXCLUDED.content_hash,
                 kind = EXCLUDED.kind,
+                role = EXCLUDED.role,
+                modality = EXCLUDED.modality,
                 occurred_at = EXCLUDED.occurred_at,
                 metadata_json = EXCLUDED.metadata_json
             """,
@@ -1064,6 +1115,8 @@ class PostgreSQLRepository:
                     atom.content,
                     atom.content_hash,
                     atom.kind.value,
+                    (atom.role or AtomRole.SOURCE).value,
+                    atom.modality.value,
                     atom.occurred_at,
                     atom.created_at,
                     Jsonb(self._json_value(atom.metadata)),
@@ -1224,6 +1277,8 @@ class PostgreSQLRepository:
             content=row["content"],
             content_hash=row["content_hash"],
             kind=AtomKind(row["kind"]),
+            role=AtomRole(row["role"]),
+            modality=PayloadModality(row["modality"]),
             occurred_at=row["occurred_at"],
             created_at=row["created_at"],
             metadata=dict(row["metadata_json"]),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from data_retrieval.domain.models import AtomKind
+from data_retrieval.domain.models import AtomRole
 from data_retrieval.storage.repository import Repository
 from data_retrieval.temporal.bridge import TemporalBridge, TemporalProjectionResult
 
@@ -30,7 +30,7 @@ class TemporalEnrichmentService:
             namespace=namespace,
             occurred_from=range_start,
             occurred_to=range_end,
-            kind=AtomKind.SOURCE,
+            role=AtomRole.SOURCE,
         )
         atoms = tuple(
             atom

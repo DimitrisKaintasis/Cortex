@@ -9,9 +9,11 @@ from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import (
     Atom,
     AtomKind,
+    AtomRole,
     AtomTag,
     Document,
     IngestionBundle,
+    PayloadModality,
     Tag,
     TagLevel,
     TagOrigin,
@@ -49,6 +51,8 @@ class IngestService:
         occurred_at: datetime | None = None,
         metadata: dict[str, Any] | None = None,
         atom_kind: AtomKind = AtomKind.SOURCE,
+        atom_role: AtomRole | None = None,
+        payload_modality: PayloadModality = PayloadModality.TEXT,
     ) -> IngestResult:
         namespace = namespace.strip()
         source = source.strip()
@@ -98,6 +102,8 @@ class IngestService:
                 content=chunk.text,
                 content_hash=content_hash(chunk.text),
                 kind=atom_kind,
+                role=atom_role,
+                modality=payload_modality,
                 occurred_at=occurred_at,
                 metadata={**source_metadata, "source": source},
             )

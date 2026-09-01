@@ -10,6 +10,7 @@ from data_retrieval.domain.models import (
     Atom,
     AtomKind,
     AtomLink,
+    AtomRole,
     AtomTag,
     CalibrationSignal,
     Document,
@@ -290,6 +291,7 @@ class InMemoryRepository:
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> tuple[Atom, ...]:
         with self._lock:
             atoms = (
@@ -297,6 +299,7 @@ class InMemoryRepository:
                 for atom in self._atoms.values()
                 if atom.namespace == namespace
                 and (kind is None or atom.kind is kind)
+                and (role is None or atom.role is role)
                 and (
                     occurred_from is None
                     or (atom.occurred_at is not None and atom.occurred_at >= occurred_from)
@@ -326,6 +329,7 @@ class InMemoryRepository:
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         kind: AtomKind | None = None,
+        role: AtomRole | None = None,
     ) -> Iterator[tuple[Atom, ...]]:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -334,6 +338,7 @@ class InMemoryRepository:
             occurred_from=occurred_from,
             occurred_to=occurred_to,
             kind=kind,
+            role=role,
         )
         for offset in range(0, len(atoms), batch_size):
             yield atoms[offset : offset + batch_size]

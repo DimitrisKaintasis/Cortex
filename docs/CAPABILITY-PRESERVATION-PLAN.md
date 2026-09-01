@@ -1,5 +1,9 @@
 # Capability preservation and implementation plan
 
+> Architectural authority: [`ARCHITECTURE.md`](ARCHITECTURE.md) and ADR-0009 define current
+> component ownership, processor contracts, and testing order. This document remains the
+> historical capability register and roadmap; conflicting boundary guidance is superseded.
+
 - Status: Proposed for review
 - Date: 2026-08-20
 - Current repository baseline: `6659b6f`
