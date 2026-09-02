@@ -1,8 +1,9 @@
 # Collective Feature Extractor v1
 
-Status: deterministic shadow contract implemented; repository adapters not connected  
-Implementation: `src/data_retrieval/collective/features.py`  
-Tests: `tests/test_collective_features.py`
+Status: deterministic shadow contract and read-only repository adapter implemented
+Implementation: `src/data_retrieval/collective/features.py`,
+`src/data_retrieval/collective/repository_features.py`
+Tests: `tests/test_collective_features.py`, `tests/test_repository_features.py`
 
 ## Purpose
 
@@ -40,7 +41,7 @@ negative = sum contributor negative support
 total = positive + negative
 
 support_maturity = min(1, total / 5)
-contributor_maturity = min(1, contributing_buckets / 5)
+contributor_maturity = min(1, independently attributable buckets / 5)
 relationship_maturity = min(support_maturity, contributor_maturity)
 
 conflict_balance = 2 * min(positive, negative) / total
@@ -51,6 +52,10 @@ concept_rarity = 1 - min(1, concept contributors / 10)
 ```
 
 The constants are versioned experiment defaults, not production values.
+
+If a repository exposes feedback volume but cannot prove independent contributors, the adapter
+sets `contributor_independence_known=false`. The volume remains visible for conflict analysis,
+but contributor maturity is forced to zero. A local feedback ID is not treated as a person.
 
 ### Vectors
 
@@ -114,6 +119,11 @@ expected_impact = clamp(max(all three), 0, 1)
 
 If no dry-run exists, impact defaults conservatively to `0.50` and is marked missing.
 
+The repository adapter supplies a first cheap approximation: it adds `0.05` to the selected tag
+relation only in memory, normalizes all outgoing weights from the source tag into relative
+shares, then measures the selected share/rank change and the largest unrelated share change.
+This is useful for triage but is not a full replay of frozen retrieval queries.
+
 ### Final combination
 
 ```text
@@ -159,14 +169,23 @@ The deterministic tests verify:
 - sensitivity is a hard hold;
 - exported features contain neither contributor nor lineage identifiers.
 
+## Repository connection
+
+`ShadowRepositoryEvidenceAdapter` now reads the same repository protocol used by memory,
+SQLite, and PostgreSQL. It discovers existing tag relations, bounds atoms per side, validates
+cached embedding hashes, follows Mem0 `SUPPORTED_BY` and `CONFLICTS_WITH` links, follows
+Temporal `SUPERSEDES` and summary links, and generates a payload-free namespace report. It
+does not call repository mutation methods or model providers.
+
+See `REPOSITORY-FEATURE-ADAPTER.md` for its exact boundary and command.
+
 ## Remaining work
 
-1. Add a repository adapter that aggregates real shadow observations into ledger evidence.
-2. Add a vector adapter using cached embedding/profile data and a measured calibration set.
-3. Add Mem0 and Temporal adapters that collapse projections by source lineage.
-4. Add a shadow-impact adapter that compares active and candidate snapshots on frozen queries.
-5. Run the extractor on real public benchmark entries and inspect explanations.
-6. Connect only escalated public cases to a real local and strong reviewer comparison.
+1. Add privacy-safe collective contributor buckets to the future observation-event schema.
+2. Calibrate vector similarity and triage thresholds on a fixed development set.
+3. Add a full frozen-query impact replay alongside the cheap relative-weight perturbation.
+4. Run the extractor on real public benchmark entries and inspect explanations.
+5. Connect only escalated public cases to a real local and strong reviewer comparison.
 
 Until those adapters exist, the extractor is an executable policy contract rather than a live
 ingestion dependency.

@@ -172,7 +172,7 @@ Automatic cheap-feature calculation implemented at the deterministic contract le
 - [x] Preserve provider/profile provenance and explanations for every component.
 - [x] Degrade safely when processors are missing and export no contributor/lineage identifiers.
 - [x] Connect extracted features directly to the cheap review triage contract.
-- [ ] Implement repository adapters that populate the evidence records from real stored data.
+- [x] Implement a read-only repository adapter that populates evidence from real stored data.
 - [ ] Calibrate vector similarity and triage thresholds on development data.
 
 Evidence: `REVIEW-CASCADE-EXPERIMENT.md`, `evals/review_cascade_v1.json`, and
@@ -289,3 +289,4 @@ Append one short entry after every work session.
 | 2026-09-02 | 2–3 | Added isolated collective core and transfer harness | 18/18 experiment checks and 104/104 unit tests passed; 2 live PostgreSQL tests skipped | Expand policy/adversarial fixture matrix |
 | 2026-09-02 | 4 | Added selective cheap/expensive AI review cascade | 17/17 cascade checks and 110/110 unit tests passed; fixed-review quality matched with 3/13 escalations and about 24% relative cost | Test ambiguous cases and real reviewers |
 | 2026-09-02 | 4 | Added deterministic ledger/vector/Mem0/Temporal feature extractor | 12 extractor contracts and 122/122 unit tests passed; cold, mature, ambiguity, conflict, supersession, degradation, lineage, and privacy behavior verified | Add real repository evidence adapters |
+| 2026-09-03 | 4 | Connected the read-only repository feature adapter | 126 tests passed (2 live PostgreSQL tests skipped); one Mem0 smoke relation was observed without model calls or feature-path mutations and correctly escalated because attribution/vectors were unavailable | Observe an enriched public development slice and calibrate thresholds |

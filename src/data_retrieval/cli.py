@@ -17,6 +17,7 @@ from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuit
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
+from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
 from data_retrieval.domain.models import TagCandidateState
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.inference.openrouter import OpenRouterError
@@ -402,6 +403,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/results/review-cascade-v1.json"),
     )
+    repository_features = commands.add_parser(
+        "observe-repository-features",
+        help="run payload-free collective triage without feature-path mutations",
+    )
+    _add_storage_options(repository_features)
+    repository_features.add_argument("--namespace", required=True)
+    repository_features.add_argument("--embedding-provider")
+    repository_features.add_argument("--embedding-model")
+    repository_features.add_argument("--limit", type=int)
+    repository_features.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/repository-features-v1.json"),
+    )
     return parser
 
 
@@ -450,8 +465,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _evaluate_capabilities(args, parser)
         elif args.command == "evaluate-collective-transfer":
             output = _evaluate_collective_transfer(args, parser)
-        else:
+        elif args.command == "evaluate-review-cascade":
             output = _evaluate_review_cascade(args, parser)
+        else:
+            output = _observe_repository_features(args, parser)
     except (
         OSError,
         UnicodeError,
@@ -1184,6 +1201,33 @@ def _evaluate_review_cascade(
         artifact_location=args.report,
     )
     payload = report.as_dict()
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _observe_repository_features(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if (args.embedding_provider is None) != (args.embedding_model is None):
+        parser.error("--embedding-provider and --embedding-model must be supplied together")
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    with _open_repository(args) as repository:
+        report = ShadowRepositoryEvidenceAdapter(repository).observe_namespace(
+            namespace=args.namespace,
+            embedding_provider=args.embedding_provider,
+            embedding_model=args.embedding_model,
+            limit=args.limit,
+        )
+    payload = {
+        **report.as_dict(),
+        "database": _database_label(args),
+        "artifact_location": str(args.report),
+    }
     args.report.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

@@ -125,8 +125,9 @@ Mem0 facts collapsed by source lineage, Temporal currentness/supersession, polic
 an ephemeral shadow-impact dry run. Missing processor evidence raises uncertainty for immature
 relationships but does not block mature ledger evidence. Processor agreement may improve
 interpretation confidence; it never manufactures independent contributors or relationship
-maturity. The v1 formulas and remaining adapter work are recorded in
-`COLLECTIVE-FEATURE-EXTRACTOR.md`.
+maturity. The v1 formulas are recorded in `COLLECTIVE-FEATURE-EXTRACTOR.md`; the read-only
+connection to current memory, SQLite, and PostgreSQL repositories is recorded in
+`REPOSITORY-FEATURE-ADAPTER.md`.
 
 Expensive review is asynchronous. Until it finishes, the active serving snapshot remains
 unchanged. High-risk updates are held rather than provisionally applied. Review queues have

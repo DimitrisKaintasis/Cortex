@@ -239,6 +239,27 @@ class CollectiveFeatureExtractorTests(unittest.TestCase):
         self.assertGreater(result.features.triage.uncertainty, 0.9)
         self.assertLess(self._components(result.features)["relationship_maturity"], 0.1)
 
+    def test_unattributed_local_volume_cannot_claim_independent_maturity(self) -> None:
+        request = self._request(
+            ledger=LedgerFeatureEvidence(
+                relationship_exists=True,
+                contributors=(
+                    ContributorSupport(
+                        contributor_bucket="unattributed-local-feedback",
+                        positive_support=100.0,
+                    ),
+                ),
+                concept_independent_contributors=0,
+                contributor_independence_known=False,
+            )
+        )
+
+        result = self.extractor.extract(request)
+
+        self.assertEqual(self._components(result)["relationship_maturity"], 0.0)
+        self.assertFalse(self._components(result)["contributor_independence_known"])
+        self.assertEqual(result.triage.uncertainty, 1.0)
+
     def test_sensitive_policy_is_a_hard_hold(self) -> None:
         result = CollectiveFeatureTriage().evaluate(
             self._request(policy=PolicyFeatureEvidence(sensitive=True))

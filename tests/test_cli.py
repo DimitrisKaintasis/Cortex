@@ -39,6 +39,25 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.fixture.as_posix(), "evals/review_cascade_v1.json")
         self.assertEqual(args.report.as_posix(), "data/results/review-cascade-v1.json")
 
+    def test_repository_feature_observer_accepts_cached_embedding_identity(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "observe-repository-features",
+                "--namespace",
+                "project-a",
+                "--embedding-provider",
+                "ollama",
+                "--embedding-model",
+                "harrier-v1",
+                "--limit",
+                "25",
+            ]
+        )
+
+        self.assertEqual(args.embedding_provider, "ollama")
+        self.assertEqual(args.embedding_model, "harrier-v1")
+        self.assertEqual(args.limit, 25)
+
     def test_tag_candidate_review_commands_are_exposed(self) -> None:
         listed = build_parser().parse_args(
             ["list-tag-candidates", "--namespace", "project-a", "--state", "proposed"]

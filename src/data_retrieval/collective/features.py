@@ -39,6 +39,7 @@ class LedgerFeatureEvidence:
     relationship_exists: bool
     contributors: tuple[ContributorSupport, ...]
     concept_independent_contributors: int
+    contributor_independence_known: bool = True
     profile: str = "collective-ledger-features-v1"
 
     def __post_init__(self) -> None:
@@ -263,7 +264,12 @@ class CollectiveFeatureExtractor:
         positive = sum(item.positive_support for item in ledger.contributors)
         negative = sum(item.negative_support for item in ledger.contributors)
         total = positive + negative
-        contributor_count = sum(item.total_support > 0 for item in ledger.contributors)
+        observed_bucket_count = sum(
+            item.total_support > 0 for item in ledger.contributors
+        )
+        contributor_count = (
+            observed_bucket_count if ledger.contributor_independence_known else 0
+        )
         support_maturity = min(1.0, total / self.policy.maturity_support_units)
         contributor_maturity = min(
             1.0, contributor_count / self.policy.maturity_contributors
@@ -295,7 +301,10 @@ class CollectiveFeatureExtractor:
             concentration,
             "ledger",
             ledger.profile,
-            f"largest contributor share across {contributor_count} contributing buckets",
+            (
+                f"largest observed bucket share across {observed_bucket_count} buckets; "
+                f"independence_known={ledger.contributor_independence_known}"
+            ),
         )
         self._add(
             components,
@@ -312,6 +321,17 @@ class CollectiveFeatureExtractor:
             "ledger",
             ledger.profile,
             "minimum of support-volume and independent-contributor maturity",
+        )
+        self._add(
+            components,
+            "contributor_independence_known",
+            ledger.contributor_independence_known,
+            "ledger",
+            ledger.profile,
+            (
+                "false means local events provide volume but cannot prove that support "
+                "came from independent contributors"
+            ),
         )
 
         vector_alignment = None

@@ -39,6 +39,13 @@ from .models import (
     canonical_concept_key,
 )
 from .policy import CollectivePolicy, ShadowCollectiveAggregator, ShadowCollectiveRanker
+from .repository_features import (
+    RepositoryFeatureAdapterPolicy,
+    RepositoryFeatureCandidate,
+    RepositoryFeatureObservation,
+    RepositoryFeatureObservationReport,
+    ShadowRepositoryEvidenceAdapter,
+)
 
 __all__ = [
     "AIReviewEvent",
@@ -70,8 +77,13 @@ __all__ = [
     "RelationshipObservation",
     "RelationshipProjection",
     "RelationshipState",
+    "RepositoryFeatureAdapterPolicy",
+    "RepositoryFeatureCandidate",
+    "RepositoryFeatureObservation",
+    "RepositoryFeatureObservationReport",
     "ShadowCollectiveAggregator",
     "ShadowCollectiveRanker",
+    "ShadowRepositoryEvidenceAdapter",
     "SharedConcept",
     "TriageDecision",
     "TriageDisposition",

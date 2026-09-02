@@ -87,8 +87,24 @@ weight boundary, and remaining real-model tests.
 
 The cheap gate's ledger, cached-vector, Mem0-lineage, Temporal, and shadow-impact formulas are
 documented in the [collective feature extractor contract](docs/COLLECTIVE-FEATURE-EXTRACTOR.md).
-The extractor is currently a pure shadow component; repository adapters have not yet connected
-it to normal ingestion or serving.
+Its read-only repository adapter can now observe existing tag relations without changing normal
+ingestion or serving:
+
+```powershell
+python -m data_retrieval observe-repository-features `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --embedding-provider ollama `
+  --embedding-model $env:OLLAMA_EMBEDDING_MODEL `
+  --limit 100
+```
+
+The observer uses only cached embeddings and native Mem0/Temporal links. It makes no model calls,
+adds no embeddings, and performs no feature-path weight updates. Opening a database still runs
+the repository's normal schema initialization/migrations; use a copy when an old source database
+must remain byte-unchanged. The local ledger does not yet prove independent contributors, so the
+report deliberately assigns zero cross-user maturity; see the
+[repository feature adapter](docs/REPOSITORY-FEATURE-ADAPTER.md).
 
 Optional developer tools can be installed with:
 
