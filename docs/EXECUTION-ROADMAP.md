@@ -150,6 +150,23 @@ Run the same fixture and inputs against:
 Measure target rank/recall, unrelated regression, response to negative evidence, replay
 equality, time-to-dormancy, reactivation, contributor concentration, and numerical stability.
 
+Selective review cascade implemented at the deterministic contract level:
+
+- [x] Add a cheap, payload-free uncertainty/impact/risk triage gate.
+- [x] Hold sensitive and high-risk updates while the active snapshot continues serving.
+- [x] Add asynchronous review priority and a bounded review-budget planner.
+- [x] Store structured AI verdicts without payloads or hidden reasoning.
+- [x] Keep behavioral and AI-review support in separate aggregate channels.
+- [x] Bound AI influence by confidence, proposed strength, reviewer reliability, reviewer-family
+  cap, and aggregation policy.
+- [x] Compare cheap-only, review-everything, and gated review on one deterministic fixture.
+- [ ] Repeat the comparison with ambiguous threshold cases and real local/strong models.
+
+Evidence: `REVIEW-CASCADE-EXPERIMENT.md`, `evals/review_cascade_v1.json`, and
+`tests/test_review_cascade.py`. The cascade matched 13/13 fixed review decisions while escalating
+3/13 cases and consuming about 24% of review-everything relative cost. This proves orchestration,
+not real reviewer quality or production thresholds.
+
 Exit gate: one candidate improves the target behavior without relying on raw cross-neighborhood
 weight comparison or introducing unacceptable regression. If none does, revise the hypothesis
 before modifying production code.
@@ -257,3 +274,4 @@ Append one short entry after every work session.
 | 2026-09-02 | 0 | Consolidated architecture into an executable roadmap | Relevant documents reconciled; `git diff --check` passed | Commit the documentation baseline |
 | 2026-09-02 | 1 | Reproduced the pre-experiment baseline | 97 tests and 7/7 gates passed; maintained surfaces lint-clean | Build shadow core |
 | 2026-09-02 | 2–3 | Added isolated collective core and transfer harness | 18/18 experiment checks and 104/104 unit tests passed; 2 live PostgreSQL tests skipped | Expand policy/adversarial fixture matrix |
+| 2026-09-02 | 4 | Added selective cheap/expensive AI review cascade | 17/17 cascade checks and 110/110 unit tests passed; fixed-review quality matched with 3/13 escalations and about 24% relative cost | Test ambiguous cases and real reviewers |

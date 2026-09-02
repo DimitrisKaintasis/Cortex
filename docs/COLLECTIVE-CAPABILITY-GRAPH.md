@@ -111,6 +111,34 @@ Global aggregation must account for independent contributors, not raw event volu
 automation loop, or coordinated identity cluster must not be able to dominate an edge by
 repetition.
 
+## Selective AI review cascade
+
+Ordinary observations use deterministic validation, contributor bounds, decay, and aggregation.
+Uncertain, high-impact, conflicting, novel, rare, sensitive, concentrated, or regression-causing
+entries may be escalated to a replaceable AI reviewer. The cheap gate uses bounded metadata and
+aggregate features; it does not require private payloads merely to decide whether review is
+worthwhile.
+
+Expensive review is asynchronous. Until it finishes, the active serving snapshot remains
+unchanged. High-risk updates are held rather than provisionally applied. Review queues have
+explicit budgets and prioritize the product of uncertainty, expected impact, and risk, with hard
+safety triggers for sensitive data and candidate regressions.
+
+An AI reviewer never writes an arbitrary raw weight. It returns a structured, versioned verdict:
+support, oppose, uncertain, or abstain; bounded confidence and recommended strength; reason
+codes; model family/profile; time; and an evidence digest. Hidden reasoning is neither requested
+nor stored. Uncertain and abstaining reviews add no support.
+
+Behavioral support and AI-review support remain distinct aggregation channels. A review policy
+converts model confidence, proposed strength, and measured reviewer reliability into capped
+equivalent support. Repeated reviews from one model family/version are not independent evidence.
+Multiple models from the same correlated family must not masquerade as independent reviewers.
+Review evidence may strongly influence a relationship but remains subject to shadow evaluation,
+canary promotion, decay, inhibition, audit, and rollback.
+
+The initial deterministic cascade result and its limitations are recorded in
+`REVIEW-CASCADE-EXPERIMENT.md`.
+
 ## Owner control and erasure
 
 Source evidence is immutable to inference, learning, and refinement. That rule does not remove

@@ -16,9 +16,15 @@ from data_retrieval.benchmarks.longmemeval import (
     LongMemEvalIngestService,
     iter_longmemeval_cases,
 )
+from data_retrieval.benchmarks.review_cascade import (
+    CascadeScenarioResult,
+    ReviewCascadeReport,
+    ReviewCascadeSuite,
+)
 
 __all__ = [
     "CapabilityGateReport",
+    "CascadeScenarioResult",
     "CollectiveTransferReport",
     "CollectiveTransferSuite",
     "ExperimentCheck",
@@ -29,5 +35,7 @@ __all__ = [
     "LongMemEvalImportResult",
     "LongMemEvalIngestService",
     "PolicyVariantResult",
+    "ReviewCascadeReport",
+    "ReviewCascadeSuite",
     "iter_longmemeval_cases",
 ]

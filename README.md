@@ -75,6 +75,16 @@ global serving state. See the
 [collective transfer experiment report](docs/COLLECTIVE-TRANSFER-EXPERIMENT.md) for the exact
 question, result, policy ablations, and limitations.
 
+Compare cheap-only evaluation, review-everything, and gated expensive AI review:
+
+```powershell
+python -m data_retrieval evaluate-review-cascade
+```
+
+The v1 cascade uses fixed reviewer outputs, not live model calls. See the
+[selective AI review experiment](docs/REVIEW-CASCADE-EXPERIMENT.md) for the measured call savings,
+weight boundary, and remaining real-model tests.
+
 Optional developer tools can be installed with:
 
 ```powershell

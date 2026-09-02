@@ -13,6 +13,7 @@ from data_retrieval.core.identifiers import stable_id
 from .models import (
     CollectiveRoute,
     CollectiveSnapshot,
+    EvidenceChannel,
     ObservationOutcome,
     PrivateCandidate,
     RankedPrivateCandidate,
@@ -28,6 +29,8 @@ class CollectivePolicy:
     learning_enabled: bool = True
     initial_observed_support: float = 0.0
     contributor_support_cap: float = 1.0
+    reviewer_support_cap: float = 5.0
+    review_support_multiplier: float = 1.0
     relationship_support_cap: float | None = None
     half_life_days: float | None = 30.0
     negative_penalty: float = 1.0
@@ -44,6 +47,8 @@ class CollectivePolicy:
         for name, value in (
             ("initial_observed_support", self.initial_observed_support),
             ("contributor_support_cap", self.contributor_support_cap),
+            ("reviewer_support_cap", self.reviewer_support_cap),
+            ("review_support_multiplier", self.review_support_multiplier),
             ("negative_penalty", self.negative_penalty),
             ("hot_threshold", self.hot_threshold),
             ("warm_threshold", self.warm_threshold),
@@ -53,6 +58,8 @@ class CollectivePolicy:
                 raise ValueError(f"{name} must be finite and non-negative")
         if self.contributor_support_cap == 0:
             raise ValueError("contributor_support_cap must be greater than zero")
+        if self.reviewer_support_cap == 0:
+            raise ValueError("reviewer_support_cap must be greater than zero")
         if self.half_life_days is not None and self.half_life_days <= 0:
             raise ValueError("half_life_days must be greater than zero")
         if self.relationship_support_cap is not None and self.relationship_support_cap <= 0:
@@ -126,29 +133,58 @@ class ShadowCollectiveAggregator:
         as_of: datetime,
     ) -> tuple[RelationshipProjection, ...]:
         contributions: dict[
-            tuple[str, str], dict[str, dict[ObservationOutcome, float]]
-        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+            tuple[str, str],
+            dict[str, dict[EvidenceChannel, dict[ObservationOutcome, float]]],
+        ] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        )
         for observation in observations:
             if observation.observed_at > as_of:
                 continue
             edge = (observation.source_concept_id, observation.target_concept_id)
-            contributions[edge][observation.contributor_bucket][observation.outcome] += (
-                self._decayed(observation, as_of=as_of)
-            )
+            contributions[edge][observation.contributor_bucket][observation.channel][
+                observation.outcome
+            ] += self._decayed(observation, as_of=as_of)
 
         projections: list[RelationshipProjection] = []
         for (source_id, target_id), contributors in sorted(contributions.items()):
-            positive = self.policy.initial_observed_support
-            negative = 0.0
-            for outcomes in contributors.values():
-                positive += min(
-                    outcomes[ObservationOutcome.POSITIVE],
+            behavioral_positive = self.policy.initial_observed_support
+            behavioral_negative = 0.0
+            review_positive = 0.0
+            review_negative = 0.0
+            reviewer_count = 0
+            behavioral_contributor_count = 0
+            for channels in contributors.values():
+                behavioral = channels[EvidenceChannel.BEHAVIORAL]
+                review = channels[EvidenceChannel.AI_REVIEW]
+                if any(behavioral.values()):
+                    behavioral_contributor_count += 1
+                behavioral_positive += min(
+                    behavioral[ObservationOutcome.POSITIVE],
                     self.policy.contributor_support_cap,
                 )
-                negative += min(
-                    outcomes[ObservationOutcome.NEGATIVE],
+                behavioral_negative += min(
+                    behavioral[ObservationOutcome.NEGATIVE],
                     self.policy.contributor_support_cap,
                 )
+                if any(review.values()):
+                    reviewer_count += 1
+                review_positive += min(
+                    review[ObservationOutcome.POSITIVE],
+                    self.policy.reviewer_support_cap,
+                )
+                review_negative += min(
+                    review[ObservationOutcome.NEGATIVE],
+                    self.policy.reviewer_support_cap,
+                )
+            positive = (
+                behavioral_positive
+                + self.policy.review_support_multiplier * review_positive
+            )
+            negative = (
+                behavioral_negative
+                + self.policy.review_support_multiplier * review_negative
+            )
             if self.policy.relationship_support_cap is not None:
                 positive = min(positive, self.policy.relationship_support_cap)
                 negative = min(negative, self.policy.relationship_support_cap)
@@ -165,8 +201,13 @@ class ShadowCollectiveAggregator:
                     positive_support=stored_positive,
                     negative_support=stored_negative,
                     effective_support=effective,
-                    contributor_count=len(contributors),
+                    contributor_count=behavioral_contributor_count,
                     state=self._state(positive, negative, effective),
+                    behavioral_positive_support=behavioral_positive,
+                    behavioral_negative_support=behavioral_negative,
+                    review_positive_support=review_positive,
+                    review_negative_support=review_negative,
+                    reviewer_count=reviewer_count,
                 )
             )
         return tuple(projections)

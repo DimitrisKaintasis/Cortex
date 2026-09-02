@@ -33,6 +33,12 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.fixture.as_posix(), "evals/collective_transfer_v1.json")
         self.assertEqual(args.report.as_posix(), "data/results/collective-transfer-v1.json")
 
+    def test_review_cascade_experiment_has_isolated_defaults(self) -> None:
+        args = build_parser().parse_args(["evaluate-review-cascade"])
+
+        self.assertEqual(args.fixture.as_posix(), "evals/review_cascade_v1.json")
+        self.assertEqual(args.report.as_posix(), "data/results/review-cascade-v1.json")
+
     def test_tag_candidate_review_commands_are_exposed(self) -> None:
         listed = build_parser().parse_args(
             ["list-tag-candidates", "--namespace", "project-a", "--state", "proposed"]

@@ -16,6 +16,7 @@ from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
 from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuite
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
+from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.domain.models import TagCandidateState
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.inference.openrouter import OpenRouterError
@@ -387,6 +388,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/results/collective-transfer-v1.json"),
     )
+    cascade = commands.add_parser(
+        "evaluate-review-cascade",
+        help="compare cheap-only, review-everything, and gated AI review",
+    )
+    cascade.add_argument(
+        "--fixture",
+        type=Path,
+        default=Path("evals/review_cascade_v1.json"),
+    )
+    cascade.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/review-cascade-v1.json"),
+    )
     return parser
 
 
@@ -433,8 +448,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _evaluate(args)
         elif args.command == "evaluate-capabilities":
             output = _evaluate_capabilities(args, parser)
-        else:
+        elif args.command == "evaluate-collective-transfer":
             output = _evaluate_collective_transfer(args, parser)
+        else:
+            output = _evaluate_review_cascade(args, parser)
     except (
         OSError,
         UnicodeError,
@@ -451,6 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command in {
         "evaluate-capabilities",
         "evaluate-collective-transfer",
+        "evaluate-review-cascade",
     } and output["passed"] is False:
         return 1
     return 0
@@ -1144,6 +1162,24 @@ def _evaluate_collective_transfer(
         parser.error(f"collective transfer fixture does not exist: {args.fixture}")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     report = CollectiveTransferSuite().run(
+        args.fixture,
+        artifact_location=args.report,
+    )
+    payload = report.as_dict()
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _evaluate_review_cascade(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.fixture.is_file():
+        parser.error(f"review cascade fixture does not exist: {args.fixture}")
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    report = ReviewCascadeSuite().run(
         args.fixture,
         artifact_location=args.report,
     )

@@ -47,6 +47,11 @@ class ObservationOutcome(StrEnum):
     NEGATIVE = "negative"
 
 
+class EvidenceChannel(StrEnum):
+    BEHAVIORAL = "behavioral"
+    AI_REVIEW = "ai_review"
+
+
 @dataclass(frozen=True, slots=True)
 class RelationshipObservation:
     """The complete exportable learning input used by the shadow aggregator.
@@ -63,6 +68,7 @@ class RelationshipObservation:
     support: float
     observed_at: datetime
     policy_version: str
+    channel: EvidenceChannel = EvidenceChannel.BEHAVIORAL
 
     def __post_init__(self) -> None:
         if not self.observation_id.strip():
@@ -92,6 +98,7 @@ class RelationshipObservation:
         support: float,
         observed_at: datetime,
         policy_version: str,
+        channel: EvidenceChannel = EvidenceChannel.BEHAVIORAL,
     ) -> RelationshipObservation:
         if not local_event_key.strip():
             raise ValueError("local_event_key cannot be empty")
@@ -103,6 +110,7 @@ class RelationshipObservation:
             target_concept_id,
             outcome.value,
             policy_version,
+            channel.value,
         )
         return cls(
             observation_id=observation_id,
@@ -113,6 +121,7 @@ class RelationshipObservation:
             support=support,
             observed_at=observed_at,
             policy_version=policy_version,
+            channel=channel,
         )
 
     def canonical_payload(self) -> dict[str, Any]:
@@ -125,6 +134,7 @@ class RelationshipObservation:
             "support": self.support,
             "observed_at": self.observed_at.isoformat(),
             "policy_version": self.policy_version,
+            "channel": self.channel.value,
         }
 
 
@@ -145,6 +155,11 @@ class RelationshipProjection:
     effective_support: float
     contributor_count: int
     state: RelationshipState
+    behavioral_positive_support: float = 0.0
+    behavioral_negative_support: float = 0.0
+    review_positive_support: float = 0.0
+    review_negative_support: float = 0.0
+    reviewer_count: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)

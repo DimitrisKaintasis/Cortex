@@ -1,0 +1,123 @@
+{
+  "fixture_id": "review-cascade-v1",
+  "as_of": "2026-09-02T12:00:00+00:00",
+  "concepts": {
+    "source": "storage architecture",
+    "target": "postgresql"
+  },
+  "costs": {
+    "cheap_evaluation": 0.01,
+    "expensive_review": 1.0
+  },
+  "scenarios": [
+    {
+      "id": "routine-support-1",
+      "cheap_verdict": "support",
+      "expected_verdict": "support",
+      "features": {"uncertainty": 0.1, "expected_impact": 0.3, "risk": 0.1},
+      "review": {"verdict": "support", "confidence": 0.96, "strength": 0.8}
+    },
+    {
+      "id": "routine-support-2",
+      "cheap_verdict": "support",
+      "expected_verdict": "support",
+      "features": {"uncertainty": 0.15, "expected_impact": 0.4, "risk": 0.1},
+      "review": {"verdict": "support", "confidence": 0.94, "strength": 0.8}
+    },
+    {
+      "id": "routine-support-3",
+      "cheap_verdict": "support",
+      "expected_verdict": "support",
+      "features": {"uncertainty": 0.2, "expected_impact": 0.25, "risk": 0.15},
+      "review": {"verdict": "support", "confidence": 0.92, "strength": 0.7}
+    },
+    {
+      "id": "routine-support-4",
+      "cheap_verdict": "support",
+      "expected_verdict": "support",
+      "features": {"uncertainty": 0.12, "expected_impact": 0.5, "risk": 0.1},
+      "review": {"verdict": "support", "confidence": 0.93, "strength": 0.75}
+    },
+    {
+      "id": "routine-support-5",
+      "cheap_verdict": "support",
+      "expected_verdict": "support",
+      "features": {"uncertainty": 0.18, "expected_impact": 0.35, "risk": 0.12},
+      "review": {"verdict": "support", "confidence": 0.95, "strength": 0.8}
+    },
+    {
+      "id": "routine-oppose-1",
+      "cheap_verdict": "oppose",
+      "expected_verdict": "oppose",
+      "features": {"uncertainty": 0.1, "expected_impact": 0.4, "risk": 0.2},
+      "review": {"verdict": "oppose", "confidence": 0.94, "strength": 0.8}
+    },
+    {
+      "id": "routine-oppose-2",
+      "cheap_verdict": "oppose",
+      "expected_verdict": "oppose",
+      "features": {"uncertainty": 0.2, "expected_impact": 0.3, "risk": 0.15},
+      "review": {"verdict": "oppose", "confidence": 0.9, "strength": 0.7}
+    },
+    {
+      "id": "routine-oppose-3",
+      "cheap_verdict": "oppose",
+      "expected_verdict": "oppose",
+      "features": {"uncertainty": 0.15, "expected_impact": 0.45, "risk": 0.2},
+      "review": {"verdict": "oppose", "confidence": 0.92, "strength": 0.75}
+    },
+    {
+      "id": "routine-oppose-4",
+      "cheap_verdict": "oppose",
+      "expected_verdict": "oppose",
+      "features": {"uncertainty": 0.1, "expected_impact": 0.2, "risk": 0.1},
+      "review": {"verdict": "oppose", "confidence": 0.91, "strength": 0.7}
+    },
+    {
+      "id": "routine-oppose-5",
+      "cheap_verdict": "oppose",
+      "expected_verdict": "oppose",
+      "features": {"uncertainty": 0.18, "expected_impact": 0.38, "risk": 0.18},
+      "review": {"verdict": "oppose", "confidence": 0.93, "strength": 0.76}
+    },
+    {
+      "id": "conflicting-high-impact",
+      "cheap_verdict": "support",
+      "expected_verdict": "oppose",
+      "features": {
+        "uncertainty": 0.8,
+        "expected_impact": 0.9,
+        "risk": 0.7,
+        "conflict": 0.9,
+        "contributor_concentration": 0.8
+      },
+      "review": {"verdict": "oppose", "confidence": 0.98, "strength": 1.0}
+    },
+    {
+      "id": "novel-uncertain-alignment",
+      "cheap_verdict": "support",
+      "expected_verdict": "abstain",
+      "features": {
+        "uncertainty": 0.9,
+        "expected_impact": 0.8,
+        "risk": 0.6,
+        "alignment_confidence": 0.4,
+        "novel_relationship": true
+      },
+      "review": {"verdict": "abstain", "confidence": 0.88, "strength": 0.0}
+    },
+    {
+      "id": "sensitive-rare-concept",
+      "cheap_verdict": "support",
+      "expected_verdict": "abstain",
+      "features": {
+        "uncertainty": 0.75,
+        "expected_impact": 0.7,
+        "risk": 0.95,
+        "concept_rarity": 0.98,
+        "sensitive": true
+      },
+      "review": {"verdict": "abstain", "confidence": 0.99, "strength": 0.0}
+    }
+  ]
+}
