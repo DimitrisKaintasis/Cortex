@@ -1,0 +1,244 @@
+# Execution Roadmap
+
+Status: active  
+Last updated: 2026-09-02  
+Current step: 0 — preserve the accepted baseline
+
+This is the operational source of truth for what we build next. The architecture documents
+describe what the system may become; this file records the order in which we will prove and
+implement it. Update the status, evidence, and decision log whenever a step changes state.
+
+## Working rule
+
+We will validate the riskiest claim with the smallest faithful implementation before building
+production infrastructure around it. The next implementation is therefore an isolated,
+deterministic `collective-transfer-v1` experiment. It must not mutate normal retrieval behavior,
+existing databases, or global serving state.
+
+Status values are `not started`, `in progress`, `blocked`, `passed`, `failed`, and `deferred`.
+A step is `passed` only when its evidence is checked into the repository or linked below.
+
+## Milestone map
+
+| Step | Status | Outcome | Unlocks |
+|---|---|---|---|
+| 0. Preserve baseline | in progress | Accepted scope and current behavior are recoverable | Safe experimentation |
+| 1. Reproduce current baseline | not started | Existing tests and capability gates have recorded results | Trustworthy before/after comparison |
+| 2. Build shadow collective core | not started | Policy math runs without production mutation | Cross-user experiments |
+| 3. Prove positive and negative transfer | not started | A changes B through shared concepts only | Central thesis evaluation |
+| 4. Compare weight policies | not started | A measured policy wins over controls | Candidate learning policy |
+| 5. Test privacy, poisoning, and lifecycle | not started | Leakage and manipulation stay within declared gates | Safe schema design |
+| 6. Make the architecture decision | not started | Proceed, revise, or reject is recorded from evidence | Production implementation |
+| 7. Repair canonical contracts | not started | Scope, visibility, payload, and contribution are explicit | Real multi-scope runtime |
+| 8. Validate with real models and data | not started | Gains survive realistic noise and model differences | Product evidence |
+| 9. Add production collective storage | not started | Events, projections, snapshots, and rollback are durable | Hosted collective service |
+| 10. Make the Mac autonomous | not started | Remote jobs continue while the laptop is offline | Continuous enrichment/evaluation |
+| 11. Add procedures | deferred | Validated ordered guidance improves small models | Small-model enhancement layer |
+
+## Step 0 — Preserve the accepted baseline
+
+Purpose: prevent the vision, historical formulas, and present implementation boundary from
+being reconstructed from chat again.
+
+- [x] Record the collective capability graph and privacy boundary.
+- [x] Record unbounded support, relative influence, passive decay, inhibition, and reactivation.
+- [x] Preserve both the original bounded Tags formula and later Cortex formula as controls.
+- [x] Record current runtime mismatches and non-goals.
+- [x] Create this ordered roadmap.
+- [x] Review the documentation diff for contradictions.
+- [ ] Commit the documentation baseline separately from experimental code.
+
+Exit gate: the accepted architecture, historical provenance, next experiment, and known gaps are
+available from repository documents in a clean documentation commit.
+
+Evidence: `COLLECTIVE-CAPABILITY-GRAPH.md`, ADR-0013, ADR-0014, the context ledger, and this file.
+
+## Step 1 — Reproduce the current baseline
+
+Purpose: distinguish new experimental effects from regressions in the working ingestion,
+retrieval, temporal, Mem0, tag-lifecycle, and weight-ledger foundations.
+
+- [ ] Run the full unit test suite.
+- [ ] Run all seven isolated capability gates.
+- [ ] Run lint and documentation integrity checks.
+- [ ] Record the commit, commands, environment, pass/fail counts, and artifacts.
+- [ ] Explicitly label `GlobalAblationRunner` as a shared-namespace LongMemEval ablation, not a
+  privacy-preserving collective-transfer test.
+
+Exit gate: the baseline is reproducible, and any existing failure is documented before new code
+is introduced.
+
+## Step 2 — Build the shadow collective core
+
+Purpose: implement only the concepts required to test the central thesis. This is an
+experimental policy module, not the production global graph.
+
+- [ ] Define stable shared concept IDs independent of A and B's private namespaces.
+- [ ] Define a minimized relationship-observation record containing no atom payload, document,
+  query, session, or public user identity.
+- [ ] Keep positive and negative support as separate values.
+- [ ] Implement configurable lazy proportional half-life decay.
+- [ ] Implement explicit comparison neighborhoods and relative `log1p` normalization.
+- [ ] Add contributor caps and idempotency so repetition by one contributor is bounded.
+- [ ] Aggregate observations into an immutable shadow snapshot.
+- [ ] Make every result deterministic and replayable from observations.
+- [ ] Keep the normal repositories, database schema, and `RetrievalService` unchanged.
+
+Exit gate: identical observation input produces an identical snapshot and score output across
+replay, while existing tests remain unchanged.
+
+## Step 3 — Prove positive and negative cross-user transfer
+
+Purpose: test whether the architecture produces value that isolated Mem0 or Temporal History
+does not provide by itself.
+
+Fixture:
+
+- A and B have disjoint private atoms.
+- Their atoms map to some shared global concepts.
+- B has held-out queries/tasks with known relevant evidence.
+- A's successful and failed outcomes generate only relationship observations.
+
+Required assertions:
+
+- [ ] B's relevant retrieval improves after A's successful observations.
+- [ ] A verified failure weakens the corresponding route for B.
+- [ ] B never receives A's atoms, text, metadata, source structure, or identity.
+- [ ] Unrelated B queries do not regress beyond the declared tolerance.
+- [ ] Removing the global snapshot restores B's exact baseline.
+- [ ] The report shows the route and score components that caused every change.
+
+Initial gates for the deterministic fixture:
+
+- target evidence rank strictly improves in the positive case;
+- target evidence rank strictly worsens or its influence falls in the negative case;
+- zero private-payload or private-identifier crossover;
+- zero change to unrelated control queries;
+- byte-equivalent results for repeated replay with the same inputs.
+
+Exit gate: the test demonstrates capability transfer through shared relationships rather than
+shared private evidence.
+
+## Step 4 — Compare learning policies
+
+Purpose: choose math from measurements instead of inheriting constants by intuition.
+
+Run the same fixture and inputs against:
+
+1. no collective learning;
+2. original bounded `0..1` Tags updates;
+3. unbounded support without passive decay;
+4. unbounded support with proportional half-life decay;
+5. unbounded, decayed, separate positive/negative support;
+6. maximum-based relative `log1p` normalization;
+7. a robust-reference alternative such as a percentile, if maximum-based normalization is
+   unstable.
+
+Measure target rank/recall, unrelated regression, response to negative evidence, replay
+equality, time-to-dormancy, reactivation, contributor concentration, and numerical stability.
+
+Exit gate: one candidate improves the target behavior without relying on raw cross-neighborhood
+weight comparison or introducing unacceptable regression. If none does, revise the hypothesis
+before modifying production code.
+
+## Step 5 — Test privacy, poisoning, and lifecycle
+
+Purpose: make failure modes visible before we encode the global storage contract.
+
+- [ ] Try to infer A's content, identity, rare concepts, and source structure from exports.
+- [ ] Repeat identical feedback from one contributor and verify the cap.
+- [ ] Add multiple independent contributors and verify their evidence can accumulate.
+- [ ] Add noisy, stale, contradictory, and malicious contributors.
+- [ ] Verify dormancy through time, inhibition through verified negative evidence, and
+  reactivation through renewed independent evidence.
+- [ ] Build shadow and candidate snapshots; reject a regression and restore the active snapshot.
+- [ ] Record residual risks that require consent, sensitivity classification, thresholding,
+  aggregation, or stronger privacy technology in production.
+
+Exit gate: the synthetic adversarial suite passes explicit thresholds, or the failed mechanism
+is revised and rerun. A synthetic pass is necessary but is not a production privacy guarantee.
+
+## Step 6 — Architecture decision checkpoint
+
+Purpose: prevent an experiment from silently becoming production architecture.
+
+Record one decision:
+
+- **Proceed:** cross-user benefit is real and the boundary is plausible. Implement the canonical
+  contracts in Step 7.
+- **Revise:** signal exists, but attribution, concept alignment, normalization, decay, or
+  contributor independence needs another isolated iteration.
+- **Reject:** the shared relationship signal does not produce useful transfer or cannot be made
+  acceptably safe. Preserve the personal graph and processor integrations without building a
+  collective service.
+
+The decision record must include experiment version, commit, fixtures, policies, metrics,
+failures, limitations, and artifact paths.
+
+## Step 7 — Repair canonical runtime contracts
+
+Only after a `Proceed` decision:
+
+- [ ] Define scope independently from visibility and contribution policy.
+- [ ] Define immutable payload reference and handler contracts.
+- [ ] Define the global concept registry plus private concept overlays and aliases.
+- [ ] Define observation-event, support-aggregate, and serving-snapshot schemas separately.
+- [ ] Version policy, processor, model, prompt, and projection provenance.
+- [ ] Add owner deletion/erasure semantics without rewriting shared aggregate history.
+- [ ] Add migrations and adapter contract tests for memory, SQLite, and PostgreSQL.
+- [ ] Replace raw relationship multiplication and the learned-weight ceiling only through a
+  versioned shadow profile with rollback.
+
+Exit gate: private evidence cannot cross scope through any normal runtime path, and all learned
+serving state can be rebuilt from policy-compliant events.
+
+## Step 8 — Validate with real models and realistic data
+
+- [ ] Repeat the transfer experiment with a stronger teacher and a smaller consumer model.
+- [ ] Rerun real-model isolated gates and pairwise Mem0/Temporal integrations.
+- [ ] Run a fixed development slice of LongMemEval without changing it during iteration.
+- [ ] Add WikiConv for evolving conversation state and conflict/supersession behavior.
+- [ ] Add EverMemBench only after bounded ingestion and evaluation costs are measured.
+- [ ] Measure task success, recall, context tokens, latency, cost, false positives, unrelated
+  regression, and small-model uplift.
+
+Exit gate: the gain survives nondeterministic models and data outside the synthetic fixture.
+
+## Steps 9–11 — Scale only proven behavior
+
+Step 9 adds PostgreSQL observation events, aggregate projections, versioned snapshots, canary
+promotion, rollback, audit, and partitioning. It does not introduce Neo4j, MongoDB, Pinecone, or
+a second canonical store without measured necessity.
+
+Step 10 adds a leased PostgreSQL job queue and a small Mac worker only after canonical storage is
+hosted and reachable while the laptop is off. The Mac runs inference/enrichment; it does not
+become the only copy of user data. Deployment must state how the worker starts, stays running,
+receives secrets, connects over TLS, logs failures, retries work, and updates safely.
+
+Step 11 adds procedures as a separate ordered structure after associative retrieval and learning
+are validated. Procedures reference source atoms and outcomes but do not replace atom-to-atom
+relationships. The gate is improved small-model task completion versus the same token budget of
+unstructured memories.
+
+## Deliberately not building yet
+
+- hosted global accounts, public APIs, or a global production database;
+- automatic promotion from an individual outcome to global serving state;
+- secure aggregation or differential privacy implementation before the export boundary is
+  characterized;
+- distributed graph infrastructure;
+- autonomous Mac execution before always-available canonical storage exists;
+- GroupTags, recursive traversal, adaptive ranking, or procedures mixed into the first transfer
+  experiment;
+- training on hidden chain-of-thought.
+
+These are not rejected capabilities. They are sequenced behind evidence so failures can be
+attributed to one mechanism at a time.
+
+## Progress log
+
+Append one short entry after every work session.
+
+| Date | Step | Change | Evidence/result | Next action |
+|---|---|---|---|---|
+| 2026-09-02 | 0 | Consolidated architecture into an executable roadmap | Relevant documents reconciled; `git diff --check` passed | Commit the documentation baseline |

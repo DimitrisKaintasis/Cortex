@@ -9,6 +9,9 @@ harness and its limitations are documented in
 [`docs/ISOLATED-CAPABILITY-GATES.md`](docs/ISOLATED-CAPABILITY-GATES.md). Recovered historical
 scope, current gaps, anti-goals, and the dependency-ordered repair plan are recorded in
 [`docs/ARCHITECTURE-RECONCILIATION.md`](docs/ARCHITECTURE-RECONCILIATION.md).
+The current build order, pass/fail gates, and session progress log live in
+[`docs/EXECUTION-ROADMAP.md`](docs/EXECUTION-ROADMAP.md); use it as the operational source of
+truth for what happens next.
 
 Data Retrieval is a clean successor to the original `Tags-Project`. It is a
 tag-centric retrieval engine that keeps source order, tag provenance, and

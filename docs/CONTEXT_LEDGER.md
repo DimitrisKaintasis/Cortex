@@ -142,8 +142,13 @@ These may reference atoms but must not replace atom-to-atom associative weights.
   renewed evidence may reactivate a relationship.
 - The first bounded `0.5`, `+0.05`, `-0.02 every N ticks` Tags formula and the later unbounded
   Cortex formula are preserved as experiment baselines, not copied as untested constants.
-- The next ordered repair is the payload reference/handler contract, which must now include
-  scope, visibility, and contribution policy.
+- The active operational sequence is maintained in `EXECUTION-ROADMAP.md`.
+- The immediate work is an isolated, deterministic collective-transfer experiment after the
+  current baseline is recorded. It may define a minimal experimental export boundary but must
+  not change canonical schemas or normal serving behavior.
+- The payload reference/handler contract, including scope, visibility, and contribution policy,
+  becomes the next canonical repair only if the collective experiment reaches a proceed
+  decision.
 
 ## Superseded or rejected
 

@@ -477,7 +477,9 @@ location.
 
 ## Immediate implementation order
 
-The next work should be narrow even though the preserved vision is broad:
+The maintained, step-by-step implementation checklist is
+[`EXECUTION-ROADMAP.md`](EXECUTION-ROADMAP.md). It is the operational source of truth for status,
+evidence, gates, and the next action. The dependency order preserved here is:
 
 1. **Implemented:** split role/modality and correct Mem0-derived atom classification;
 2. **Implemented:** add provenance-aware and role-aware evidence packing;
@@ -486,12 +488,15 @@ The next work should be narrow even though the preserved vision is broad:
 5. **Implemented:** unified immutable weight-event ledger and aggregate audit/rebuild;
 6. **Accepted (contract level):** ADR-0013 collective graph and ADR-0014 unbounded support,
    relative influence, and forgetting lifecycle;
-7. record the payload-reference/handler contract with scope, visibility, and contribution
-   policy;
-8. rerun real-model capability gates, then pairwise integrations and a fixed LongMemEval slice;
-9. run the isolated cross-user transfer/leakage/poisoning experiment;
-10. then choose among source adapters, bounded recursive traversal, and GroupTags as the next
-    measured capability.
+7. reproduce and record the current deterministic baseline;
+8. run the isolated shadow cross-user transfer, policy-ablation, leakage, lifecycle, and
+   poisoning experiment without changing canonical schemas or normal serving behavior;
+9. use that evidence to decide whether to proceed, revise, or reject the collective mechanism;
+10. after a proceed decision, record and implement the payload-reference/handler contract with
+    scope, visibility, and contribution policy;
+11. rerun real-model gates, pairwise integrations, and fixed benchmark slices;
+12. then choose among production collective persistence, source adapters, bounded recursive
+    traversal, and GroupTags according to measured value and dependencies.
 
 This order protects current data before adding ranking complexity. It also gives GroupTags,
 recursive traversal, exploration, adaptive profiles, remote workers, and procedures the durable
