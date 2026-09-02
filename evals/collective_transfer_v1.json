@@ -1,0 +1,88 @@
+{
+  "fixture_id": "collective-transfer-v1",
+  "as_of": "2026-09-02T12:00:00+00:00",
+  "private_sentinels": [
+    "A_PRIVATE_PAYLOAD_SENTINEL_7f29",
+    "A_PRIVATE_IDENTITY_SENTINEL_3c81",
+    "A_PRIVATE_SOURCE_PATH_SENTINEL_9d44"
+  ],
+  "concepts": {
+    "storage_query": "storage architecture",
+    "postgresql": "postgresql",
+    "graph_database": "graph database",
+    "remote_query": "remote inference",
+    "ollama": "ollama",
+    "cloud_api": "cloud inference api",
+    "outlier": "unrelated outlier"
+  },
+  "main_policy": {
+    "policy_id": "collective-shadow-v1",
+    "contributor_support_cap": 1.0,
+    "half_life_days": 30.0,
+    "negative_penalty": 1.0,
+    "normalization": "maximum",
+    "hot_threshold": 2.0,
+    "warm_threshold": 1.0,
+    "dormant_threshold": 0.1,
+    "bonus_weight": 0.3
+  },
+  "storage_case": {
+    "query_concepts": ["storage_query"],
+    "target_candidate_id": "b-storage-postgresql",
+    "candidates": [
+      {
+        "candidate_id": "b-storage-postgresql",
+        "baseline_score": 0.45,
+        "concepts": ["postgresql"]
+      },
+      {
+        "candidate_id": "b-storage-graph",
+        "baseline_score": 0.55,
+        "concepts": ["graph_database"]
+      }
+    ]
+  },
+  "unrelated_case": {
+    "query_concepts": ["remote_query"],
+    "candidates": [
+      {
+        "candidate_id": "b-remote-ollama",
+        "baseline_score": 0.6,
+        "concepts": ["ollama"]
+      },
+      {
+        "candidate_id": "b-remote-cloud",
+        "baseline_score": 0.4,
+        "concepts": ["cloud_api"]
+      }
+    ]
+  },
+  "positive_observations": [
+    {
+      "local_event_key": "a-storage-win-1",
+      "contributor_bucket": "epoch-contributor-a",
+      "source": "storage_query",
+      "target": "postgresql",
+      "outcome": "positive",
+      "support": 0.8
+    },
+    {
+      "local_event_key": "a-storage-partial-1",
+      "contributor_bucket": "epoch-contributor-a",
+      "source": "storage_query",
+      "target": "graph_database",
+      "outcome": "positive",
+      "support": 0.4
+    }
+  ],
+  "negative_observations": [
+    {
+      "local_event_key": "a-storage-loss-1",
+      "contributor_bucket": "epoch-contributor-a",
+      "source": "storage_query",
+      "target": "postgresql",
+      "outcome": "negative",
+      "support": 0.8
+    }
+  ]
+}

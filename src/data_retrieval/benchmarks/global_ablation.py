@@ -87,7 +87,11 @@ class GlobalAblationReport:
 
 
 class GlobalAblationRunner:
-    """Evaluates core atom retrieval capabilities in a single shared global namespace."""
+    """Evaluates atom retrieval in one shared LongMemEval namespace.
+
+    This is a retrieval-channel ablation, not a privacy-preserving cross-user transfer test.
+    It has no private overlays, minimized observations, contributor bounds, or global snapshots.
+    """
 
     def __init__(
         self,

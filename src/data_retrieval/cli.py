@@ -13,6 +13,7 @@ from uuid import uuid4
 import psycopg
 
 from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
+from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuite
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.domain.models import TagCandidateState
@@ -372,6 +373,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/results/isolated-capabilities.json"),
     )
+    collective = commands.add_parser(
+        "evaluate-collective-transfer",
+        help="run the deterministic shadow collective-transfer experiment",
+    )
+    collective.add_argument(
+        "--fixture",
+        type=Path,
+        default=Path("evals/collective_transfer_v1.json"),
+    )
+    collective.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/collective-transfer-v1.json"),
+    )
     return parser
 
 
@@ -416,8 +431,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _feedback(args)
         elif args.command == "evaluate":
             output = _evaluate(args)
-        else:
+        elif args.command == "evaluate-capabilities":
             output = _evaluate_capabilities(args, parser)
+        else:
+            output = _evaluate_collective_transfer(args, parser)
     except (
         OSError,
         UnicodeError,
@@ -431,7 +448,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     print(json.dumps(output, indent=2))
-    if args.command == "evaluate-capabilities" and output["passed"] is False:
+    if args.command in {
+        "evaluate-capabilities",
+        "evaluate-collective-transfer",
+    } and output["passed"] is False:
         return 1
     return 0
 
@@ -1106,6 +1126,24 @@ def _evaluate_capabilities(
         parser.error(f"capability fixture does not exist: {args.fixture}")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     report = IsolatedCapabilitySuite().run(
+        args.fixture,
+        artifact_location=args.report,
+    )
+    payload = report.as_dict()
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _evaluate_collective_transfer(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.fixture.is_file():
+        parser.error(f"collective transfer fixture does not exist: {args.fixture}")
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    report = CollectiveTransferSuite().run(
         args.fixture,
         artifact_location=args.report,
     )

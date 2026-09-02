@@ -27,6 +27,11 @@ class CliParserTests(unittest.TestCase):
 
         self.assertEqual(args.tag_model, "query-tagger")
 
+    def test_collective_transfer_experiment_has_isolated_defaults(self) -> None:
+        args = build_parser().parse_args(["evaluate-collective-transfer"])
+
+        self.assertEqual(args.fixture.as_posix(), "evals/collective_transfer_v1.json")
+        self.assertEqual(args.report.as_posix(), "data/results/collective-transfer-v1.json")
 
     def test_tag_candidate_review_commands_are_exposed(self) -> None:
         listed = build_parser().parse_args(

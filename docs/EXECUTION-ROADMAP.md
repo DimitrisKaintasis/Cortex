@@ -2,7 +2,7 @@
 
 Status: active  
 Last updated: 2026-09-02  
-Current step: 0 — preserve the accepted baseline
+Current step: 4 — expand the policy comparison fixture matrix
 
 This is the operational source of truth for what we build next. The architecture documents
 describe what the system may become; this file records the order in which we will prove and
@@ -22,12 +22,12 @@ A step is `passed` only when its evidence is checked into the repository or link
 
 | Step | Status | Outcome | Unlocks |
 |---|---|---|---|
-| 0. Preserve baseline | in progress | Accepted scope and current behavior are recoverable | Safe experimentation |
-| 1. Reproduce current baseline | not started | Existing tests and capability gates have recorded results | Trustworthy before/after comparison |
-| 2. Build shadow collective core | not started | Policy math runs without production mutation | Cross-user experiments |
-| 3. Prove positive and negative transfer | not started | A changes B through shared concepts only | Central thesis evaluation |
-| 4. Compare weight policies | not started | A measured policy wins over controls | Candidate learning policy |
-| 5. Test privacy, poisoning, and lifecycle | not started | Leakage and manipulation stay within declared gates | Safe schema design |
+| 0. Preserve baseline | passed | Accepted scope and current behavior are recoverable | Safe experimentation |
+| 1. Reproduce current baseline | passed | Existing tests and capability gates have recorded results | Trustworthy before/after comparison |
+| 2. Build shadow collective core | passed | Policy math runs without production mutation | Cross-user experiments |
+| 3. Prove positive and negative transfer | passed | A changes B through shared concepts only | Central thesis evaluation |
+| 4. Compare weight policies | in progress | A measured policy wins over controls | Candidate learning policy |
+| 5. Test privacy, poisoning, and lifecycle | in progress | Leakage and manipulation stay within declared gates | Safe schema design |
 | 6. Make the architecture decision | not started | Proceed, revise, or reject is recorded from evidence | Production implementation |
 | 7. Repair canonical contracts | not started | Scope, visibility, payload, and contribution are explicit | Real multi-scope runtime |
 | 8. Validate with real models and data | not started | Gains survive realistic noise and model differences | Product evidence |
@@ -46,7 +46,7 @@ being reconstructed from chat again.
 - [x] Record current runtime mismatches and non-goals.
 - [x] Create this ordered roadmap.
 - [x] Review the documentation diff for contradictions.
-- [ ] Commit the documentation baseline separately from experimental code.
+- [x] Commit the documentation baseline separately from experimental code (`77b3df4`).
 
 Exit gate: the accepted architecture, historical provenance, next experiment, and known gaps are
 available from repository documents in a clean documentation commit.
@@ -58,31 +58,40 @@ Evidence: `COLLECTIVE-CAPABILITY-GRAPH.md`, ADR-0013, ADR-0014, the context ledg
 Purpose: distinguish new experimental effects from regressions in the working ingestion,
 retrieval, temporal, Mem0, tag-lifecycle, and weight-ledger foundations.
 
-- [ ] Run the full unit test suite.
-- [ ] Run all seven isolated capability gates.
-- [ ] Run lint and documentation integrity checks.
-- [ ] Record the commit, commands, environment, pass/fail counts, and artifacts.
-- [ ] Explicitly label `GlobalAblationRunner` as a shared-namespace LongMemEval ablation, not a
+- [x] Run the full unit test suite.
+- [x] Run all seven isolated capability gates.
+- [x] Run lint and documentation integrity checks.
+- [x] Record the commit, commands, environment, pass/fail counts, and artifacts.
+- [x] Explicitly label `GlobalAblationRunner` as a shared-namespace LongMemEval ablation, not a
   privacy-preserving collective-transfer test.
 
 Exit gate: the baseline is reproducible, and any existing failure is documented before new code
 is introduced.
+
+Evidence recorded on baseline commit `77b3df4` with Python 3.13.1:
+
+- 97 unit tests passed; 2 live PostgreSQL integration tests skipped because no test DSN was set;
+- 7 of 7 isolated capability gates passed;
+- `src` and `tests` passed Ruff 0.15.1;
+- whole-repository Ruff found 53 pre-existing findings in legacy benchmark scripts, primarily
+  long lines, unused imports/variables, and unnecessary f-strings;
+- `git diff --check` passed.
 
 ## Step 2 — Build the shadow collective core
 
 Purpose: implement only the concepts required to test the central thesis. This is an
 experimental policy module, not the production global graph.
 
-- [ ] Define stable shared concept IDs independent of A and B's private namespaces.
-- [ ] Define a minimized relationship-observation record containing no atom payload, document,
+- [x] Define stable shared concept IDs independent of A and B's private namespaces.
+- [x] Define a minimized relationship-observation record containing no atom payload, document,
   query, session, or public user identity.
-- [ ] Keep positive and negative support as separate values.
-- [ ] Implement configurable lazy proportional half-life decay.
-- [ ] Implement explicit comparison neighborhoods and relative `log1p` normalization.
-- [ ] Add contributor caps and idempotency so repetition by one contributor is bounded.
-- [ ] Aggregate observations into an immutable shadow snapshot.
-- [ ] Make every result deterministic and replayable from observations.
-- [ ] Keep the normal repositories, database schema, and `RetrievalService` unchanged.
+- [x] Keep positive and negative support as separate values.
+- [x] Implement configurable lazy proportional half-life decay.
+- [x] Implement explicit comparison neighborhoods and relative `log1p` normalization.
+- [x] Add contributor caps and idempotency so repetition by one contributor is bounded.
+- [x] Aggregate observations into an immutable shadow snapshot.
+- [x] Make every result deterministic and replayable from observations.
+- [x] Keep the normal repositories, database schema, and `RetrievalService` unchanged.
 
 Exit gate: identical observation input produces an identical snapshot and score output across
 replay, while existing tests remain unchanged.
@@ -101,12 +110,12 @@ Fixture:
 
 Required assertions:
 
-- [ ] B's relevant retrieval improves after A's successful observations.
-- [ ] A verified failure weakens the corresponding route for B.
-- [ ] B never receives A's atoms, text, metadata, source structure, or identity.
-- [ ] Unrelated B queries do not regress beyond the declared tolerance.
-- [ ] Removing the global snapshot restores B's exact baseline.
-- [ ] The report shows the route and score components that caused every change.
+- [x] B's relevant retrieval improves after A's successful observations.
+- [x] A verified failure weakens the corresponding route for B.
+- [x] B never receives A's atoms, text, metadata, source structure, or identity in the fixture.
+- [x] Unrelated B queries do not regress beyond the declared tolerance.
+- [x] Removing the global snapshot restores B's exact baseline.
+- [x] The report shows the route and score components that caused every change.
 
 Initial gates for the deterministic fixture:
 
@@ -118,6 +127,10 @@ Initial gates for the deterministic fixture:
 
 Exit gate: the test demonstrates capability transfer through shared relationships rather than
 shared private evidence.
+
+Evidence: `COLLECTIVE-TRANSFER-EXPERIMENT.md`, `evals/collective_transfer_v1.json`, and
+`tests/test_collective.py`. The deterministic suite passes 18 of 18 checks. This gate proves the
+mechanism in the controlled fixture, not real-world quality or production privacy.
 
 ## Step 4 — Compare learning policies
 
@@ -146,13 +159,13 @@ before modifying production code.
 Purpose: make failure modes visible before we encode the global storage contract.
 
 - [ ] Try to infer A's content, identity, rare concepts, and source structure from exports.
-- [ ] Repeat identical feedback from one contributor and verify the cap.
-- [ ] Add multiple independent contributors and verify their evidence can accumulate.
+- [x] Repeat identical feedback from one contributor and verify the cap.
+- [x] Add multiple independent contributors and verify their evidence can accumulate.
 - [ ] Add noisy, stale, contradictory, and malicious contributors.
-- [ ] Verify dormancy through time, inhibition through verified negative evidence, and
+- [x] Verify dormancy through time, inhibition through verified negative evidence, and
   reactivation through renewed independent evidence.
 - [ ] Build shadow and candidate snapshots; reject a regression and restore the active snapshot.
-- [ ] Record residual risks that require consent, sensitivity classification, thresholding,
+- [x] Record residual risks that require consent, sensitivity classification, thresholding,
   aggregation, or stronger privacy technology in production.
 
 Exit gate: the synthetic adversarial suite passes explicit thresholds, or the failed mechanism
@@ -242,3 +255,5 @@ Append one short entry after every work session.
 | Date | Step | Change | Evidence/result | Next action |
 |---|---|---|---|---|
 | 2026-09-02 | 0 | Consolidated architecture into an executable roadmap | Relevant documents reconciled; `git diff --check` passed | Commit the documentation baseline |
+| 2026-09-02 | 1 | Reproduced the pre-experiment baseline | 97 tests and 7/7 gates passed; maintained surfaces lint-clean | Build shadow core |
+| 2026-09-02 | 2–3 | Added isolated collective core and transfer harness | 18/18 experiment checks and 104/104 unit tests passed; 2 live PostgreSQL tests skipped | Expand policy/adversarial fixture matrix |

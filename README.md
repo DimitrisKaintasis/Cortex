@@ -64,6 +64,17 @@ Run the seven isolated architecture contracts before combined evaluation:
 python -m data_retrieval evaluate-capabilities
 ```
 
+Run the isolated privacy-preserving cross-user mechanism test separately:
+
+```powershell
+python -m data_retrieval evaluate-collective-transfer
+```
+
+This is a deterministic shadow experiment; it does not mutate normal retrieval, databases, or
+global serving state. See the
+[collective transfer experiment report](docs/COLLECTIVE-TRANSFER-EXPERIMENT.md) for the exact
+question, result, policy ablations, and limitations.
+
 Optional developer tools can be installed with:
 
 ```powershell
