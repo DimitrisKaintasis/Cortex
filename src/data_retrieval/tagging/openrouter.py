@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from data_retrieval.domain.models import TagLevel
 from data_retrieval.inference.openrouter import OpenRouterError, OpenRouterJsonClient
 from data_retrieval.tagging.proposals import TagProposal
 
@@ -148,7 +149,11 @@ class OpenRouterTagProposer:
             raise OpenRouterError("OpenRouter response field 'tags' must be a list")
         try:
             return tuple(
-                TagProposal(text=str(item["text"]), confidence=float(item["confidence"]))
+                TagProposal(
+                    text=str(item["text"]),
+                    confidence=float(item["confidence"]),
+                    level=TagLevel(str(item["level"])),
+                )
                 for item in raw_tags[: self.max_tags]
             )
         except (KeyError, TypeError, ValueError) as error:
@@ -162,6 +167,8 @@ class OpenRouterTagProposer:
             f"{self.max_tags} concise concept tags. Prefer an exact existing catalog tag when "
             "it fits; create a new tag only when necessary. Do not tag names that are merely "
             "mentioned unless central to the atom. Confidence must be between 0 and 1. "
+            "Classify every tag level as broad for a general category or specific for a "
+            "narrow concept; phrase length does not determine the level. "
             f"Namespace: {namespace}. Existing catalog: {catalog_text}."
         )
 
@@ -189,8 +196,12 @@ class OpenRouterTagProposer:
                                             "minimum": 0,
                                             "maximum": 1,
                                         },
+                                        "level": {
+                                            "type": "string",
+                                            "enum": ["broad", "specific"],
+                                        },
                                     },
-                                    "required": ["text", "confidence"],
+                                    "required": ["text", "confidence", "level"],
                                     "additionalProperties": False,
                                 },
                             },

@@ -75,6 +75,32 @@ documented historically but not completely protected by current runtime tests.
 
 These may reference atoms but must not replace atom-to-atom associative weights.
 
+## Tag lifecycle repair — implemented 2026-09-02
+
+- ADR-0011 separates untrusted atom-specific `TagCandidate` records from canonical serving
+  tags.
+- Model proposals now include explicit broad/specific level; persisted candidates include
+  confidence, producer, proposal version, resolution, and timestamps.
+- Novel candidates create no serving tag or atom-tag edge. Exact/semantic catalog matches may
+  resolve immediately; review supports atomic promote, merge, and reject operations.
+- Explicit user tags are canonical and have distinct `explicit` provenance.
+- Legacy migrations preserve old explicit tags while quarantining model-only `proposed_new`
+  relationships.
+- This lifecycle repair unblocked the immutable weight-event history completed below.
+
+## Immutable weight ledger — implemented 2026-09-02
+
+- ADR-0012 makes append-only `weight_events` authoritative for atom-tag, atom-link, and
+  tag-relation weights while retaining fast serving aggregates.
+- Ingestion, tag review, calibration/Mem0, and explicit feedback record versioned before/after
+  transitions atomically with aggregate changes.
+- Existing databases receive labeled migration baselines; unavailable pre-ledger detail is not
+  fabricated.
+- `audit-weights` reconstructs every edge and reports missing history, broken chains, and cache
+  divergence. `--repair-aggregates` explicitly restores only the serving cache.
+- Automatic groups now have the required history substrate, but still require their own quality
+  gate. The next ordered repair is the payload reference/handler contract.
+
 ## Superseded or rejected
 
 - Neo4j as a required graph database: PostgreSQL adjacency tables and recursive queries keep one

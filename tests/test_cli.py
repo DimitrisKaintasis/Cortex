@@ -28,5 +28,37 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.tag_model, "query-tagger")
 
 
+    def test_tag_candidate_review_commands_are_exposed(self) -> None:
+        listed = build_parser().parse_args(
+            ["list-tag-candidates", "--namespace", "project-a", "--state", "proposed"]
+        )
+        resolved = build_parser().parse_args(
+            [
+                "resolve-tag-candidate",
+                "candidate-1",
+                "--action",
+                "merge",
+                "--canonical-tag",
+                "database",
+            ]
+        )
+
+        self.assertEqual(listed.state, "proposed")
+        self.assertEqual(resolved.action, "merge")
+        self.assertEqual(resolved.canonical_tag, "database")
+
+    def test_weight_audit_can_explicitly_request_aggregate_repair(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "audit-weights",
+                "--namespace",
+                "project-a",
+                "--repair-aggregates",
+            ]
+        )
+
+        self.assertTrue(args.repair_aggregates)
+
+
 if __name__ == "__main__":
     unittest.main()

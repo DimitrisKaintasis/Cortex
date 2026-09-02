@@ -65,9 +65,9 @@ measurement remains pending.
 
 ### 2. The tag proposal and lifecycle contracts are too thin
 
-`TagProposal` currently carries only text and confidence. Broad/specific level is inferred from
-whether a normalized tag contains whitespace. A `proposed_new` tag has no promotion, rejection,
-merge, or alias-history lifecycle, yet proposed tags can enter serving paths.
+Historically, `TagProposal` carried only text and confidence. Broad/specific level was inferred
+from whitespace. A `proposed_new` tag had no promotion, rejection, or merge lifecycle, yet its
+edges could enter serving paths.
 
 Required design before mutation:
 
@@ -78,10 +78,15 @@ Required design before mutation:
 - separate quality metrics for proposal precision, coverage, level accuracy, hierarchy
   accuracy, catalog-match correctness, and degraded behavior.
 
-Recommended serving policy: proposed tags may support a bounded exact direct match, clearly
-labeled as provisional, but must not act as canonical catalog hints or recursive relationship
-expansion nodes until promoted. Thresholds must be selected by evaluation rather than copied
-from historical code.
+Repair status: ADR-0011 is implemented. Provider outputs now carry explicit semantic level;
+atom-specific `TagCandidate` records preserve confidence, producer, and proposal version; exact
+and semantic catalog matches resolve to canonical tags; novel candidates are quarantined until
+promoted or merged, and rejection records a reason. SQLite/PostgreSQL migrate old explicit tags
+to canonical state and old model-only `proposed_new` edges into quarantine. Parent/hierarchy
+candidates and automatic promotion thresholds remain evaluation-driven future work.
+
+Serving policy: proposed candidates create no tag or atom-tag edge and therefore cannot affect
+retrieval, calibration, relationship expansion, or learning.
 
 ### 3. Learned state is not fully reconstructable
 
@@ -98,6 +103,13 @@ Required repair:
 - versioned learning policies and rollback-compatible serving snapshots.
 
 Automatic group promotion must not precede this substrate.
+
+Repair status: ADR-0012 is implemented. Ingestion, calibration/Mem0, feedback, and tag review
+append immutable before/after transitions in the same transaction as their serving aggregate.
+Pre-ledger edges receive labeled migration baselines. Namespace audit reconstructs each chain,
+detects missing/broken history and aggregate divergence, and can explicitly restore aggregate
+caches without rewriting events. Conflict/counterexample policy and serving-snapshot rollback
+remain future learning-policy work rather than ledger prerequisites.
 
 ### 4. Payload independence is only partially represented
 
@@ -165,7 +177,8 @@ Required repair:
 
 - evidence-backed broad/specific tag hierarchies;
 - bounded layered tag expansion and semantic fail-safe;
-- immutable weight history, conflicts, negative direct-plus-one-hop learning, and rollback;
+- immutable weight history (implemented), plus future conflict policy, negative direct-plus-one-
+  hop learning, and serving-snapshot rollback;
 - global/project/user scope profiles and privacy-aware personalization;
 - hot/warm/cold exploration and adaptive channel profiles with control groups;
 - source adapters for chats, code ASTs, Git history, structured events, and media;
@@ -179,8 +192,8 @@ Required repair:
 
 1. **Implemented (contract level):** restore and gate the optional tag-first query path in
    normal retrieval and general evaluation. Real-model quality remains part of step 5.
-2. Specify and test the structured tag proposal and proposed-tag lifecycle.
-3. Implement the unified immutable weight-event ledger and aggregate rebuild.
+2. **Implemented:** structured tag proposal and quarantined candidate lifecycle.
+3. **Implemented:** unified immutable weight-event ledger, audit, and aggregate rebuild.
 4. Record the payload-reference/handler contract without disrupting text ingestion.
 5. Run real-model tag, Mem0, and Temporal quality gates.
 6. Run pairwise integrations with matched inputs and budgets.

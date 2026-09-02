@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from temporal_history.core import NormalizedEvent, Period
 
+from data_retrieval.domain.models import TagLevel
 from data_retrieval.tagging.ollama import OllamaError, OllamaTagProposer
 from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
 
@@ -37,7 +38,11 @@ class OllamaTagProposerTests(unittest.TestCase):
                                     {
                                         "atom_id": "item_0",
                                         "tags": [
-                                            {"text": "Data Retrieval", "confidence": 0.91}
+                                            {
+                                                "text": "Data Retrieval",
+                                                "confidence": 0.91,
+                                                "level": "specific",
+                                            }
                                         ],
                                     }
                                 ]
@@ -61,6 +66,7 @@ class OllamaTagProposerTests(unittest.TestCase):
 
         self.assertEqual(proposals[0].text, "Data Retrieval")
         self.assertEqual(proposals[0].confidence, 0.91)
+        self.assertIs(proposals[0].level, TagLevel.SPECIFIC)
         request = mock_open.call_args.args[0]
         payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual(request.full_url, "http://127.0.0.1:11435/api/chat")

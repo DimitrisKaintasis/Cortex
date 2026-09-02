@@ -17,6 +17,9 @@ from data_retrieval.domain.models import (
     AtomLinkRelation,
     AtomRole,
     PayloadModality,
+    TagCandidateState,
+    TagLevel,
+    WeightEventSource,
 )
 from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.mem0 import Mem0BootstrapService
@@ -32,6 +35,8 @@ from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
+from data_retrieval.services.tag_lifecycle import TagLifecycleService
+from data_retrieval.services.weight_ledger import WeightLedgerService
 from data_retrieval.storage.memory import InMemoryRepository
 from data_retrieval.storage.sqlite import SQLiteRepository
 from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
@@ -455,21 +460,47 @@ class IsolatedCapabilitySuite:
             text=str(fixture["text"]),
         )
         proposals = tuple(
-            TagProposal(text=str(value["text"]), confidence=float(value["confidence"]))
+            TagProposal(
+                text=str(value["text"]),
+                confidence=float(value["confidence"]),
+                level=TagLevel(str(value["level"])),
+            )
             for value in fixture["proposals"]
         )
         service = TagEnrichmentService(repository, _FixtureTagProposer(proposals))
         first = service.enrich_document(ingested.document_id)
         replay = service.enrich_document(ingested.document_id)
+        quarantined = repository.list_tag_candidates(
+            namespace=str(fixture["namespace"]), state=TagCandidateState.PROPOSED
+        )
+        initial_tag_count = len(repository.list_tags(str(fixture["namespace"])))
+        initial_edge_count = len(repository.list_atom_tags(str(fixture["namespace"])))
+        lifecycle = TagLifecycleService(repository)
+        for candidate in quarantined:
+            lifecycle.promote(candidate.candidate_id)
         actual = {tag.canonical_text for tag in repository.list_tags(str(fixture["namespace"]))}
         expected = {str(value) for value in fixture["expected_canonical_tags"]}
         intersection = actual & expected
         precision = len(intersection) / len(actual) if actual else 0.0
         recall = len(intersection) / len(expected) if expected else 0.0
         checks = (
+            self._check(
+                "novel_proposals_quarantined",
+                (0, 0),
+                (initial_tag_count, initial_edge_count),
+            ),
+            self._check(
+                "structured_levels_preserved",
+                {"broad", "specific"},
+                {value.level.value for value in quarantined},
+            ),
             self._check("canonical_tag_set", expected, actual),
-            self._check("duplicate_proposal_collapsed", len(expected), len(first.tag_ids)),
-            self._check("atom_tag_attachments", len(expected), first.atom_tag_count),
+            self._check("duplicate_proposal_collapsed", len(expected), len(first.candidate_ids)),
+            self._check(
+                "atom_tag_attachments",
+                len(expected),
+                len(repository.list_atom_tags(str(fixture["namespace"]))),
+            ),
             self._check("replay_idempotent", True, replay.idempotent),
         )
         return {
@@ -529,6 +560,12 @@ class IsolatedCapabilitySuite:
             )
         except ValueError:
             replay_rejected = True
+        weight_audit = WeightLedgerService(repository).audit_namespace(namespace)
+        feedback_weight_events = tuple(
+            event
+            for event in repository.list_weight_events(namespace=namespace)
+            if event.source_type is WeightEventSource.FEEDBACK
+        )
         selected_delta = selected_after - selected_before
         collateral_delta = collateral_after - collateral_before
         checks = (
@@ -544,11 +581,14 @@ class IsolatedCapabilitySuite:
             ),
             self._check("credited_only_selected", (selected_id,), learned.credited_atom_ids),
             self._check("feedback_replay_rejected", True, replay_rejected),
+            self._check("weight_ledger_reconstructs_aggregates", True, weight_audit.passed),
+            self._check("feedback_weight_events", True, bool(feedback_weight_events)),
         )
         return {
             "selected_delta": selected_delta,
             "collateral_delta": collateral_delta,
             "atom_tag_updates": learned.atom_tag_updates,
+            "weight_event_count": weight_audit.event_count,
         }, checks
 
     def _retrieval_channels(

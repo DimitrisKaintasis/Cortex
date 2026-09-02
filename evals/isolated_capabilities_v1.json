@@ -51,9 +51,9 @@
     "source": "deployment-note",
     "text": "PostgreSQL stores retrieval data while the Mac Mini performs remote inference.",
     "proposals": [
-      {"text": "PostgreSQL", "confidence": 0.95},
-      {"text": "Remote Inference", "confidence": 0.90},
-      {"text": "postgresql", "confidence": 0.70}
+      {"text": "PostgreSQL", "confidence": 0.95, "level": "broad"},
+      {"text": "Remote Inference", "confidence": 0.90, "level": "specific"},
+      {"text": "postgresql", "confidence": 0.70, "level": "broad"}
     ],
     "expected_canonical_tags": ["postgresql", "remote inference"]
   },

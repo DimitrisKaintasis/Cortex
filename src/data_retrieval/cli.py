@@ -15,6 +15,7 @@ import psycopg
 from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
+from data_retrieval.domain.models import TagCandidateState
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.inference.openrouter import OpenRouterError
 from data_retrieval.mem0 import (
@@ -33,7 +34,9 @@ from data_retrieval.services.large_ingestion import LargeFileIngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
+from data_retrieval.services.tag_lifecycle import TagLifecycleService
 from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
+from data_retrieval.services.weight_ledger import WeightLedgerService
 from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.repository import Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
@@ -159,6 +162,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
     )
 
+    candidates = commands.add_parser(
+        "list-tag-candidates", help="list quarantined or resolved AI tag candidates"
+    )
+    _add_storage_options(candidates)
+    candidates.add_argument("--namespace", required=True)
+    candidates.add_argument(
+        "--state",
+        choices=tuple(state.value for state in TagCandidateState),
+        default=TagCandidateState.PROPOSED.value,
+    )
+    candidates.add_argument("--limit", type=int, default=100)
+
+    resolve_candidate = commands.add_parser(
+        "resolve-tag-candidate", help="promote, merge, or reject one tag candidate"
+    )
+    resolve_candidate.add_argument("candidate_id")
+    _add_storage_options(resolve_candidate)
+    resolve_candidate.add_argument(
+        "--action", choices=("promote", "merge", "reject"), required=True
+    )
+    resolve_candidate.add_argument(
+        "--canonical-tag", help="existing canonical tag required for merge"
+    )
+    resolve_candidate.add_argument("--reason", help="required reason for rejection")
+
     temporal = commands.add_parser(
         "enrich-temporal", help="create Temporal History summary atoms from stored atoms"
     )
@@ -245,6 +273,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-documents",
         type=int,
         help="global safety cap across the selected namespace scope",
+    )
+
+    weight_audit = commands.add_parser(
+        "audit-weights", help="reconstruct serving weights from immutable events"
+    )
+    _add_storage_options(weight_audit)
+    weight_audit.add_argument("--namespace", required=True)
+    weight_audit.add_argument(
+        "--repair-aggregates",
+        action="store_true",
+        help="replace mismatched serving aggregates with ledger-reconstructed weights",
     )
 
     interaction = commands.add_parser(
@@ -353,6 +392,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _run_longmemeval(args, parser)
         elif args.command == "enrich-tags":
             output = _enrich_tags(args)
+        elif args.command == "list-tag-candidates":
+            output = _list_tag_candidates(args)
+        elif args.command == "resolve-tag-candidate":
+            output = _resolve_tag_candidate(args)
         elif args.command == "enrich-temporal":
             output = _enrich_temporal(args)
         elif args.command == "enrich-embeddings":
@@ -363,6 +406,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _bootstrap_mem0(args, parser)
         elif args.command == "backfill-calibration":
             output = _backfill_calibration(args)
+        elif args.command == "audit-weights":
+            output = _audit_weights(args)
         elif args.command == "record-interaction":
             output = _record_interaction(args)
         elif args.command == "retrieve":
@@ -586,8 +631,76 @@ def _enrich_tags(args: argparse.Namespace) -> dict[str, object]:
     return {
         "document_id": result.document_id,
         "tag_ids": result.tag_ids,
+        "candidate_ids": result.candidate_ids,
         "atom_tag_count": result.atom_tag_count,
+        "proposed_count": result.proposed_count,
+        "resolved_count": result.resolved_count,
         "idempotent": result.idempotent,
+        "database": _database_label(args),
+    }
+
+
+def _list_tag_candidates(args: argparse.Namespace) -> dict[str, object]:
+    with _open_repository(args) as repository:
+        candidates = repository.list_tag_candidates(
+            namespace=args.namespace,
+            state=TagCandidateState(args.state),
+            limit=args.limit,
+        )
+    return {
+        "namespace": args.namespace,
+        "state": args.state,
+        "count": len(candidates),
+        "candidates": [
+            {
+                "candidate_id": candidate.candidate_id,
+                "atom_id": candidate.atom_id,
+                "text": candidate.normalized_text,
+                "display_text": candidate.display_text,
+                "level": candidate.level.value,
+                "confidence": candidate.confidence,
+                "producer": candidate.producer,
+                "proposal_version": candidate.proposal_version,
+                "resolved_tag_id": candidate.resolved_tag_id,
+                "resolution_reason": candidate.resolution_reason,
+                "created_at": candidate.created_at.isoformat(),
+                "resolved_at": (
+                    candidate.resolved_at.isoformat() if candidate.resolved_at else None
+                ),
+            }
+            for candidate in candidates
+        ],
+        "database": _database_label(args),
+    }
+
+
+def _resolve_tag_candidate(args: argparse.Namespace) -> dict[str, object]:
+    with _open_repository(args) as repository:
+        service = TagLifecycleService(repository)
+        if args.action == "promote":
+            if args.canonical_tag or args.reason:
+                raise ValueError("promote does not accept --canonical-tag or --reason")
+            result = service.promote(args.candidate_id)
+        elif args.action == "merge":
+            if not args.canonical_tag:
+                raise ValueError("merge requires --canonical-tag")
+            if args.reason:
+                raise ValueError("merge does not accept --reason")
+            result = service.merge(args.candidate_id, args.canonical_tag)
+        else:
+            if not args.reason:
+                raise ValueError("reject requires --reason")
+            if args.canonical_tag:
+                raise ValueError("reject does not accept --canonical-tag")
+            result = service.reject(args.candidate_id, reason=args.reason)
+    return {
+        "candidate_id": result.candidate.candidate_id,
+        "state": result.candidate.state.value,
+        "resolved_tag_id": result.candidate.resolved_tag_id,
+        "canonical_tag": result.tag.canonical_text if result.tag else None,
+        "atom_id": result.candidate.atom_id,
+        "atom_tag_activated": result.atom_tag is not None,
+        "resolution_reason": result.candidate.resolution_reason,
         "database": _database_label(args),
     }
 
@@ -809,6 +922,43 @@ def _backfill_calibration(args: argparse.Namespace) -> dict[str, object]:
         "scope_truncated": len(results) < len(namespaces) or any(
             result.truncated for result in results
         ),
+        "database": _database_label(args),
+    }
+
+
+def _audit_weights(args: argparse.Namespace) -> dict[str, object]:
+    with _open_repository(args) as repository:
+        service = WeightLedgerService(repository)
+        audit = (
+            service.repair_aggregates(args.namespace)
+            if args.repair_aggregates
+            else service.audit_namespace(args.namespace)
+        )
+    issues = [
+        {
+            "target_type": target.target_type.value,
+            "target_id": target.target_id,
+            "related_id": target.related_id,
+            "relation_type": target.relation_type,
+            "event_count": target.event_count,
+            "reconstructed_weight": target.reconstructed_weight,
+            "aggregate_weight": target.aggregate_weight,
+            "issues": target.issues,
+        }
+        for target in audit.targets
+        if not target.valid
+    ]
+    return {
+        "namespace": audit.namespace,
+        "passed": audit.passed,
+        "repair_requested": args.repair_aggregates,
+        "target_count": audit.target_count,
+        "event_count": audit.event_count,
+        "valid_target_count": audit.valid_target_count,
+        "mismatched_target_count": audit.mismatched_target_count,
+        "missing_event_target_count": audit.missing_event_target_count,
+        "issues": issues[:100],
+        "issues_truncated": len(issues) > 100,
         "database": _database_label(args),
     }
 

@@ -111,10 +111,10 @@ class LargeFileIngestService:
                     namespace=namespace,
                     canonical_text=canonical,
                     display_text=display,
-                    level=TagLevel.SPECIFIC if " " in canonical else TagLevel.BROAD,
-                    state=TagState.PROPOSED_NEW,
+                    level=TagLevel.SPECIFIC,
+                    state=TagState.CANONICAL,
                 )
-                origins[tag.tag_id] = TagOrigin.PROPOSED_NEW
+                origins[tag.tag_id] = TagOrigin.EXPLICIT
             else:
                 origins[tag.tag_id] = TagOrigin.CATALOG_MATCH
             tags.append(tag)

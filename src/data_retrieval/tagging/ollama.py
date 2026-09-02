@@ -6,6 +6,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from data_retrieval.domain.models import TagLevel
 from data_retrieval.tagging.proposals import TagProposal
 
 
@@ -264,14 +265,24 @@ class OllamaTagProposer:
                 raise OllamaError("each Ollama tag must be an object")
             text_value = raw_tag.get("text")
             confidence = raw_tag.get("confidence")
+            level = raw_tag.get("level")
             if (
                 not isinstance(text_value, str)
                 or isinstance(confidence, bool)
                 or not isinstance(confidence, int | float)
+                or level not in {TagLevel.BROAD.value, TagLevel.SPECIFIC.value}
             ):
-                raise OllamaError("each Ollama tag needs text and numeric confidence")
+                raise OllamaError(
+                    "each Ollama tag needs text, numeric confidence, and broad/specific level"
+                )
             try:
-                proposals.append(TagProposal(text=text_value, confidence=float(confidence)))
+                proposals.append(
+                    TagProposal(
+                        text=text_value,
+                        confidence=float(confidence),
+                        level=TagLevel(level),
+                    )
+                )
             except ValueError as error:
                 raise OllamaError(f"invalid Ollama tag proposal: {error}") from error
         return tuple(proposals)
@@ -285,9 +296,11 @@ class OllamaTagProposer:
             "Prefer an exact tag from the existing catalog when it fits; create a new tag only "
             "when necessary. Do not return names that are merely mentioned unless they are "
             "central to the atom. Confidence must be between 0 and 1. "
+            "Classify every tag level as broad for a general category or specific for a "
+            "narrow concept; phrase length does not determine the level. "
             "Return exactly one JSON object shaped as "
             '{"items":[{"atom_id":"item_0","tags":'
-            '[{"text":"concise tag","confidence":0.0}]}]}. '
+            '[{"text":"concise tag","confidence":0.0,"level":"specific"}]}]}. '
             "Do not add Markdown or commentary. "
             f"Namespace: {namespace}. Existing catalog: {catalog_text}."
         )

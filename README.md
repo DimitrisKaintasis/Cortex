@@ -196,6 +196,24 @@ python -m data_retrieval enrich-tags <document-id> `
   --ollama-model gemma4:12b-mlx
 ```
 
+Existing catalog matches attach immediately. A novel model suggestion is stored as a
+quarantined candidate and cannot affect retrieval or learned weights. Review pending candidates:
+
+```powershell
+python -m data_retrieval list-tag-candidates `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --state proposed
+
+python -m data_retrieval resolve-tag-candidate <candidate-id> `
+  --db .\data.sqlite3 `
+  --action promote
+```
+
+Use `--action merge --canonical-tag <existing-tag>` to reuse an existing concept, or
+`--action reject --reason "too vague"` to reject it. Resolution is atomic: accepted tags and
+edges appear together, while rejected candidates never enter the serving graph.
+
 Create Temporal summaries from all matching stored source atoms in a half-open time range:
 
 ```powershell
@@ -272,6 +290,21 @@ Feedback never rewrites source atoms or factual `SUPERSEDES`, `SUMMARIZES`,
 `SUPPORTED_BY`, and `DERIVED_FROM` links. It makes small bounded changes to atom-tag weights,
 learned `CO_USED` atom links, and tag co-occurrence relations. Summary selections pass only
 partial credit to their source lineage.
+
+All edge-weight changes are recorded as immutable events while `weight_raw` remains a fast
+serving aggregate. Audit one namespace without changing it:
+
+```powershell
+python -m data_retrieval audit-weights `
+  --db .\data.sqlite3 `
+  --namespace personal
+```
+
+If an audit reports only aggregate mismatches, explicitly restore those caches with
+`--repair-aggregates`. Broken chains or missing history block repair rather than inventing
+events. Run repair while ingestion/learning workers for that namespace are stopped. Existing
+databases receive a labeled migration baseline when first opened by this version; it preserves
+the current starting weights while marking older detail unavailable.
 
 Import a Mem0 JSON/JSONL export. Records become native atoms; the embedding model enables
 the accepted 0.92 semantic near-duplicate check, and the optional tag model enriches records

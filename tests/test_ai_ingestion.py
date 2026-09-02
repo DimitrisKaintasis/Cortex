@@ -1,5 +1,6 @@
 import unittest
 
+from data_retrieval.domain.models import TagCandidateState, TagLevel
 from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
@@ -102,6 +103,10 @@ class AiIngestionTests(unittest.TestCase):
         self.assertEqual(tags[0].aliases, ("postgres storage",))
         edge = repository.atom_tags_for(target.atom_ids[0])[0]
         self.assertIn("semantic-catalog:stub:tag-vectors", edge.evidence_sources)
+        candidate = repository.list_tag_candidates(namespace="project-a")[0]
+        self.assertIs(candidate.state, TagCandidateState.MERGED)
+        self.assertEqual(candidate.producer, "stub:test-model")
+        self.assertEqual(candidate.proposal_version, "stub-v1")
 
     def test_batch_provider_classifies_one_document_in_one_call(self) -> None:
         repository = InMemoryRepository()
@@ -122,11 +127,21 @@ class AiIngestionTests(unittest.TestCase):
             ),
         )
 
-        TagEnrichmentService(repository, proposer).enrich_document(result.document_id)
+        enrichment = TagEnrichmentService(repository, proposer).enrich_document(
+            result.document_id
+        )
 
         self.assertEqual(len(proposer.batch_calls), 1)
         self.assertEqual(len(proposer.batch_calls[0][0]), 2)
-        self.assertEqual(len(repository.list_tags("project-a")), 2)
+        self.assertEqual(repository.list_tags("project-a"), ())
+        self.assertEqual(repository.list_atom_tags("project-a"), ())
+        self.assertEqual(enrichment.proposed_count, 2)
+        self.assertEqual(
+            {candidate.normalized_text for candidate in repository.list_tag_candidates(
+                namespace="project-a", state=TagCandidateState.PROPOSED
+            )},
+            {"database", "remote inference"},
+        )
 
     def test_model_tags_are_atom_specific_normalized_and_traceable(self) -> None:
         repository = InMemoryRepository()
@@ -162,8 +177,10 @@ class AiIngestionTests(unittest.TestCase):
         self.assertEqual(len(proposer.calls), 2)
         self.assertEqual(
             [tag.canonical_text for tag in repository.list_tags("project-a")],
-            ["architecture", "data retrieval", "remote inference"],
+            ["architecture"],
         )
+        self.assertEqual(enrichment.proposed_count, 2)
+        self.assertEqual(enrichment.resolved_count, 1)
 
         first_edges = repository.atom_tags_for(result.atom_ids[0])
         second_edges = repository.atom_tags_for(result.atom_ids[1])
@@ -171,15 +188,22 @@ class AiIngestionTests(unittest.TestCase):
         first = {tags_by_id[edge.tag_id].canonical_text: edge for edge in first_edges}
         second = {tags_by_id[edge.tag_id].canonical_text: edge for edge in second_edges}
 
-        self.assertEqual(set(first), {"architecture", "data retrieval"})
-        self.assertEqual(set(second), {"architecture", "remote inference"})
-        self.assertEqual(first["data retrieval"].confidence, 0.9)
-        self.assertEqual(first["data retrieval"].evidence_sources, ("stub:test-model",))
+        self.assertEqual(set(first), {"architecture"})
+        self.assertEqual(set(second), {"architecture"})
         self.assertEqual(
             first["architecture"].evidence_sources,
             ("explicit", "stub:test-model"),
         )
         self.assertEqual(second["architecture"].evidence_sources, ("explicit",))
+        proposed = {
+            candidate.normalized_text: candidate
+            for candidate in repository.list_tag_candidates(
+                namespace="project-a", state=TagCandidateState.PROPOSED
+            )
+        }
+        self.assertEqual(proposed["data retrieval"].confidence, 0.9)
+        self.assertIs(proposed["data retrieval"].level, TagLevel.SPECIFIC)
+        self.assertEqual(proposed["data retrieval"].producer, "stub:test-model")
         self.assertEqual(repository.get_atom(result.atom_ids[0]).metadata["actor_type"], "human")
         self.assertEqual(
             repository.get_atom(result.atom_ids[0]).metadata["source"],

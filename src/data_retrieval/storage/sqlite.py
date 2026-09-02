@@ -10,6 +10,12 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from data_retrieval.core.weight_events import (
+    EdgeCoordinates,
+    calibration_transition_events,
+    edge_coordinates,
+    transition_events,
+)
 from data_retrieval.domain.models import (
     Atom,
     AtomKind,
@@ -18,14 +24,19 @@ from data_retrieval.domain.models import (
     AtomRole,
     AtomTag,
     CalibrationSignal,
+    CalibrationTarget,
     Document,
     IngestionBundle,
     PayloadModality,
     Tag,
+    TagCandidate,
+    TagCandidateState,
     TagLevel,
     TagOrigin,
     TagRelation,
     TagState,
+    WeightEvent,
+    WeightEventSource,
 )
 from data_retrieval.retrieval.embedding import cosine_similarity
 from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
@@ -98,6 +109,24 @@ class SQLiteRepository:
                     PRIMARY KEY(atom_id, tag_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS tag_candidates (
+                    candidate_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    atom_id TEXT NOT NULL REFERENCES atoms(atom_id) ON DELETE CASCADE,
+                    normalized_text TEXT NOT NULL,
+                    display_text TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                    state TEXT NOT NULL,
+                    producer TEXT NOT NULL,
+                    proposal_version TEXT NOT NULL,
+                    resolved_tag_id TEXT REFERENCES tags(tag_id),
+                    resolution_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    UNIQUE(atom_id, normalized_text, producer, proposal_version)
+                );
+
                 CREATE TABLE IF NOT EXISTS atom_links (
                     from_atom_id TEXT NOT NULL REFERENCES atoms(atom_id),
                     to_atom_id TEXT NOT NULL REFERENCES atoms(atom_id),
@@ -155,6 +184,23 @@ class SQLiteRepository:
                     metadata_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS weight_events (
+                    event_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    related_id TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    weight_before REAL NOT NULL CHECK(weight_before >= 0),
+                    weight_after REAL NOT NULL CHECK(weight_after >= 0),
+                    delta REAL NOT NULL,
+                    created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS atom_embeddings (
                     atom_id TEXT NOT NULL REFERENCES atoms(atom_id),
                     provider TEXT NOT NULL,
@@ -172,6 +218,8 @@ class SQLiteRepository:
                     ON atoms(namespace, occurred_at);
                 CREATE INDEX IF NOT EXISTS idx_tags_namespace_canonical
                     ON tags(namespace, canonical_text);
+                CREATE INDEX IF NOT EXISTS idx_tag_candidates_namespace_state
+                    ON tag_candidates(namespace, state, created_at);
                 CREATE INDEX IF NOT EXISTS idx_atom_links_to
                     ON atom_links(to_atom_id, relation);
                 CREATE INDEX IF NOT EXISTS idx_atom_embeddings_provider_model
@@ -182,6 +230,10 @@ class SQLiteRepository:
                     ON feedback_events(retrieval_id);
                 CREATE INDEX IF NOT EXISTS idx_calibration_target
                     ON calibration_signals(namespace, target_type, target_id);
+                CREATE INDEX IF NOT EXISTS idx_weight_events_target
+                    ON weight_events(
+                        namespace, target_type, target_id, related_id, relation_type, created_at
+                    );
                 """
             )
             self._ensure_column("atom_tags", "updated_at", "TEXT")
@@ -222,6 +274,8 @@ class SQLiteRepository:
             self._connection.execute(
                 "UPDATE atom_links SET updated_at = created_at WHERE updated_at IS NULL"
             )
+            self._migrate_legacy_proposed_tags()
+            self._seed_weight_event_baselines()
 
     def get_document(self, document_id: str) -> Document | None:
         with self._lock:
@@ -496,7 +550,7 @@ class SQLiteRepository:
             rows = self._connection.execute(
                 f"""
                 SELECT * FROM tags
-                WHERE namespace = ?
+                WHERE namespace = ? AND state = 'canonical'
                 ORDER BY canonical_text
                 {limit_clause}
                 """,
@@ -512,7 +566,9 @@ class SQLiteRepository:
             for batch in self._batches(tag_ids):
                 placeholders = ",".join("?" for _ in batch)
                 rows = self._connection.execute(
-                    f"SELECT * FROM tags WHERE tag_id IN ({placeholders})", batch
+                    f"SELECT * FROM tags WHERE state = 'canonical' "
+                    f"AND tag_id IN ({placeholders})",
+                    batch,
                 ).fetchall()
                 found.update((row["tag_id"], self._tag(row)) for row in rows)
         return tuple(found[tag_id] for tag_id in tag_ids if tag_id in found)
@@ -529,12 +585,79 @@ class SQLiteRepository:
                 rows = self._connection.execute(
                     f"""
                     SELECT * FROM tags
-                    WHERE namespace = ? AND canonical_text IN ({placeholders})
+                    WHERE namespace = ? AND state = 'canonical'
+                      AND canonical_text IN ({placeholders})
                     """,
                     [namespace, *batch],
                 ).fetchall()
                 found.update((row["canonical_text"], self._tag(row)) for row in rows)
         return tuple(found[value] for value in canonical_texts if value in found)
+
+    def get_tag_candidate(self, candidate_id: str) -> TagCandidate | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM tag_candidates WHERE candidate_id = ?", (candidate_id,)
+            ).fetchone()
+        return self._tag_candidate(row) if row else None
+
+    def list_tag_candidates(
+        self,
+        *,
+        namespace: str,
+        state: TagCandidateState | None = None,
+        limit: int | None = None,
+    ) -> tuple[TagCandidate, ...]:
+        if limit is not None and limit <= 0:
+            return ()
+        clauses = ["namespace = ?"]
+        parameters: list[Any] = [namespace]
+        if state is not None:
+            clauses.append("state = ?")
+            parameters.append(state.value)
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            parameters.append(limit)
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT * FROM tag_candidates WHERE {' AND '.join(clauses)} "
+                f"ORDER BY created_at, candidate_id {limit_clause}",
+                parameters,
+            ).fetchall()
+        return tuple(self._tag_candidate(row) for row in rows)
+
+    def apply_tag_candidate_resolution(
+        self,
+        *,
+        candidate: TagCandidate,
+        tag: Tag | None,
+        atom_tag: AtomTag | None,
+    ) -> None:
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT state FROM tag_candidates WHERE candidate_id = ?",
+                (candidate.candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown candidate_id: {candidate.candidate_id}")
+            if row["state"] != TagCandidateState.PROPOSED.value:
+                raise ValueError(f"candidate is already resolved: {candidate.candidate_id}")
+            if (tag is None) != (atom_tag is None):
+                raise ValueError("tag and atom_tag must be supplied together")
+            if tag is not None and tag.state is not TagState.CANONICAL:
+                raise ValueError("resolved tag must be canonical")
+            if tag is not None and atom_tag is not None:
+                events = self._weight_transitions(
+                    edges=(atom_tag,),
+                    namespace=candidate.namespace,
+                    source_type=WeightEventSource.TAG_REVIEW,
+                    source_id=candidate.candidate_id,
+                    policy_version="tag-review-v1",
+                )
+                self._upsert_tags((tag,))
+                self._upsert_atom_tags((atom_tag,))
+                self._upsert_weight_events(events)
+            self._upsert_tag_candidates((candidate,))
 
     def list_tag_relations(
         self, *, namespace: str, relation_type: str | None = None
@@ -689,6 +812,7 @@ class SQLiteRepository:
                 JOIN tags ON tags.tag_id = edges.tag_id
                 JOIN atoms ON atoms.atom_id = edges.atom_id
                 WHERE atoms.namespace = ?
+                  AND tags.state = 'canonical'
                   AND tags.canonical_text IN ({placeholders})
                 """,
                 [namespace, *canonical_tags],
@@ -921,6 +1045,34 @@ class SQLiteRepository:
                 found.update(str(row["signal_id"]) for row in rows)
         return frozenset(found)
 
+    def list_weight_events(
+        self,
+        *,
+        namespace: str,
+        target_type: CalibrationTarget | None = None,
+        target_id: str | None = None,
+        related_id: str | None = None,
+        relation_type: str | None = None,
+    ) -> tuple[WeightEvent, ...]:
+        clauses = ["namespace = ?"]
+        parameters: list[Any] = [namespace]
+        for column, value in (
+            ("target_type", target_type.value if target_type else None),
+            ("target_id", target_id),
+            ("related_id", related_id),
+            ("relation_type", relation_type),
+        ):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                parameters.append(value)
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT * FROM weight_events WHERE {' AND '.join(clauses)} "
+                "ORDER BY created_at, event_id",
+                parameters,
+            ).fetchall()
+        return tuple(self._weight_event(row) for row in rows)
+
     def apply_calibration_updates(
         self,
         *,
@@ -930,6 +1082,14 @@ class SQLiteRepository:
         tag_relations: tuple[TagRelation, ...],
     ) -> None:
         with self._lock, self._connection:
+            events = calibration_transition_events(
+                edges=(*atom_tags, *atom_links, *tag_relations),
+                namespace=signals[0].namespace if signals else "unknown",
+                previous_weights=self._previous_weight_map(
+                    (*atom_tags, *atom_links, *tag_relations)
+                ),
+                signals=signals,
+            )
             self._connection.executemany(
                 """
                 INSERT INTO calibration_signals (
@@ -962,6 +1122,7 @@ class SQLiteRepository:
             self._upsert_atom_tags(atom_tags)
             self._upsert_atom_links(atom_links)
             self._upsert_tag_relations(tag_relations)
+            self._upsert_weight_events(events)
 
     def apply_learning_updates(
         self,
@@ -973,9 +1134,21 @@ class SQLiteRepository:
     ) -> None:
         """Store one feedback event and all derived weight changes atomically."""
         with self._lock, self._connection:
+            events = self._weight_transitions(
+                edges=(*atom_tags, *atom_links, *tag_relations),
+                namespace=str(feedback_event["namespace"]),
+                source_type=WeightEventSource.FEEDBACK,
+                source_id=str(feedback_event["feedback_id"]),
+                policy_version="bounded-feedback-v1",
+                metadata={
+                    "retrieval_id": str(feedback_event["retrieval_id"]),
+                    "outcome": str(feedback_event["outcome"]),
+                },
+            )
             self._upsert_atom_tags(atom_tags)
             self._upsert_atom_links(atom_links)
             self._upsert_tag_relations(tag_relations)
+            self._upsert_weight_events(events)
             self._connection.execute(
                 """
                 INSERT INTO feedback_events (
@@ -990,14 +1163,35 @@ class SQLiteRepository:
                 ),
             )
 
+    def restore_weight_aggregates(
+        self,
+        *,
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        with self._lock, self._connection:
+            self._upsert_atom_tags(atom_tags)
+            self._upsert_atom_links(atom_links)
+            self._upsert_tag_relations(tag_relations)
+
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         """Persist the whole bundle in one transaction or persist nothing."""
         with self._lock, self._connection:
+            events = self._weight_transitions(
+                edges=(*bundle.atom_tags, *bundle.atom_links),
+                namespace=bundle.document.namespace,
+                source_type=WeightEventSource.INGESTION,
+                source_id=bundle.document.document_id,
+                policy_version="canonical-ingestion-v1",
+            )
             self._upsert_document(bundle.document)
             self._upsert_atoms(bundle.atoms)
             self._upsert_tags(bundle.tags)
             self._upsert_atom_tags(bundle.atom_tags)
             self._upsert_atom_links(bundle.atom_links)
+            self._upsert_tag_candidates(bundle.tag_candidates)
+            self._upsert_weight_events(events)
 
     def close(self) -> None:
         with self._lock:
@@ -1161,6 +1355,129 @@ class SQLiteRepository:
             ),
         )
 
+    def _upsert_tag_candidates(self, candidates: Iterable[TagCandidate]) -> None:
+        self._connection.executemany(
+            """
+            INSERT INTO tag_candidates (
+                candidate_id, namespace, atom_id, normalized_text, display_text,
+                level, confidence, state, producer, proposal_version,
+                resolved_tag_id, resolution_reason, created_at, resolved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(candidate_id) DO UPDATE SET
+                state = excluded.state,
+                resolved_tag_id = excluded.resolved_tag_id,
+                resolution_reason = excluded.resolution_reason,
+                resolved_at = excluded.resolved_at
+            """,
+            (
+                (
+                    candidate.candidate_id,
+                    candidate.namespace,
+                    candidate.atom_id,
+                    candidate.normalized_text,
+                    candidate.display_text,
+                    candidate.level.value,
+                    candidate.confidence,
+                    candidate.state.value,
+                    candidate.producer,
+                    candidate.proposal_version,
+                    candidate.resolved_tag_id,
+                    candidate.resolution_reason,
+                    candidate.created_at.isoformat(),
+                    candidate.resolved_at.isoformat() if candidate.resolved_at else None,
+                )
+                for candidate in candidates
+            ),
+        )
+
+    def _upsert_weight_events(self, events: Iterable[WeightEvent]) -> None:
+        self._connection.executemany(
+            """
+            INSERT OR IGNORE INTO weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                (
+                    event.event_id,
+                    event.namespace,
+                    event.target_type.value,
+                    event.target_id,
+                    event.related_id,
+                    event.relation_type,
+                    event.source_type.value,
+                    event.source_id,
+                    event.policy_version,
+                    event.weight_before,
+                    event.weight_after,
+                    event.delta,
+                    event.created_at.isoformat(),
+                    self._json(event.metadata),
+                )
+                for event in events
+            ),
+        )
+
+    def _weight_transitions(
+        self,
+        *,
+        edges: tuple[AtomTag | AtomLink | TagRelation, ...],
+        namespace: str,
+        source_type: WeightEventSource,
+        source_id: str,
+        policy_version: str,
+        metadata: dict[str, object] | None = None,
+    ) -> tuple[WeightEvent, ...]:
+        return transition_events(
+            namespace=namespace,
+            edges=edges,
+            previous_weights=self._previous_weight_map(edges),
+            source_type=source_type,
+            source_id=source_id,
+            policy_version=policy_version,
+            metadata=metadata,
+        )
+
+    def _previous_weight_map(
+        self, edges: tuple[AtomTag | AtomLink | TagRelation, ...]
+    ) -> dict[EdgeCoordinates, float]:
+        atom_ids = tuple(
+            sorted(
+                {
+                    value
+                    for edge in edges
+                    if isinstance(edge, AtomTag | AtomLink)
+                    for value in (
+                        (edge.atom_id,) if isinstance(edge, AtomTag) else (
+                            edge.from_atom_id,
+                            edge.to_atom_id,
+                        )
+                    )
+                }
+            )
+        )
+        tag_ids = tuple(
+            sorted(
+                {
+                    value
+                    for edge in edges
+                    if isinstance(edge, TagRelation)
+                    for value in (edge.source_tag_id, edge.target_tag_id)
+                }
+            )
+        )
+        previous_edges = (
+            *self.get_atom_tags_for_atoms(atom_ids),
+            *self.get_atom_links_touching(atom_ids=atom_ids),
+            *self.get_tag_relations_touching(tag_ids=tag_ids),
+        )
+        previous_weights = {
+            edge_coordinates(edge): edge.weight_raw for edge in previous_edges
+        }
+        return previous_weights
+
     def _upsert_atom_links(self, atom_links: Iterable[AtomLink]) -> None:
         self._connection.executemany(
             """
@@ -1265,6 +1582,46 @@ class SQLiteRepository:
         )
 
     @staticmethod
+    def _tag_candidate(row: sqlite3.Row) -> TagCandidate:
+        return TagCandidate(
+            candidate_id=row["candidate_id"],
+            namespace=row["namespace"],
+            atom_id=row["atom_id"],
+            normalized_text=row["normalized_text"],
+            display_text=row["display_text"],
+            level=TagLevel(row["level"]),
+            confidence=row["confidence"],
+            state=TagCandidateState(row["state"]),
+            producer=row["producer"],
+            proposal_version=row["proposal_version"],
+            resolved_tag_id=row["resolved_tag_id"],
+            resolution_reason=row["resolution_reason"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            resolved_at=(
+                datetime.fromisoformat(row["resolved_at"]) if row["resolved_at"] else None
+            ),
+        )
+
+    @staticmethod
+    def _weight_event(row: sqlite3.Row) -> WeightEvent:
+        return WeightEvent(
+            event_id=row["event_id"],
+            namespace=row["namespace"],
+            target_type=CalibrationTarget(row["target_type"]),
+            target_id=row["target_id"],
+            related_id=row["related_id"],
+            relation_type=row["relation_type"],
+            source_type=WeightEventSource(row["source_type"]),
+            source_id=row["source_id"],
+            policy_version=row["policy_version"],
+            weight_before=row["weight_before"],
+            weight_after=row["weight_after"],
+            delta=row["delta"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            metadata=SQLiteRepository._object(row["metadata_json"]),
+        )
+
+    @staticmethod
     def _atom_tag(row: sqlite3.Row) -> AtomTag:
         return AtomTag(
             atom_id=row["atom_id"],
@@ -1302,6 +1659,156 @@ class SQLiteRepository:
             evidence_sources=tuple(SQLiteRepository._array(row["evidence_sources_json"])),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def _migrate_legacy_proposed_tags(self) -> None:
+        """Quarantine pre-lifecycle proposed tags without losing their evidence."""
+        self._connection.execute(
+            """
+            UPDATE tags
+            SET state = 'canonical'
+            WHERE state = 'proposed_new'
+              AND tag_id IN (
+                  SELECT edges.tag_id
+                  FROM atom_tags AS edges, json_each(edges.evidence_sources_json)
+                  WHERE json_each.value = 'explicit'
+              )
+            """
+        )
+        self._connection.execute(
+            """
+            UPDATE atom_tags
+            SET origin = 'explicit'
+            WHERE tag_id IN (SELECT tag_id FROM tags WHERE state = 'canonical')
+              AND EXISTS (
+                  SELECT 1 FROM json_each(atom_tags.evidence_sources_json)
+                  WHERE json_each.value = 'explicit'
+              )
+            """
+        )
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO tag_candidates (
+                candidate_id, namespace, atom_id, normalized_text, display_text,
+                level, confidence, state, producer, proposal_version,
+                resolved_tag_id, resolution_reason, created_at, resolved_at
+            )
+            SELECT
+                'candidate_legacy_' || edges.atom_id || '_' || tags.tag_id,
+                tags.namespace,
+                edges.atom_id,
+                tags.canonical_text,
+                tags.display_text,
+                tags.level,
+                edges.confidence,
+                'proposed',
+                COALESCE(
+                    json_extract(edges.evidence_sources_json, '$[0]'),
+                    'legacy-unknown'
+                ),
+                'pre-tag-candidates-v1',
+                NULL,
+                'migrated from proposed_new tag and quarantined; evidence=' ||
+                    edges.evidence_sources_json,
+                edges.created_at,
+                NULL
+            FROM atom_tags AS edges
+            JOIN tags ON tags.tag_id = edges.tag_id
+            WHERE tags.state = 'proposed_new'
+            """
+        )
+        self._connection.execute(
+            "DELETE FROM atom_tags WHERE tag_id IN "
+            "(SELECT tag_id FROM tags WHERE state = 'proposed_new')"
+        )
+        self._connection.execute(
+            "DELETE FROM tag_relations WHERE source_tag_id IN "
+            "(SELECT tag_id FROM tags WHERE state = 'proposed_new') "
+            "OR target_tag_id IN "
+            "(SELECT tag_id FROM tags WHERE state = 'proposed_new')"
+        )
+        self._connection.execute("DELETE FROM tags WHERE state = 'proposed_new'")
+
+    def _seed_weight_event_baselines(self) -> None:
+        """Create honest starting snapshots for edges written before the ledger existed."""
+        metadata = '{"historical_detail_unavailable":true}'
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            )
+            SELECT
+                'weight_migration_atom_tag_' || edges.atom_id || '_' || edges.tag_id,
+                atoms.namespace,
+                'atom_tag', edges.atom_id, edges.tag_id, 'has_tag',
+                'migration', 'pre-ledger-current-state', 'migration-baseline-v1',
+                0.0, edges.weight_raw, edges.weight_raw, edges.updated_at, ?
+            FROM atom_tags AS edges
+            JOIN atoms ON atoms.atom_id = edges.atom_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM weight_events AS events
+                WHERE events.target_type = 'atom_tag'
+                  AND events.target_id = edges.atom_id
+                  AND events.related_id = edges.tag_id
+                  AND events.relation_type = 'has_tag'
+            )
+            """,
+            (metadata,),
+        )
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            )
+            SELECT
+                'weight_migration_atom_link_' || links.from_atom_id || '_' ||
+                    links.to_atom_id || '_' || links.relation,
+                atoms.namespace,
+                'atom_link', links.from_atom_id, links.to_atom_id, links.relation,
+                'migration', 'pre-ledger-current-state', 'migration-baseline-v1',
+                0.0, links.weight_raw, links.weight_raw, links.updated_at, ?
+            FROM atom_links AS links
+            JOIN atoms ON atoms.atom_id = links.from_atom_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM weight_events AS events
+                WHERE events.target_type = 'atom_link'
+                  AND events.target_id = links.from_atom_id
+                  AND events.related_id = links.to_atom_id
+                  AND events.relation_type = links.relation
+            )
+            """,
+            (metadata,),
+        )
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            )
+            SELECT
+                'weight_migration_tag_relation_' || relations.source_tag_id || '_' ||
+                    relations.target_tag_id || '_' || relations.relation_type,
+                tags.namespace,
+                'tag_relation', relations.source_tag_id, relations.target_tag_id,
+                    relations.relation_type,
+                'migration', 'pre-ledger-current-state', 'migration-baseline-v1',
+                0.0, relations.weight_raw, relations.weight_raw, relations.updated_at, ?
+            FROM tag_relations AS relations
+            JOIN tags ON tags.tag_id = relations.source_tag_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM weight_events AS events
+                WHERE events.target_type = 'tag_relation'
+                  AND events.target_id = relations.source_tag_id
+                  AND events.related_id = relations.target_tag_id
+                  AND events.relation_type = relations.relation_type
+            )
+            """,
+            (metadata,),
         )
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:

@@ -136,10 +136,10 @@ class IngestService:
                     namespace=namespace,
                     canonical_text=canonical,
                     display_text=display,
-                    level=self._infer_level(canonical),
-                    state=TagState.PROPOSED_NEW,
+                    level=TagLevel.SPECIFIC,
+                    state=TagState.CANONICAL,
                 )
-                origins[resolved.tag_id] = TagOrigin.PROPOSED_NEW
+                origins[resolved.tag_id] = TagOrigin.EXPLICIT
             tags_by_canonical[canonical] = resolved
             return resolved
 
@@ -186,7 +186,3 @@ class IngestService:
             tag_ids=tuple(tag.tag_id for tag in tags),
             idempotent=False,
         )
-
-    @staticmethod
-    def _infer_level(canonical_tag: str) -> TagLevel:
-        return TagLevel.SPECIFIC if " " in canonical_tag else TagLevel.BROAD

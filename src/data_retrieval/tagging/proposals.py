@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from data_retrieval.domain.models import TagLevel
+
 
 @dataclass(frozen=True, slots=True)
 class TagProposal:
@@ -10,6 +12,7 @@ class TagProposal:
 
     text: str
     confidence: float
+    level: TagLevel = TagLevel.SPECIFIC
 
     def __post_init__(self) -> None:
         if not self.text.strip():

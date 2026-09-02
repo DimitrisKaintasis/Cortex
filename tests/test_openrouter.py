@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from temporal_history.core import NormalizedEvent, Period
 
+from data_retrieval.domain.models import TagLevel
 from data_retrieval.tagging.openrouter import OpenRouterTagProposer
 from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
 
@@ -30,11 +31,23 @@ class OpenRouterTagProposerTests(unittest.TestCase):
             "items": [
                 {
                     "atom_id": "item_0",
-                    "tags": [{"text": "Data Retrieval", "confidence": 0.94}],
+                    "tags": [
+                        {
+                            "text": "Data Retrieval",
+                            "confidence": 0.94,
+                            "level": "specific",
+                        }
+                    ],
                 },
                 {
                     "atom_id": "item_1",
-                    "tags": [{"text": "Remote Inference", "confidence": 0.87}],
+                    "tags": [
+                        {
+                            "text": "Remote Inference",
+                            "confidence": 0.87,
+                            "level": "broad",
+                        }
+                    ],
                 },
             ]
         }
@@ -51,6 +64,7 @@ class OpenRouterTagProposerTests(unittest.TestCase):
 
         self.assertEqual(proposals[0][0].text, "Data Retrieval")
         self.assertEqual(proposals[1][0].confidence, 0.87)
+        self.assertIs(proposals[1][0].level, TagLevel.BROAD)
         request = mock_open.call_args.args[0]
         payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/chat/completions")

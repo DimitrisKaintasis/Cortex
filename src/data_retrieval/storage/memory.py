@@ -6,6 +6,11 @@ from collections.abc import Iterator
 from datetime import datetime
 from threading import RLock
 
+from data_retrieval.core.weight_events import (
+    calibration_transition_events,
+    edge_coordinates,
+    transition_events,
+)
 from data_retrieval.domain.models import (
     Atom,
     AtomKind,
@@ -13,10 +18,16 @@ from data_retrieval.domain.models import (
     AtomRole,
     AtomTag,
     CalibrationSignal,
+    CalibrationTarget,
     Document,
     IngestionBundle,
     Tag,
+    TagCandidate,
+    TagCandidateState,
     TagRelation,
+    TagState,
+    WeightEvent,
+    WeightEventSource,
 )
 from data_retrieval.retrieval.embedding import cosine_similarity
 from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
@@ -32,12 +43,14 @@ class InMemoryRepository:
         self._atoms: dict[str, Atom] = {}
         self._atom_links: dict[tuple[str, str, str], AtomLink] = {}
         self._tags: dict[str, Tag] = {}
+        self._tag_candidates: dict[str, TagCandidate] = {}
         self._atom_tags: dict[tuple[str, str], AtomTag] = {}
         self._embeddings: dict[tuple[str, str, str], AtomEmbedding] = {}
         self._tag_relations: dict[tuple[str, str, str], TagRelation] = {}
         self._retrieval_events: dict[str, dict[str, object]] = {}
         self._feedback_events: dict[str, dict[str, object]] = {}
         self._calibration_signals: dict[str, CalibrationSignal] = {}
+        self._weight_events: dict[str, WeightEvent] = {}
         self._lock = RLock()
 
     def get_document(self, document_id: str) -> Document | None:
@@ -209,13 +222,21 @@ class InMemoryRepository:
 
     def list_tags(self, namespace: str, limit: int | None = None) -> tuple[Tag, ...]:
         with self._lock:
-            tags = (tag for tag in self._tags.values() if tag.namespace == namespace)
+            tags = (
+                tag
+                for tag in self._tags.values()
+                if tag.namespace == namespace and tag.state is TagState.CANONICAL
+            )
             ordered = sorted(tags, key=lambda tag: tag.canonical_text)
             return tuple(ordered if limit is None else ordered[:limit])
 
     def get_tags(self, tag_ids: tuple[str, ...]) -> tuple[Tag, ...]:
         with self._lock:
-            return tuple(self._tags[tag_id] for tag_id in tag_ids if tag_id in self._tags)
+            return tuple(
+                self._tags[tag_id]
+                for tag_id in tag_ids
+                if tag_id in self._tags and self._tags[tag_id].state is TagState.CANONICAL
+            )
 
     def get_tags_by_canonical(
         self, *, namespace: str, canonical_texts: tuple[str, ...]
@@ -227,11 +248,77 @@ class InMemoryRepository:
                     (
                         tag
                         for tag in self._tags.values()
-                        if tag.namespace == namespace and tag.canonical_text in selected
+                        if tag.namespace == namespace
+                        and tag.state is TagState.CANONICAL
+                        and tag.canonical_text in selected
                     ),
                     key=lambda tag: tag.canonical_text,
                 )
             )
+
+    def get_tag_candidate(self, candidate_id: str) -> TagCandidate | None:
+        with self._lock:
+            return self._tag_candidates.get(candidate_id)
+
+    def list_tag_candidates(
+        self,
+        *,
+        namespace: str,
+        state: TagCandidateState | None = None,
+        limit: int | None = None,
+    ) -> tuple[TagCandidate, ...]:
+        if limit is not None and limit <= 0:
+            return ()
+        with self._lock:
+            candidates = sorted(
+                (
+                    candidate
+                    for candidate in self._tag_candidates.values()
+                    if candidate.namespace == namespace
+                    and (state is None or candidate.state is state)
+                ),
+                key=lambda candidate: (candidate.created_at, candidate.candidate_id),
+            )
+            return tuple(candidates if limit is None else candidates[:limit])
+
+    def apply_tag_candidate_resolution(
+        self,
+        *,
+        candidate: TagCandidate,
+        tag: Tag | None,
+        atom_tag: AtomTag | None,
+    ) -> None:
+        with self._lock:
+            existing = self._tag_candidates.get(candidate.candidate_id)
+            if existing is None:
+                raise ValueError(f"unknown candidate_id: {candidate.candidate_id}")
+            if existing.state is not TagCandidateState.PROPOSED:
+                raise ValueError(f"candidate is already resolved: {candidate.candidate_id}")
+            if candidate.atom_id not in self._atoms:
+                raise ValueError(f"unknown atom_id: {candidate.atom_id}")
+            if tag is not None and tag.state is not TagState.CANONICAL:
+                raise ValueError("resolved tag must be canonical")
+            if (tag is None) != (atom_tag is None):
+                raise ValueError("tag and atom_tag must be supplied together")
+            tags = dict(self._tags)
+            atom_tags = dict(self._atom_tags)
+            candidates = dict(self._tag_candidates)
+            weight_events = dict(self._weight_events)
+            if tag is not None and atom_tag is not None:
+                weight_events = self._with_weight_transitions(
+                    edges=(atom_tag,),
+                    namespace=candidate.namespace,
+                    source_type=WeightEventSource.TAG_REVIEW,
+                    source_id=candidate.candidate_id,
+                    policy_version="tag-review-v1",
+                )
+                tags[tag.tag_id] = tag
+                atom_tags[(atom_tag.atom_id, atom_tag.tag_id)] = atom_tag
+            candidates[candidate.candidate_id] = candidate
+            self._tags = tags
+            self._atom_tags = atom_tags
+            self._tag_candidates = candidates
+            self._weight_events = weight_events
 
     def list_tag_relations(
         self, *, namespace: str, relation_type: str | None = None
@@ -465,6 +552,31 @@ class InMemoryRepository:
                 if signal_id in self._calibration_signals
             )
 
+    def list_weight_events(
+        self,
+        *,
+        namespace: str,
+        target_type: CalibrationTarget | None = None,
+        target_id: str | None = None,
+        related_id: str | None = None,
+        relation_type: str | None = None,
+    ) -> tuple[WeightEvent, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    (
+                        event
+                        for event in self._weight_events.values()
+                        if event.namespace == namespace
+                        and (target_type is None or event.target_type is target_type)
+                        and (target_id is None or event.target_id == target_id)
+                        and (related_id is None or event.related_id == related_id)
+                        and (relation_type is None or event.relation_type == relation_type)
+                    ),
+                    key=lambda event: (event.created_at, event.event_id),
+                )
+            )
+
     def apply_calibration_updates(
         self,
         *,
@@ -495,10 +607,18 @@ class InMemoryRepository:
                 ((edge.source_tag_id, edge.target_tag_id, edge.relation_type), edge)
                 for edge in tag_relations
             )
+            events = calibration_transition_events(
+                namespace=signals[0].namespace if signals else "unknown",
+                edges=(*atom_tags, *atom_links, *tag_relations),
+                previous_weights=self._previous_weight_map(),
+                signals=signals,
+            )
+            weight_events = self._with_events(events)
             self._calibration_signals = updated_signals
             self._atom_tags = updated_atom_tags
             self._atom_links = updated_links
             self._tag_relations = updated_relations
+            self._weight_events = weight_events
 
     def apply_learning_updates(
         self,
@@ -528,10 +648,42 @@ class InMemoryRepository:
                 for edge in tag_relations
             )
             updated_feedback[feedback_id] = dict(feedback_event)
+            weight_events = self._with_weight_transitions(
+                edges=(*atom_tags, *atom_links, *tag_relations),
+                namespace=str(feedback_event["namespace"]),
+                source_type=WeightEventSource.FEEDBACK,
+                source_id=feedback_id,
+                policy_version="bounded-feedback-v1",
+                metadata={
+                    "retrieval_id": str(feedback_event["retrieval_id"]),
+                    "outcome": str(feedback_event["outcome"]),
+                },
+            )
             self._atom_tags = updated_atom_tags
             self._atom_links = updated_links
             self._tag_relations = updated_relations
             self._feedback_events = updated_feedback
+            self._weight_events = weight_events
+
+    def restore_weight_aggregates(
+        self,
+        *,
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        with self._lock:
+            self._atom_tags.update(
+                ((edge.atom_id, edge.tag_id), edge) for edge in atom_tags
+            )
+            self._atom_links.update(
+                ((edge.from_atom_id, edge.to_atom_id, edge.relation), edge)
+                for edge in atom_links
+            )
+            self._tag_relations.update(
+                ((edge.source_tag_id, edge.target_tag_id, edge.relation_type), edge)
+                for edge in tag_relations
+            )
 
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         with self._lock:
@@ -554,11 +706,22 @@ class InMemoryRepository:
             atom_links = dict(self._atom_links)
             tags = dict(self._tags)
             atom_tags = dict(self._atom_tags)
+            tag_candidates = dict(self._tag_candidates)
+            weight_events = self._with_weight_transitions(
+                edges=(*bundle.atom_tags, *bundle.atom_links),
+                namespace=bundle.document.namespace,
+                source_type=WeightEventSource.INGESTION,
+                source_id=bundle.document.document_id,
+                policy_version="canonical-ingestion-v1",
+            )
 
             documents[bundle.document.document_id] = bundle.document
             atoms.update((atom.atom_id, atom) for atom in bundle.atoms)
             tags.update((tag.tag_id, tag) for tag in bundle.tags)
             atom_tags.update(((edge.atom_id, edge.tag_id), edge) for edge in bundle.atom_tags)
+            tag_candidates.update(
+                (candidate.candidate_id, candidate) for candidate in bundle.tag_candidates
+            )
             atom_links.update(
                 ((edge.from_atom_id, edge.to_atom_id, edge.relation), edge)
                 for edge in bundle.atom_links
@@ -569,6 +732,8 @@ class InMemoryRepository:
             self._atom_links = atom_links
             self._tags = tags
             self._atom_tags = atom_tags
+            self._tag_candidates = tag_candidates
+            self._weight_events = weight_events
 
     @property
     def document_count(self) -> int:
@@ -613,3 +778,45 @@ class InMemoryRepository:
         with self._lock:
             edges = (edge for edge in self._atom_tags.values() if edge.atom_id in selected)
             return tuple(sorted(edges, key=lambda edge: (edge.atom_id, edge.tag_id)))
+
+    def _with_weight_transitions(
+        self,
+        *,
+        edges: tuple[AtomTag | AtomLink | TagRelation, ...],
+        namespace: str,
+        source_type: WeightEventSource,
+        source_id: str,
+        policy_version: str,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, WeightEvent]:
+        events = transition_events(
+            namespace=namespace,
+            edges=edges,
+            previous_weights=self._previous_weight_map(),
+            source_type=source_type,
+            source_id=source_id,
+            policy_version=policy_version,
+            metadata=metadata,
+        )
+        return self._with_events(events)
+
+    def _previous_weight_map(self):
+        previous_edges = (
+            *self._atom_tags.values(),
+            *self._atom_links.values(),
+            *self._tag_relations.values(),
+        )
+        return {
+            edge_coordinates(edge): edge.weight_raw for edge in previous_edges
+        }
+
+    def _with_events(
+        self, events: tuple[WeightEvent, ...]
+    ) -> dict[str, WeightEvent]:
+        updated = dict(self._weight_events)
+        for event in events:
+            existing = updated.get(event.event_id)
+            if existing is not None and existing != event:
+                raise ValueError(f"weight event collision: {event.event_id}")
+            updated[event.event_id] = event
+        return updated

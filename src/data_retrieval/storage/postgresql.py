@@ -14,6 +14,12 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from data_retrieval.core.weight_events import (
+    EdgeCoordinates,
+    calibration_transition_events,
+    edge_coordinates,
+    transition_events,
+)
 from data_retrieval.domain.models import (
     Atom,
     AtomKind,
@@ -22,14 +28,19 @@ from data_retrieval.domain.models import (
     AtomRole,
     AtomTag,
     CalibrationSignal,
+    CalibrationTarget,
     Document,
     IngestionBundle,
     PayloadModality,
     Tag,
+    TagCandidate,
+    TagCandidateState,
     TagLevel,
     TagOrigin,
     TagRelation,
     TagState,
+    WeightEvent,
+    WeightEventSource,
 )
 from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
 
@@ -123,6 +134,29 @@ class PostgreSQLRepository:
                     created_at TIMESTAMPTZ NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL,
                     PRIMARY KEY(atom_id, tag_id)
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {SCHEMA}.tag_candidates (
+                    candidate_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    atom_id TEXT NOT NULL
+                        REFERENCES {SCHEMA}.atoms(atom_id) ON DELETE CASCADE,
+                    normalized_text TEXT NOT NULL,
+                    display_text TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    confidence DOUBLE PRECISION NOT NULL
+                        CHECK(confidence >= 0 AND confidence <= 1),
+                    state TEXT NOT NULL,
+                    producer TEXT NOT NULL,
+                    proposal_version TEXT NOT NULL,
+                    resolved_tag_id TEXT REFERENCES {SCHEMA}.tags(tag_id),
+                    resolution_reason TEXT,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    resolved_at TIMESTAMPTZ,
+                    UNIQUE(atom_id, normalized_text, producer, proposal_version)
                 )
                 """
             )
@@ -223,6 +257,26 @@ class PostgreSQLRepository:
                 """
             )
             self._connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {SCHEMA}.weight_events (
+                    event_id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    related_id TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    weight_before DOUBLE PRECISION NOT NULL CHECK(weight_before >= 0),
+                    weight_after DOUBLE PRECISION NOT NULL CHECK(weight_after >= 0),
+                    delta DOUBLE PRECISION NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb
+                )
+                """
+            )
+            self._connection.execute(
                 f"ALTER TABLE {SCHEMA}.atoms ADD COLUMN IF NOT EXISTS role TEXT"
             )
             self._connection.execute(
@@ -273,6 +327,8 @@ class PostgreSQLRepository:
                 f"ON {SCHEMA}.atoms USING GIN(search_vector)",
                 f"CREATE INDEX IF NOT EXISTS idx_tags_namespace_canonical "
                 f"ON {SCHEMA}.tags(namespace, canonical_text)",
+                f"CREATE INDEX IF NOT EXISTS idx_tag_candidates_namespace_state "
+                f"ON {SCHEMA}.tag_candidates(namespace, state, created_at)",
                 f"CREATE INDEX IF NOT EXISTS idx_atom_tags_tag_atom "
                 f"ON {SCHEMA}.atom_tags(tag_id, atom_id)",
                 f"CREATE INDEX IF NOT EXISTS idx_atom_links_to_relation "
@@ -285,8 +341,13 @@ class PostgreSQLRepository:
                 f"ON {SCHEMA}.feedback_events(retrieval_id)",
                 f"CREATE INDEX IF NOT EXISTS idx_calibration_target "
                 f"ON {SCHEMA}.calibration_signals(namespace, target_type, target_id)",
+                f"CREATE INDEX IF NOT EXISTS idx_weight_events_target "
+                f"ON {SCHEMA}.weight_events("
+                "namespace, target_type, target_id, related_id, relation_type, created_at)",
             ):
                 self._connection.execute(statement)
+            self._migrate_legacy_proposed_tags()
+            self._seed_weight_event_baselines()
         register_vector(self._connection)
 
     def get_document(self, document_id: str) -> Document | None:
@@ -614,7 +675,7 @@ class PostgreSQLRepository:
         if limit is not None:
             parameters.append(limit)
         rows = self._fetchall(
-            f"SELECT * FROM {SCHEMA}.tags WHERE namespace = %s "
+            f"SELECT * FROM {SCHEMA}.tags WHERE namespace = %s AND state = 'canonical' "
             f"ORDER BY canonical_text {limit_clause}",
             parameters,
         )
@@ -624,7 +685,8 @@ class PostgreSQLRepository:
         if not tag_ids:
             return ()
         rows = self._fetchall(
-            f"SELECT * FROM {SCHEMA}.tags WHERE tag_id = ANY(%s)", (list(tag_ids),)
+            f"SELECT * FROM {SCHEMA}.tags WHERE state = 'canonical' AND tag_id = ANY(%s)",
+            (list(tag_ids),),
         )
         found = {row["tag_id"]: self._tag(row) for row in rows}
         return tuple(found[tag_id] for tag_id in tag_ids if tag_id in found)
@@ -636,11 +698,78 @@ class PostgreSQLRepository:
             return ()
         rows = self._fetchall(
             f"SELECT * FROM {SCHEMA}.tags "
-            "WHERE namespace = %s AND canonical_text = ANY(%s)",
+            "WHERE namespace = %s AND state = 'canonical' AND canonical_text = ANY(%s)",
             (namespace, list(canonical_texts)),
         )
         found = {row["canonical_text"]: self._tag(row) for row in rows}
         return tuple(found[value] for value in canonical_texts if value in found)
+
+    def get_tag_candidate(self, candidate_id: str) -> TagCandidate | None:
+        row = self._fetchone(
+            f"SELECT * FROM {SCHEMA}.tag_candidates WHERE candidate_id = %s",
+            (candidate_id,),
+        )
+        return self._tag_candidate(row) if row else None
+
+    def list_tag_candidates(
+        self,
+        *,
+        namespace: str,
+        state: TagCandidateState | None = None,
+        limit: int | None = None,
+    ) -> tuple[TagCandidate, ...]:
+        if limit is not None and limit <= 0:
+            return ()
+        clauses = ["namespace = %s"]
+        parameters: list[Any] = [namespace]
+        if state is not None:
+            clauses.append("state = %s")
+            parameters.append(state.value)
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT %s"
+            parameters.append(limit)
+        rows = self._fetchall(
+            f"SELECT * FROM {SCHEMA}.tag_candidates WHERE {' AND '.join(clauses)} "
+            f"ORDER BY created_at, candidate_id {limit_clause}",
+            parameters,
+        )
+        return tuple(self._tag_candidate(row) for row in rows)
+
+    def apply_tag_candidate_resolution(
+        self,
+        *,
+        candidate: TagCandidate,
+        tag: Tag | None,
+        atom_tag: AtomTag | None,
+    ) -> None:
+        with self._lock, self._connection.transaction():
+            self._lock_weight_namespace(candidate.namespace)
+            row = self._connection.execute(
+                f"SELECT state FROM {SCHEMA}.tag_candidates "
+                "WHERE candidate_id = %s FOR UPDATE",
+                (candidate.candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown candidate_id: {candidate.candidate_id}")
+            if row["state"] != TagCandidateState.PROPOSED.value:
+                raise ValueError(f"candidate is already resolved: {candidate.candidate_id}")
+            if (tag is None) != (atom_tag is None):
+                raise ValueError("tag and atom_tag must be supplied together")
+            if tag is not None and tag.state is not TagState.CANONICAL:
+                raise ValueError("resolved tag must be canonical")
+            if tag is not None and atom_tag is not None:
+                events = self._weight_transitions(
+                    edges=(atom_tag,),
+                    namespace=candidate.namespace,
+                    source_type=WeightEventSource.TAG_REVIEW,
+                    source_id=candidate.candidate_id,
+                    policy_version="tag-review-v1",
+                )
+                self._upsert_tags((tag,))
+                self._upsert_atom_tags((atom_tag,))
+                self._upsert_weight_events(events)
+            self._upsert_tag_candidates((candidate,))
 
     def list_tag_relations(
         self, *, namespace: str, relation_type: str | None = None
@@ -704,6 +833,7 @@ class PostgreSQLRepository:
             JOIN {SCHEMA}.documents AS documents USING(document_id)
             WHERE atoms.namespace = %s
               AND documents.ingestion_status = 'complete'
+              AND tags.state = 'canonical'
               AND tags.canonical_text = ANY(%s)
             GROUP BY edges.atom_id
             ORDER BY score DESC, edges.atom_id
@@ -899,6 +1029,33 @@ class PostgreSQLRepository:
         )
         return frozenset(str(row["signal_id"]) for row in rows)
 
+    def list_weight_events(
+        self,
+        *,
+        namespace: str,
+        target_type: CalibrationTarget | None = None,
+        target_id: str | None = None,
+        related_id: str | None = None,
+        relation_type: str | None = None,
+    ) -> tuple[WeightEvent, ...]:
+        clauses = ["namespace = %s"]
+        parameters: list[Any] = [namespace]
+        for column, value in (
+            ("target_type", target_type.value if target_type else None),
+            ("target_id", target_id),
+            ("related_id", related_id),
+            ("relation_type", relation_type),
+        ):
+            if value is not None:
+                clauses.append(f"{column} = %s")
+                parameters.append(value)
+        rows = self._fetchall(
+            f"SELECT * FROM {SCHEMA}.weight_events WHERE {' AND '.join(clauses)} "
+            "ORDER BY created_at, event_id",
+            parameters,
+        )
+        return tuple(self._weight_event(row) for row in rows)
+
     def apply_calibration_updates(
         self,
         *,
@@ -908,6 +1065,16 @@ class PostgreSQLRepository:
         tag_relations: tuple[TagRelation, ...],
     ) -> None:
         with self._lock, self._connection.transaction():
+            namespace = signals[0].namespace if signals else "unknown"
+            self._lock_weight_namespace(namespace)
+            events = calibration_transition_events(
+                edges=(*atom_tags, *atom_links, *tag_relations),
+                namespace=namespace,
+                previous_weights=self._previous_weight_map(
+                    (*atom_tags, *atom_links, *tag_relations)
+                ),
+                signals=signals,
+            )
             self._executemany(
                 f"""
                 INSERT INTO {SCHEMA}.calibration_signals (
@@ -940,6 +1107,7 @@ class PostgreSQLRepository:
             self._upsert_atom_tags(atom_tags)
             self._upsert_atom_links(atom_links)
             self._upsert_tag_relations(tag_relations)
+            self._upsert_weight_events(events)
 
     def apply_learning_updates(
         self,
@@ -950,9 +1118,22 @@ class PostgreSQLRepository:
         tag_relations: tuple[TagRelation, ...],
     ) -> None:
         with self._lock, self._connection.transaction():
+            self._lock_weight_namespace(str(feedback_event["namespace"]))
+            events = self._weight_transitions(
+                edges=(*atom_tags, *atom_links, *tag_relations),
+                namespace=str(feedback_event["namespace"]),
+                source_type=WeightEventSource.FEEDBACK,
+                source_id=str(feedback_event["feedback_id"]),
+                policy_version="bounded-feedback-v1",
+                metadata={
+                    "retrieval_id": str(feedback_event["retrieval_id"]),
+                    "outcome": str(feedback_event["outcome"]),
+                },
+            )
             self._upsert_atom_tags(atom_tags)
             self._upsert_atom_links(atom_links)
             self._upsert_tag_relations(tag_relations)
+            self._upsert_weight_events(events)
             self._connection.execute(
                 f"""
                 INSERT INTO {SCHEMA}.feedback_events (
@@ -967,13 +1148,35 @@ class PostgreSQLRepository:
                 ),
             )
 
+    def restore_weight_aggregates(
+        self,
+        *,
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        with self._lock, self._connection.transaction():
+            self._upsert_atom_tags(atom_tags)
+            self._upsert_atom_links(atom_links)
+            self._upsert_tag_relations(tag_relations)
+
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         with self._lock, self._connection.transaction():
+            self._lock_weight_namespace(bundle.document.namespace)
+            events = self._weight_transitions(
+                edges=(*bundle.atom_tags, *bundle.atom_links),
+                namespace=bundle.document.namespace,
+                source_type=WeightEventSource.INGESTION,
+                source_id=bundle.document.document_id,
+                policy_version="canonical-ingestion-v1",
+            )
             self._upsert_document(bundle.document, status="complete", atom_count=len(bundle.atoms))
             self._upsert_atoms(bundle.atoms)
             self._upsert_tags(bundle.tags)
             self._upsert_atom_tags(bundle.atom_tags)
             self._upsert_atom_links(bundle.atom_links)
+            self._upsert_tag_candidates(bundle.tag_candidates)
+            self._upsert_weight_events(events)
 
     def begin_staged_ingestion(
         self, *, document: Document, tags: tuple[Tag, ...]
@@ -993,8 +1196,18 @@ class PostgreSQLRepository:
         self, *, atoms: tuple[Atom, ...], atom_tags: tuple[AtomTag, ...]
     ) -> None:
         with self._lock, self._connection.transaction():
+            namespace = atoms[0].namespace if atoms else "unknown"
+            self._lock_weight_namespace(namespace)
+            events = self._weight_transitions(
+                edges=atom_tags,
+                namespace=namespace,
+                source_type=WeightEventSource.INGESTION,
+                source_id=atoms[0].document_id if atoms else "empty-stage",
+                policy_version="canonical-ingestion-v1",
+            )
             self._upsert_atoms(atoms)
             self._upsert_atom_tags(atom_tags)
+            self._upsert_weight_events(events)
 
     def complete_staged_ingestion(self, *, document_id: str, atom_count: int) -> None:
         with self._lock, self._connection.transaction():
@@ -1184,6 +1397,130 @@ class PostgreSQLRepository:
             ),
         )
 
+    def _upsert_tag_candidates(self, candidates: Iterable[TagCandidate]) -> None:
+        self._executemany(
+            f"""
+            INSERT INTO {SCHEMA}.tag_candidates (
+                candidate_id, namespace, atom_id, normalized_text, display_text,
+                level, confidence, state, producer, proposal_version,
+                resolved_tag_id, resolution_reason, created_at, resolved_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT(candidate_id) DO UPDATE SET
+                state = EXCLUDED.state,
+                resolved_tag_id = EXCLUDED.resolved_tag_id,
+                resolution_reason = EXCLUDED.resolution_reason,
+                resolved_at = EXCLUDED.resolved_at
+            """,
+            (
+                (
+                    candidate.candidate_id,
+                    candidate.namespace,
+                    candidate.atom_id,
+                    candidate.normalized_text,
+                    candidate.display_text,
+                    candidate.level.value,
+                    candidate.confidence,
+                    candidate.state.value,
+                    candidate.producer,
+                    candidate.proposal_version,
+                    candidate.resolved_tag_id,
+                    candidate.resolution_reason,
+                    candidate.created_at,
+                    candidate.resolved_at,
+                )
+                for candidate in candidates
+            ),
+        )
+
+    def _upsert_weight_events(self, events: Iterable[WeightEvent]) -> None:
+        self._executemany(
+            f"""
+            INSERT INTO {SCHEMA}.weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT(event_id) DO NOTHING
+            """,
+            (
+                (
+                    event.event_id,
+                    event.namespace,
+                    event.target_type.value,
+                    event.target_id,
+                    event.related_id,
+                    event.relation_type,
+                    event.source_type.value,
+                    event.source_id,
+                    event.policy_version,
+                    event.weight_before,
+                    event.weight_after,
+                    event.delta,
+                    event.created_at,
+                    Jsonb(self._json_value(event.metadata)),
+                )
+                for event in events
+            ),
+        )
+
+    def _weight_transitions(
+        self,
+        *,
+        edges: tuple[AtomTag | AtomLink | TagRelation, ...],
+        namespace: str,
+        source_type: WeightEventSource,
+        source_id: str,
+        policy_version: str,
+        metadata: dict[str, object] | None = None,
+    ) -> tuple[WeightEvent, ...]:
+        return transition_events(
+            namespace=namespace,
+            edges=edges,
+            previous_weights=self._previous_weight_map(edges),
+            source_type=source_type,
+            source_id=source_id,
+            policy_version=policy_version,
+            metadata=metadata,
+        )
+
+    def _previous_weight_map(
+        self, edges: tuple[AtomTag | AtomLink | TagRelation, ...]
+    ) -> dict[EdgeCoordinates, float]:
+        atom_ids = tuple(
+            sorted(
+                {
+                    value
+                    for edge in edges
+                    if isinstance(edge, AtomTag | AtomLink)
+                    for value in (
+                        (edge.atom_id,) if isinstance(edge, AtomTag) else (
+                            edge.from_atom_id,
+                            edge.to_atom_id,
+                        )
+                    )
+                }
+            )
+        )
+        tag_ids = tuple(
+            sorted(
+                {
+                    value
+                    for edge in edges
+                    if isinstance(edge, TagRelation)
+                    for value in (edge.source_tag_id, edge.target_tag_id)
+                }
+            )
+        )
+        previous_edges = (
+            *self.get_atom_tags_for_atoms(atom_ids),
+            *self.get_atom_links_touching(atom_ids=atom_ids),
+            *self.get_tag_relations_touching(tag_ids=tag_ids),
+        )
+        previous_weights = {
+            edge_coordinates(edge): edge.weight_raw for edge in previous_edges
+        }
+        return previous_weights
+
     def _upsert_atom_links(self, atom_links: Iterable[AtomLink]) -> None:
         self._executemany(
             f"""
@@ -1242,9 +1579,166 @@ class PostgreSQLRepository:
             ),
         )
 
+    def _migrate_legacy_proposed_tags(self) -> None:
+        """Quarantine pre-lifecycle proposed tags without losing their evidence."""
+        self._connection.execute(
+            f"""
+            UPDATE {SCHEMA}.tags AS tags
+            SET state = 'canonical'
+            WHERE tags.state = 'proposed_new'
+              AND EXISTS (
+                  SELECT 1 FROM {SCHEMA}.atom_tags AS edges
+                  WHERE edges.tag_id = tags.tag_id
+                    AND 'explicit' = ANY(edges.evidence_sources)
+              )
+            """
+        )
+        self._connection.execute(
+            f"""
+            UPDATE {SCHEMA}.atom_tags AS edges
+            SET origin = 'explicit'
+            FROM {SCHEMA}.tags AS tags
+            WHERE edges.tag_id = tags.tag_id
+              AND tags.state = 'canonical'
+              AND 'explicit' = ANY(edges.evidence_sources)
+            """
+        )
+        self._connection.execute(
+            f"""
+            INSERT INTO {SCHEMA}.tag_candidates (
+                candidate_id, namespace, atom_id, normalized_text, display_text,
+                level, confidence, state, producer, proposal_version,
+                resolved_tag_id, resolution_reason, created_at, resolved_at
+            )
+            SELECT
+                'candidate_legacy_' || edges.atom_id || '_' || tags.tag_id,
+                tags.namespace,
+                edges.atom_id,
+                tags.canonical_text,
+                tags.display_text,
+                tags.level,
+                edges.confidence,
+                'proposed',
+                COALESCE(edges.evidence_sources[1], 'legacy-unknown'),
+                'pre-tag-candidates-v1',
+                NULL,
+                'migrated from proposed_new tag and quarantined; evidence=' ||
+                    array_to_string(edges.evidence_sources, ','),
+                edges.created_at,
+                NULL
+            FROM {SCHEMA}.atom_tags AS edges
+            JOIN {SCHEMA}.tags AS tags ON tags.tag_id = edges.tag_id
+            WHERE tags.state = 'proposed_new'
+            ON CONFLICT(candidate_id) DO NOTHING
+            """
+        )
+        self._connection.execute(
+            f"DELETE FROM {SCHEMA}.atom_tags AS edges USING {SCHEMA}.tags AS tags "
+            "WHERE edges.tag_id = tags.tag_id AND tags.state = 'proposed_new'"
+        )
+        self._connection.execute(
+            f"DELETE FROM {SCHEMA}.tag_relations AS relations "
+            f"USING {SCHEMA}.tags AS tags "
+            "WHERE tags.state = 'proposed_new' AND "
+            "(relations.source_tag_id = tags.tag_id OR relations.target_tag_id = tags.tag_id)"
+        )
+        self._connection.execute(
+            f"DELETE FROM {SCHEMA}.tags WHERE state = 'proposed_new'"
+        )
+
+    def _seed_weight_event_baselines(self) -> None:
+        """Create honest starting snapshots for edges written before the ledger existed."""
+        metadata = Jsonb({"historical_detail_unavailable": True})
+        self._connection.execute(
+            f"""
+            INSERT INTO {SCHEMA}.weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            )
+            SELECT
+                'weight_migration_atom_tag_' || edges.atom_id || '_' || edges.tag_id,
+                atoms.namespace,
+                'atom_tag', edges.atom_id, edges.tag_id, 'has_tag',
+                'migration', 'pre-ledger-current-state', 'migration-baseline-v1',
+                0.0, edges.weight_raw, edges.weight_raw, edges.updated_at, %s
+            FROM {SCHEMA}.atom_tags AS edges
+            JOIN {SCHEMA}.atoms AS atoms ON atoms.atom_id = edges.atom_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {SCHEMA}.weight_events AS events
+                WHERE events.target_type = 'atom_tag'
+                  AND events.target_id = edges.atom_id
+                  AND events.related_id = edges.tag_id
+                  AND events.relation_type = 'has_tag'
+            )
+            ON CONFLICT(event_id) DO NOTHING
+            """,
+            (metadata,),
+        )
+        self._connection.execute(
+            f"""
+            INSERT INTO {SCHEMA}.weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            )
+            SELECT
+                'weight_migration_atom_link_' || links.from_atom_id || '_' ||
+                    links.to_atom_id || '_' || links.relation,
+                atoms.namespace,
+                'atom_link', links.from_atom_id, links.to_atom_id, links.relation,
+                'migration', 'pre-ledger-current-state', 'migration-baseline-v1',
+                0.0, links.weight_raw, links.weight_raw, links.updated_at, %s
+            FROM {SCHEMA}.atom_links AS links
+            JOIN {SCHEMA}.atoms AS atoms ON atoms.atom_id = links.from_atom_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {SCHEMA}.weight_events AS events
+                WHERE events.target_type = 'atom_link'
+                  AND events.target_id = links.from_atom_id
+                  AND events.related_id = links.to_atom_id
+                  AND events.relation_type = links.relation
+            )
+            ON CONFLICT(event_id) DO NOTHING
+            """,
+            (metadata,),
+        )
+        self._connection.execute(
+            f"""
+            INSERT INTO {SCHEMA}.weight_events (
+                event_id, namespace, target_type, target_id, related_id,
+                relation_type, source_type, source_id, policy_version,
+                weight_before, weight_after, delta, created_at, metadata_json
+            )
+            SELECT
+                'weight_migration_tag_relation_' || relations.source_tag_id || '_' ||
+                    relations.target_tag_id || '_' || relations.relation_type,
+                tags.namespace,
+                'tag_relation', relations.source_tag_id, relations.target_tag_id,
+                    relations.relation_type,
+                'migration', 'pre-ledger-current-state', 'migration-baseline-v1',
+                0.0, relations.weight_raw, relations.weight_raw, relations.updated_at, %s
+            FROM {SCHEMA}.tag_relations AS relations
+            JOIN {SCHEMA}.tags AS tags ON tags.tag_id = relations.source_tag_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {SCHEMA}.weight_events AS events
+                WHERE events.target_type = 'tag_relation'
+                  AND events.target_id = relations.source_tag_id
+                  AND events.related_id = relations.target_tag_id
+                  AND events.relation_type = relations.relation_type
+            )
+            ON CONFLICT(event_id) DO NOTHING
+            """,
+            (metadata,),
+        )
+
     def _fetchone(self, query, parameters: Iterable[Any] = ()):
         with self._lock:
             return self._connection.execute(query, parameters).fetchone()
+
+    def _lock_weight_namespace(self, namespace: str) -> None:
+        digest = hashlib.sha256(f"weight-ledger\0{namespace}".encode()).digest()[:8]
+        lock_key = int.from_bytes(digest, byteorder="big", signed=True)
+        self._connection.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
 
     def _fetchall(self, query, parameters: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self._lock:
@@ -1295,6 +1789,44 @@ class PostgreSQLRepository:
             state=TagState(row["state"]),
             aliases=tuple(row["aliases"]),
             created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _tag_candidate(row: dict[str, Any]) -> TagCandidate:
+        return TagCandidate(
+            candidate_id=row["candidate_id"],
+            namespace=row["namespace"],
+            atom_id=row["atom_id"],
+            normalized_text=row["normalized_text"],
+            display_text=row["display_text"],
+            level=TagLevel(row["level"]),
+            confidence=float(row["confidence"]),
+            state=TagCandidateState(row["state"]),
+            producer=row["producer"],
+            proposal_version=row["proposal_version"],
+            resolved_tag_id=row["resolved_tag_id"],
+            resolution_reason=row["resolution_reason"],
+            created_at=row["created_at"],
+            resolved_at=row["resolved_at"],
+        )
+
+    @staticmethod
+    def _weight_event(row: dict[str, Any]) -> WeightEvent:
+        return WeightEvent(
+            event_id=row["event_id"],
+            namespace=row["namespace"],
+            target_type=CalibrationTarget(row["target_type"]),
+            target_id=row["target_id"],
+            related_id=row["related_id"],
+            relation_type=row["relation_type"],
+            source_type=WeightEventSource(row["source_type"]),
+            source_id=row["source_id"],
+            policy_version=row["policy_version"],
+            weight_before=float(row["weight_before"]),
+            weight_after=float(row["weight_after"]),
+            delta=float(row["delta"]),
+            created_at=row["created_at"],
+            metadata=dict(row["metadata_json"]),
         )
 
     @staticmethod

@@ -230,8 +230,11 @@ lineage.
    reports. Real-model quality gates remain required before pairwise testing.
 6. **Implemented (contract level):** restore and gate natural-language query -> generated
    concept -> canonical tag -> atom retrieval in normal serving and evaluation paths.
-7. Specify the structured tag proposal/promotion lifecycle and implement one immutable weight
-   event history before automatic groups or procedures.
-8. Run real-model quality gates and then pairwise integrations.
-9. Decide which upstream serving functions Tags has earned the right to replace.
-10. Run the full system and only then move to scale and procedure synthesis.
+7. **Implemented:** structured tag candidates, canonical-only serving, and atomic
+   promote/merge/reject lifecycle with legacy migration.
+8. **Implemented:** immutable event-backed edge weights, migration baselines, replay audit, and
+   explicit aggregate-cache repair.
+9. Record the payload-reference/handler contract without disrupting text ingestion.
+10. Run real-model quality gates and then pairwise integrations.
+11. Decide which upstream serving functions Tags has earned the right to replace.
+12. Run the full system and only then move to scale and procedure synthesis.

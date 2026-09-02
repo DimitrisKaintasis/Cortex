@@ -11,10 +11,14 @@ from data_retrieval.domain.models import (
     AtomRole,
     AtomTag,
     CalibrationSignal,
+    CalibrationTarget,
     Document,
     IngestionBundle,
     Tag,
+    TagCandidate,
+    TagCandidateState,
     TagRelation,
+    WeightEvent,
 )
 from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
 
@@ -107,6 +111,26 @@ class Repository(Protocol):
         self, *, namespace: str, canonical_texts: tuple[str, ...]
     ) -> tuple[Tag, ...]: ...
 
+    def get_tag_candidate(self, candidate_id: str) -> TagCandidate | None: ...
+
+    def list_tag_candidates(
+        self,
+        *,
+        namespace: str,
+        state: TagCandidateState | None = None,
+        limit: int | None = None,
+    ) -> tuple[TagCandidate, ...]: ...
+
+    def apply_tag_candidate_resolution(
+        self,
+        *,
+        candidate: TagCandidate,
+        tag: Tag | None,
+        atom_tag: AtomTag | None,
+    ) -> None:
+        """Atomically resolve one candidate and optionally activate a canonical edge."""
+        ...
+
     def list_tag_relations(
         self, *, namespace: str, relation_type: str | None = None
     ) -> tuple[TagRelation, ...]: ...
@@ -156,6 +180,16 @@ class Repository(Protocol):
 
     def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]: ...
 
+    def list_weight_events(
+        self,
+        *,
+        namespace: str,
+        target_type: CalibrationTarget | None = None,
+        target_id: str | None = None,
+        related_id: str | None = None,
+        relation_type: str | None = None,
+    ) -> tuple[WeightEvent, ...]: ...
+
     def apply_calibration_updates(
         self,
         *,
@@ -173,6 +207,16 @@ class Repository(Protocol):
         atom_links: tuple[AtomLink, ...],
         tag_relations: tuple[TagRelation, ...],
     ) -> None: ...
+
+    def restore_weight_aggregates(
+        self,
+        *,
+        atom_tags: tuple[AtomTag, ...],
+        atom_links: tuple[AtomLink, ...],
+        tag_relations: tuple[TagRelation, ...],
+    ) -> None:
+        """Repair serving aggregates from the immutable ledger without adding events."""
+        ...
 
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         """Persist a complete ingestion bundle atomically."""
