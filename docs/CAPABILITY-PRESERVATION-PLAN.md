@@ -286,7 +286,10 @@ Goal: establish the learning substrate before adding more learners.
 3. Migrate outcome feedback, `CO_USED`, atom-tag, and tag-pair changes to the same schema.
 4. Add durable conflict observations and confirmation windows.
 5. Add replay, audit, and aggregate-rebuild tests on SQLite and PostgreSQL.
-6. Preserve raw non-negative unbounded relationship weights; normalize only at retrieval time.
+6. Preserve raw non-negative unbounded positive and negative support; normalize only at
+   retrieval time inside explicit relation/scope/query comparison neighborhoods.
+7. Treat current aggregate weights as the local compatibility projection. Collective learning
+   adds immutable observations, rebuildable support aggregates, and versioned serving snapshots.
 
 Exit gate: deleting and rebuilding aggregate weights from events produces the same serving
 state, and repeated event IDs cannot double-apply.
@@ -322,8 +325,9 @@ Goal: make the tag graph the primary semantic address space rather than a small 
 4. Implement GroupTags using rolling support, cohesion, lineage, promotion/demotion, and
    hysteresis. Compare their value against ordinary tag-pair traversal.
 5. Add result diversification across raw/derived roles, sources, time periods, and groups.
-6. Experiment with global/project/user scope blending as profiles rather than a fixed 50/50
-   rule.
+6. Implement the ADR-0013 identity seam: globally stable concepts plus organization, project,
+   user, and private evidence overlays. Experiment with scope blending as profiles rather than a
+   fixed 50/50 rule.
 7. Keep the temporal lens conditional. Later compare a semantic-temporal beam with the staged
    lens; do not replace the proven staged path without an as-of/current-state win.
 
@@ -349,9 +353,37 @@ Goal: let the system improve without becoming self-confirming or destructive.
    - explicit user will;
    - reliability.
    Only retain components that add measurable value without violating temporal semantics.
+8. Implement ADR-0014 as shadow profiles before serving mutation:
+   - unbounded positive/negative support;
+   - proportional lazy decay;
+   - relative `log1p` neighborhood normalization;
+   - hot/warm/cold/dormant/inhibited lifecycle;
+   - reactivation and snapshot rollback.
+9. Preserve the original bounded discrete decay, no-passive-decay, and proportional half-life
+   policies as matched-input controls.
 
 Exit gate: learning survives restart, is reproducible from events, has a stable control group,
 and cannot reinforce an item merely because the system returned it.
+
+### Phase 5A — Prove privacy-preserving collective transfer
+
+Goal: validate the project's central thesis before building global production infrastructure.
+
+1. Create A and B with disjoint private atoms mapped to a controlled shared concept catalog.
+2. Establish B's held-out retrieval and task baseline.
+3. Produce attributable successes and failures using only A.
+4. Export only policy-compliant bounded concept-relationship observations; export no atom,
+   document, query, session, or public user identity.
+5. Aggregate a shadow global snapshot using independent-contributor limits.
+6. Re-evaluate B for task lift, recall, context cost, false positives, and unrelated regression.
+7. Probe reconstruction of A's content, identity, rare concepts, and source structure.
+8. Add stale, noisy, repetitive, and malicious contributors; test decay, thresholds, canary,
+   and rollback.
+9. Repeat with a stronger teacher and a smaller consumer model.
+
+Exit gate: B improves through A's outcome observations without receiving A's private evidence,
+privacy leakage remains below the accepted threshold, and one contributor cannot materially
+poison shared serving behavior.
 
 ### Phase 6 — Make the Mac an autonomous worker and expose safe integrations
 
@@ -449,25 +481,30 @@ The next work should be narrow even though the preserved vision is broad:
 
 1. **Implemented:** split role/modality and correct Mem0-derived atom classification;
 2. **Implemented:** add provenance-aware and role-aware evidence packing;
-3. restore and gate the optional generated-query-tag path in normal retrieval;
-4. specify structured tag proposals and the proposed-tag promotion/serving lifecycle;
-5. introduce the unified immutable weight-event ledger;
-6. record the payload-reference/handler contract without disrupting text ingestion;
-7. rerun real-model capability gates, then pairwise integrations and a fixed LongMemEval slice;
-8. then choose among source adapters, bounded recursive traversal, and GroupTags as the next
-   measured capability.
+3. **Implemented (contract level):** restore and gate the optional generated-query-tag path;
+4. **Implemented:** structured tag proposals and quarantined promotion/merge/reject lifecycle;
+5. **Implemented:** unified immutable weight-event ledger and aggregate audit/rebuild;
+6. **Accepted (contract level):** ADR-0013 collective graph and ADR-0014 unbounded support,
+   relative influence, and forgetting lifecycle;
+7. record the payload-reference/handler contract with scope, visibility, and contribution
+   policy;
+8. rerun real-model capability gates, then pairwise integrations and a fixed LongMemEval slice;
+9. run the isolated cross-user transfer/leakage/poisoning experiment;
+10. then choose among source adapters, bounded recursive traversal, and GroupTags as the next
+    measured capability.
 
 This order protects current data before adding ranking complexity. It also gives GroupTags,
 recursive traversal, exploration, adaptive profiles, remote workers, and procedures the durable
 evidence substrate each one needs.
 
-## Review questions
+## Remaining review questions
 
-Before this proposal becomes an accepted ADR/roadmap, confirm:
-
-1. whether “role + payload modality” is the desired universal atom contract;
-2. whether group membership should stay a separate associative structure rather than become an
-   atom;
-3. whether all weight mutations should be reconstructable from one immutable event ledger;
-4. whether hosted PostgreSQL remains the prerequisite for autonomous Mac operation;
-5. whether the immediate implementation order above matches the desired priority.
+1. Which payload-reference and handler representation best preserves the accepted scope and
+   visibility contract?
+2. Should group membership stay a separate associative structure or become group-as-atom after
+   matched evaluation?
+3. Which passive-decay, maturity, negative-penalty, and robust normalization profiles win the
+   required ablations?
+4. What consent, sensitivity, minimum-contributor, secure-aggregation, and leakage thresholds
+   are required before a private observation can contribute globally?
+5. Which hosted PostgreSQL topology and backup/restore gate precede autonomous Mac work?

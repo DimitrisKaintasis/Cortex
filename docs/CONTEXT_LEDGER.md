@@ -10,14 +10,25 @@ not equivalent to a rejected item.
 - Atoms remain the canonical, payload-agnostic unit of stored information.
 - PostgreSQL owns durable atoms, tags, relationships, embeddings, events, and calibration
   provenance. External models and Mem0 are replaceable providers, not sources of truth.
-- Source content is never deleted or rewritten by learning.
+- Source content is never deleted or rewritten by learning. Owner-authorized retention,
+  tombstoning, export, and privacy/legal erasure are separate audited operations.
 - Factual links (`SUMMARIZES`, `DERIVED_FROM`, `SUPERSEDES`, `ADJACENT_TO`, conflicts) stay
   separate from behavioral links (`CO_USED`) and weighted tag associations.
 - Returning an item does not reinforce it. Learning requires attributable outcome evidence.
 - Every initial or imported weight signal is versioned, idempotent, and replayable.
 - Temporal summaries are derived atoms and retain lineage to source atoms.
+- Versioned processor outputs have active, shadow, superseded, or rejected serving state; old
+  and new projections do not all compete merely because they are retained for audit.
 - Ordered procedures/steps remain an additive structure; atom relationships do not encode
   procedural order.
+- The future global graph shares concept identity and promoted capability, not implicit access
+  to private evidence.
+- Individual outcomes create scoped observations; global serving changes require aggregation,
+  privacy/abuse gates, and a versioned snapshot.
+- Raw behavioral support is non-negative and unbounded; bounded relative influence is calculated
+  only inside an explicit relation/scope/query neighborhood.
+- Learned behavioral attention may decay or become dormant, but provenance and event history do
+  not.
 
 ## Required foundation — implemented
 
@@ -43,7 +54,8 @@ change ranking behavior rather than restore a missing prerequisite.
   penalized repeatedly.
 - Maturity-based exploration and hot/warm/cold result sampling.
 - Evaluation-driven channel-weight profiles with snapshots and rollback.
-- Global-plus-project namespace blending and user-scoped personalization.
+- Scope-aware blending profiles built on the accepted collective graph contract rather than a
+  fixed global/project ratio.
 - Result diversification, raw-evidence quotas, and broader semantic fallback thresholds.
 - Source-specific adapters for code ASTs, Git history, chats, and other structured inputs.
 
@@ -99,7 +111,39 @@ These may reference atoms but must not replace atom-to-atom associative weights.
 - `audit-weights` reconstructs every edge and reports missing history, broken chains, and cache
   divergence. `--repair-aggregates` explicitly restores only the serving cache.
 - Automatic groups now have the required history substrate, but still require their own quality
-  gate. The next ordered repair is the payload reference/handler contract.
+  gate.
+
+## Collective capability graph — accepted contract 2026-09-02
+
+- ADR-0013 makes the long-term product a privacy-preserving, model-agnostic collective
+  capability substrate.
+- Globally stable concepts and promoted routing/procedure capability compose with organization,
+  project, user, and private evidence overlays. Namespace alone is not the scope or security
+  contract.
+- Private payloads and atom attachments remain scoped by default. Only minimized, consented,
+  sensitivity-checked, bounded observations may enter independent-contributor aggregation.
+- Individual outcomes never mutate global serving state directly. Shadow evaluation,
+  privacy/abuse gates, canary promotion, snapshots, and rollback stand between observations and
+  shared behavior.
+- The decisive test is cross-user improvement on disjoint private atoms through shared concepts,
+  accompanied by content-leakage and poisoning probes.
+
+## Unbounded support and forgetting — accepted contract 2026-09-02
+
+- ADR-0014 restores the later Cortex decision that `HAS_TAG`, `RELATED_TO`, and `CONTAINS`
+  support is non-negative and unbounded.
+- Positive and negative support remain distinct; confidence, reliability, cohesion, and final
+  serving influence remain bounded.
+- Retrieval uses relative `log1p` normalization within explicit local comparison sets. Raw
+  weights from unrelated scopes, relation types, or paths are never directly multiplied.
+- Passive behavioral decay is proportional and lazy; verified bad outcomes add bounded negative
+  observations immediately. Provenance/factual links never decay from non-use.
+- Hot/warm/cold/dormant/inhibited state controls serving indexes without deleting history, and
+  renewed evidence may reactivate a relationship.
+- The first bounded `0.5`, `+0.05`, `-0.02 every N ticks` Tags formula and the later unbounded
+  Cortex formula are preserved as experiment baselines, not copied as untested constants.
+- The next ordered repair is the payload reference/handler contract, which must now include
+  scope, visibility, and contribution policy.
 
 ## Superseded or rejected
 

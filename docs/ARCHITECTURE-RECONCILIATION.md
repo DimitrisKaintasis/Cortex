@@ -173,13 +173,41 @@ Required repair:
 - test irrelevant-query and provider-degradation cases;
 - keep this separate from temporal role and source/derived trust.
 
+### 9. Collective learning was reduced to scope blending
+
+The original scope allowed personal graphs to improve one shared semantic graph so later users
+and models could inherit routing capability without receiving another user's source atoms.
+Recent plans retained only a global/project/user blend experiment. That did not define stable
+global concept identity, private overlays, contribution privacy, independent-user aggregation,
+poisoning controls, or global snapshot promotion.
+
+Repair status: ADR-0013 and `COLLECTIVE-CAPABILITY-GRAPH.md` restore the target contract. One
+logical graph consists of shared concepts/capability plus organization, project, user, and
+private evidence overlays. Outcomes become scoped observations; they cannot mutate global
+serving state directly. The cross-user transfer/leakage experiment is required before global
+infrastructure.
+
+### 10. Unbounded relative weights lost their complete lifecycle
+
+The first Tags design used bounded `0.5` priors, example `+0.05` reinforcement, and example
+`-0.02` unused-weight decay every `N` interaction ticks. Cortex later deliberately selected
+non-negative unbounded raw `HAS_TAG`, `RELATED_TO`, and `CONTAINS` weights with relative `log1p`
+serving influence. Passive decay and several negative/group/retrieval paths were not adapted
+consistently after that decision.
+
+Repair status: ADR-0014 restores separate unbounded positive/negative support, proportional lazy
+decay, relative neighborhood normalization, and hot/warm/cold/dormant/inhibited/reactivated
+serving state as the future contract. Historical formulas remain matched baselines; exact
+half-lives, penalties, maturity rules, and robust-reference choices require ablation.
+
 ## Preserved future capabilities
 
 - evidence-backed broad/specific tag hierarchies;
 - bounded layered tag expansion and semantic fail-safe;
 - immutable weight history (implemented), plus future conflict policy, negative direct-plus-one-
   hop learning, and serving-snapshot rollback;
-- global/project/user scope profiles and privacy-aware personalization;
+- the accepted collective graph contract in ADR-0013/0014, including global concepts, private
+  evidence overlays, and privacy-safe cross-user outcome aggregation;
 - hot/warm/cold exploration and adaptive channel profiles with control groups;
 - source adapters for chats, code ASTs, Git history, structured events, and media;
 - emergent weighted groups and group-of-group capability hierarchies;
@@ -194,12 +222,18 @@ Required repair:
    normal retrieval and general evaluation. Real-model quality remains part of step 5.
 2. **Implemented:** structured tag proposal and quarantined candidate lifecycle.
 3. **Implemented:** unified immutable weight-event ledger, audit, and aggregate rebuild.
-4. Record the payload-reference/handler contract without disrupting text ingestion.
-5. Run real-model tag, Mem0, and Temporal quality gates.
-6. Run pairwise integrations with matched inputs and budgets.
-7. Restore bounded recursive tag traversal and confidence-triggered fallback experimentally.
-8. Decide the group representation only after weight history and group quality gates exist.
-9. Design procedural memory separately and test small-model uplift against ordinary RAG and
+4. **Accepted (contract level):** restore the privacy-preserving collective capability graph,
+   global concepts/private overlays, and cross-user validation gate in ADR-0013.
+5. **Accepted (contract level):** restore unbounded positive/negative support, relative
+   normalization, passive decay, active negative learning, and recoverable dormancy in ADR-0014.
+6. Record the payload-reference/handler contract with scope, visibility, and contribution
+   policy without disrupting text ingestion.
+7. Run real-model tag, Mem0, and Temporal quality gates.
+8. Run pairwise integrations with matched inputs and budgets.
+9. Run the isolated cross-user transfer, privacy-leakage, and poisoning experiment.
+10. Restore bounded recursive tag traversal and confidence-triggered fallback experimentally.
+11. Decide the group representation only after weight history and group quality gates exist.
+12. Design procedural memory separately and test small-model uplift against ordinary RAG and
    the current evidence pack.
 
 ## Anti-goals
@@ -211,6 +245,10 @@ Required repair:
 - Do not let summaries, Mem0 memories, groups, or skills replace their source evidence.
 - Do not reinforce an item merely because it was returned.
 - Do not copy historical thresholds or gravity formulas without an ablation.
+- Do not treat namespace isolation as a privacy model or put every user's evidence in one flat
+  global graph.
+- Do not let one user's outcome mutate global serving weights directly.
+- Do not multiply arbitrary unbounded raw weights across retrieval paths.
 - Do not require Neo4j solely because the logical model is a graph.
 - Do not hard-wire one model, embedding profile, storage engine, or orchestration framework into
   domain semantics.

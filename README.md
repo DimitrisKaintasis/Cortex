@@ -393,6 +393,13 @@ the Mac.
 
 ## Architecture
 
+The authoritative target is [Data Retrieval architecture](docs/ARCHITECTURE.md). Its long-term
+collective scope, privacy boundary, unbounded support, relative influence, passive decay, and
+cross-user validation gate are specified in the
+[collective capability graph](docs/COLLECTIVE-CAPABILITY-GRAPH.md),
+[ADR-0013](docs/decisions/0013-privacy-preserving-collective-capability-graph.md), and
+[ADR-0014](docs/decisions/0014-unbounded-relative-support-and-forgetting.md).
+
 The target graph is:
 
 ```text
