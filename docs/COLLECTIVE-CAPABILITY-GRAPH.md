@@ -119,6 +119,15 @@ entries may be escalated to a replaceable AI reviewer. The cheap gate uses bound
 aggregate features; it does not require private payloads merely to decide whether review is
 worthwhile.
 
+The deterministic gate receives its values from a versioned collective feature extractor. The
+extractor combines immutable ledger aggregates, cached and calibrated vector similarities,
+Mem0 facts collapsed by source lineage, Temporal currentness/supersession, policy metadata, and
+an ephemeral shadow-impact dry run. Missing processor evidence raises uncertainty for immature
+relationships but does not block mature ledger evidence. Processor agreement may improve
+interpretation confidence; it never manufactures independent contributors or relationship
+maturity. The v1 formulas and remaining adapter work are recorded in
+`COLLECTIVE-FEATURE-EXTRACTOR.md`.
+
 Expensive review is asynchronous. Until it finishes, the active serving snapshot remains
 unchanged. High-risk updates are held rather than provisionally applied. Review queues have
 explicit budgets and prioritize the product of uncertainty, expected impact, and risk, with hard

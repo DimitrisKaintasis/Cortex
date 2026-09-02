@@ -85,6 +85,11 @@ The v1 cascade uses fixed reviewer outputs, not live model calls. See the
 [selective AI review experiment](docs/REVIEW-CASCADE-EXPERIMENT.md) for the measured call savings,
 weight boundary, and remaining real-model tests.
 
+The cheap gate's ledger, cached-vector, Mem0-lineage, Temporal, and shadow-impact formulas are
+documented in the [collective feature extractor contract](docs/COLLECTIVE-FEATURE-EXTRACTOR.md).
+The extractor is currently a pure shadow component; repository adapters have not yet connected
+it to normal ingestion or serving.
+
 Optional developer tools can be installed with:
 
 ```powershell

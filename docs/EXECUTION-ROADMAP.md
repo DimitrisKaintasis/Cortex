@@ -162,6 +162,19 @@ Selective review cascade implemented at the deterministic contract level:
 - [x] Compare cheap-only, review-everything, and gated review on one deterministic fixture.
 - [ ] Repeat the comparison with ambiguous threshold cases and real local/strong models.
 
+Automatic cheap-feature calculation implemented at the deterministic contract level:
+
+- [x] Derive maturity, conflict, concentration, rarity, and novelty from ledger aggregates.
+- [x] Use cached calibrated vector similarity, top-two ambiguity, novelty, and duplicate signals.
+- [x] Use Mem0 supporting/conflicting facts while deduplicating common source lineage.
+- [x] Use Temporal currentness, conflict, and supersession.
+- [x] Use an ephemeral active-versus-candidate impact contract.
+- [x] Preserve provider/profile provenance and explanations for every component.
+- [x] Degrade safely when processors are missing and export no contributor/lineage identifiers.
+- [x] Connect extracted features directly to the cheap review triage contract.
+- [ ] Implement repository adapters that populate the evidence records from real stored data.
+- [ ] Calibrate vector similarity and triage thresholds on development data.
+
 Evidence: `REVIEW-CASCADE-EXPERIMENT.md`, `evals/review_cascade_v1.json`, and
 `tests/test_review_cascade.py`. The cascade matched 13/13 fixed review decisions while escalating
 3/13 cases and consuming about 24% of review-everything relative cost. This proves orchestration,
@@ -275,3 +288,4 @@ Append one short entry after every work session.
 | 2026-09-02 | 1 | Reproduced the pre-experiment baseline | 97 tests and 7/7 gates passed; maintained surfaces lint-clean | Build shadow core |
 | 2026-09-02 | 2–3 | Added isolated collective core and transfer harness | 18/18 experiment checks and 104/104 unit tests passed; 2 live PostgreSQL tests skipped | Expand policy/adversarial fixture matrix |
 | 2026-09-02 | 4 | Added selective cheap/expensive AI review cascade | 17/17 cascade checks and 110/110 unit tests passed; fixed-review quality matched with 3/13 escalations and about 24% relative cost | Test ambiguous cases and real reviewers |
+| 2026-09-02 | 4 | Added deterministic ledger/vector/Mem0/Temporal feature extractor | 12 extractor contracts and 122/122 unit tests passed; cold, mature, ambiguity, conflict, supersession, degradation, lineage, and privacy behavior verified | Add real repository evidence adapters |
