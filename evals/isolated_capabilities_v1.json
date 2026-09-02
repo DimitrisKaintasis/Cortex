@@ -1,0 +1,105 @@
+{
+  "fixture_id": "isolated-capabilities-v1",
+  "random_seed": 0,
+  "canonical_core": {
+    "namespace": "gate:canonical",
+    "source": "architecture-note",
+    "text": "Canonical atoms preserve identity, provenance, and replay safety.",
+    "tags": ["architecture", "canonical evidence"]
+  },
+  "mem0_boundary": {
+    "namespace": "gate:mem0",
+    "source": "conversation",
+    "source_paragraphs": [
+      "PostgreSQL stores durable project records and preserves every audited change safely.",
+      "The Mac Mini runs the inference worker overnight and returns completed results remotely."
+    ],
+    "facts": [
+      {
+        "id": "memory-storage",
+        "content": "PostgreSQL stores the durable project records.",
+        "support_index": 0
+      },
+      {
+        "id": "memory-worker",
+        "content": "The Mac Mini runs inference overnight.",
+        "support_index": 1
+      }
+    ]
+  },
+  "temporal_projection": {
+    "namespace": "gate:temporal",
+    "timeline_id": "main",
+    "range_start": "2026-08-19T12:00:00+00:00",
+    "range_end": "2026-08-19T13:00:00+00:00",
+    "events": [
+      {
+        "source": "event-1",
+        "text": "The team selected PostgreSQL for canonical storage.",
+        "occurred_at": "2026-08-19T12:10:00+00:00"
+      },
+      {
+        "source": "event-2",
+        "text": "The team kept the Mac Mini as a replaceable inference worker.",
+        "occurred_at": "2026-08-19T12:20:00+00:00"
+      }
+    ],
+    "expected_granularities": ["six_hour", "day", "week", "month", "year"]
+  },
+  "tags": {
+    "namespace": "gate:tags",
+    "source": "deployment-note",
+    "text": "PostgreSQL stores retrieval data while the Mac Mini performs remote inference.",
+    "proposals": [
+      {"text": "PostgreSQL", "confidence": 0.95},
+      {"text": "Remote Inference", "confidence": 0.90},
+      {"text": "postgresql", "confidence": 0.70}
+    ],
+    "expected_canonical_tags": ["postgresql", "remote inference"]
+  },
+  "outcome_learning": {
+    "namespace": "gate:learning",
+    "query": "Which storage architecture is used?",
+    "query_tags": ["architecture"],
+    "documents": [
+      {
+        "source": "selected",
+        "text": "PostgreSQL is the selected storage architecture.",
+        "tags": ["architecture", "postgresql"]
+      },
+      {
+        "source": "collateral",
+        "text": "The Mac Mini inference architecture is replaceable.",
+        "tags": ["architecture", "mac mini"]
+      }
+    ],
+    "expected_selected_delta": 0.05,
+    "expected_collateral_delta": 0.0
+  },
+  "retrieval_channels": {
+    "namespace": "gate:retrieval",
+    "target": {
+      "source": "vehicle",
+      "text": "A car engine converts fuel into motion through combustion.",
+      "tags": ["vehicles"]
+    },
+    "distractor": {
+      "source": "cooking",
+      "text": "Bread requires flour, water, yeast, and heat.",
+      "tags": ["cooking"]
+    },
+    "lexical_query": "engine fuel",
+    "semantic_query": "automobile powertrain",
+    "tag_query": ["vehicles"],
+    "generated_query_tag": "automobiles",
+    "canonical_query_tag": "vehicles"
+  },
+  "evidence_packing": {
+    "top_k": 5,
+    "source_count": 2,
+    "derived_count": 4,
+    "expected_source_selected": 2,
+    "expected_derived_limit": 2,
+    "expected_total_selected": 4
+  }
+}

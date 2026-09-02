@@ -4,7 +4,11 @@ The authoritative component boundaries, processor contracts, and isolated capabi
 order are documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Mem0 and Temporal
 History are replaceable processors; Data Retrieval owns canonical evidence and final retrieval.
 The final context-composition constraints are documented in
-[`docs/EVIDENCE-PACKING.md`](docs/EVIDENCE-PACKING.md).
+[`docs/EVIDENCE-PACKING.md`](docs/EVIDENCE-PACKING.md). The deterministic subsystem test
+harness and its limitations are documented in
+[`docs/ISOLATED-CAPABILITY-GATES.md`](docs/ISOLATED-CAPABILITY-GATES.md). Recovered historical
+scope, current gaps, anti-goals, and the dependency-ordered repair plan are recorded in
+[`docs/ARCHITECTURE-RECONCILIATION.md`](docs/ARCHITECTURE-RECONCILIATION.md).
 
 Data Retrieval is a clean successor to the original `Tags-Project`. It is a
 tag-centric retrieval engine that keeps source order, tag provenance, and
@@ -49,6 +53,12 @@ Python 3.13 or newer is required.
 
 ```powershell
 python -m unittest discover -s tests -v
+```
+
+Run the seven isolated architecture contracts before combined evaluation:
+
+```powershell
+python -m data_retrieval evaluate-capabilities
 ```
 
 Optional developer tools can be installed with:
@@ -231,6 +241,21 @@ python -m data_retrieval retrieve "current Docker status" `
   --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
   --embedding-profile harrier-retrieval-v1
 ```
+
+Or let the optional Ollama tag proposer map the natural-language query into the existing tag
+catalog before retrieval:
+
+```powershell
+python -m data_retrieval retrieve "How is inference hosted?" `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --tag-model $env:OLLAMA_TAG_MODEL `
+  --embedding-model $env:OLLAMA_EMBEDDING_MODEL
+```
+
+The embedding model enables semantic matching from generated concepts to canonical catalog
+tags. If the tag model or Mac is unavailable, retrieval continues through explicit tags,
+lexical search, and the semantic channel and records the degradation in diagnostics.
 
 The output includes a `retrieval_id`, per-channel scores, evidence, temporal roles, and
 atom IDs. Explicit outcome feedback can then update only learned relationships:

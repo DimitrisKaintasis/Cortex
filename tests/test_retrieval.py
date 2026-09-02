@@ -7,6 +7,8 @@ from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentServ
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.storage.memory import InMemoryRepository
+from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
+from data_retrieval.tagging.proposals import TagProposal
 
 
 class StubEmbedder:
@@ -23,7 +25,73 @@ class StubEmbedder:
         return self.vectors[text]
 
 
+class StubTagProposer:
+    evidence_source = "stub-query-tags"
+    proposal_version = "stub-query-tags-v1"
+
+    def __init__(self, proposals: tuple[TagProposal, ...]) -> None:
+        self.proposals = proposals
+
+    def propose_tags(self, *, text, namespace, existing_tags):
+        return self.proposals
+
+
+class FailingTagProposer(StubTagProposer):
+    def propose_tags(self, *, text, namespace, existing_tags):
+        raise RuntimeError("query tag provider unavailable")
+
+
 class RetrievalServiceTests(unittest.TestCase):
+    def test_generated_query_tag_canonicalizes_and_retrieves_without_shared_words(self) -> None:
+        repository = InMemoryRepository()
+        target = IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="vehicle",
+            text="A car engine converts fuel into motion.",
+            explicit_tags=("vehicles",),
+        )
+        canonicalizer = SemanticTagCanonicalizer(
+            StubEmbedder(
+                {
+                    "automobiles": (1.0, 0.0),
+                    "vehicles": (1.0, 0.0),
+                }
+            )
+        )
+
+        retrieved = RetrievalService(
+            repository,
+            tag_proposer=StubTagProposer((TagProposal("automobiles", 0.95),)),
+            tag_canonicalizer=canonicalizer,
+        ).retrieve(
+            QueryPlan(query="How does the powertrain work?", namespace="project-a")
+        )
+
+        self.assertEqual(retrieved.items[0].atom_id, target.atom_ids[0])
+        self.assertEqual(retrieved.diagnostics["query_tags"], ("vehicles",))
+        self.assertGreater(retrieved.items[0].score.tag, 0.0)
+        self.assertEqual(retrieved.diagnostics["warnings"], [])
+
+    def test_query_tag_failure_degrades_to_lexical_retrieval(self) -> None:
+        repository = InMemoryRepository()
+        target = IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="storage",
+            text="PostgreSQL stores durable project records.",
+        )
+
+        retrieved = RetrievalService(
+            repository,
+            tag_proposer=FailingTagProposer(()),
+        ).retrieve(QueryPlan(query="PostgreSQL records", namespace="project-a"))
+
+        self.assertEqual(retrieved.items[0].atom_id, target.atom_ids[0])
+        self.assertEqual(retrieved.items[0].score.lexical, 1.0)
+        self.assertIn(
+            "tag_proposer_unavailable:RuntimeError",
+            retrieved.diagnostics["warnings"],
+        )
+
     def test_relative_time_uses_query_reference_time(self) -> None:
         repository = InMemoryRepository()
         ingestion = IngestService(repository)

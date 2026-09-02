@@ -13,6 +13,7 @@ from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentServ
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.storage.repository import Repository
+from data_retrieval.tagging.proposals import TagProposer
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +41,15 @@ class EvaluationReport:
 class EvaluationRunner:
     """Run a small, deterministic retrieval corpus against one configuration."""
 
-    def __init__(self, repository: Repository, *, embedder: Embedder | None = None) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        *,
+        tag_proposer: TagProposer | None = None,
+        embedder: Embedder | None = None,
+    ) -> None:
         self.repository = repository
+        self.tag_proposer = tag_proposer
         self.embedder = embedder
 
     def run(self, dataset_path: Path) -> EvaluationReport:
@@ -50,7 +58,11 @@ class EvaluationRunner:
         source_atoms = self._ingest_documents(namespace, dataset["documents"])
         if self.embedder is not None:
             EmbeddingEnrichmentService(self.repository, self.embedder).enrich_namespace(namespace)
-        retrieval = RetrievalService(self.repository, embedder=self.embedder)
+        retrieval = RetrievalService(
+            self.repository,
+            tag_proposer=self.tag_proposer,
+            embedder=self.embedder,
+        )
         results: list[dict[str, Any]] = []
         for case in dataset["cases"]:
             expected = {
@@ -79,6 +91,8 @@ class EvaluationRunner:
                     "recall": hits / len(expected),
                     "forbidden_violation": bool(set(ranked).intersection(forbidden)),
                     "resolved_temporal_mode": retrieved.resolved_temporal_mode.value,
+                    "query_tags": list(retrieved.diagnostics["query_tags"]),
+                    "warnings": list(retrieved.diagnostics["warnings"]),
                     "retrieved_atom_ids": ranked,
                 }
             )

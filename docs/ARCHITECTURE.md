@@ -226,7 +226,12 @@ lineage.
 2. **Implemented:** correct Mem0 outputs to role `derived` and make learning role-aware.
 3. **Implemented:** define and validate fact-level support lineage for Mem0 outputs.
 4. **Implemented:** add role/provenance-aware evidence packing.
-5. Build isolated capability fixtures and reports.
-6. Run pairwise integrations.
-7. Decide which upstream serving functions Tags has earned the right to replace.
-8. Run the full system and only then move to scale and procedure synthesis.
+5. **Implemented (contract level):** build deterministic isolated capability fixtures and
+   reports. Real-model quality gates remain required before pairwise testing.
+6. **Implemented (contract level):** restore and gate natural-language query -> generated
+   concept -> canonical tag -> atom retrieval in normal serving and evaluation paths.
+7. Specify the structured tag proposal/promotion lifecycle and implement one immutable weight
+   event history before automatic groups or procedures.
+8. Run real-model quality gates and then pairwise integrations.
+9. Decide which upstream serving functions Tags has earned the right to replace.
+10. Run the full system and only then move to scale and procedure synthesis.

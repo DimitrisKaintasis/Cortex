@@ -47,6 +47,26 @@ change ranking behavior rather than restore a missing prerequisite.
 - Result diversification, raw-evidence quotas, and broader semantic fallback thresholds.
 - Source-specific adapters for code ASTs, Git history, chats, and other structured inputs.
 
+## Recovered repair dependencies — accepted 2026-09-02
+
+The architecture audit in `ARCHITECTURE-RECONCILIATION.md` identified capabilities that were
+documented historically but not completely protected by current runtime tests.
+
+- The optional generated query-tag path is part of normal retrieval, not only benchmark
+  plumbing. It must degrade to lexical/semantic retrieval when inference is unavailable.
+- `TagProposal` must evolve beyond text/confidence to preserve semantic level, hierarchy
+  candidates, aliases, evidence, and generation trace.
+- `proposed_new` needs an explicit serving and promotion lifecycle. Proposal state must not be
+  merely decorative.
+- All learned aggregate weights must become reconstructable from one immutable event history
+  before automatic groups or procedures are promoted.
+- Payload modality is not the complete universal-atom contract; payload reference, handler,
+  immutable identity, and derived projection semantics remain to be decided.
+- A downstream consumer must be allowed to abstain from injecting irrelevant memory even when
+  retrieval produced low-confidence candidates.
+- Semantic-temporal beam traversal, emergent groups, and procedural memory remain accepted
+  experiments/layers, but depend on the repaired tag and learning substrate.
+
 ## Intentionally separate future structure
 
 - Refining frequently useful atoms into concise instructions.

@@ -447,12 +447,15 @@ location.
 
 The next work should be narrow even though the preserved vision is broad:
 
-1. implement the role/modality split and correct Mem0-derived atom classification;
-2. add provenance-aware and role-aware evidence packing;
-3. introduce the unified immutable weight-event ledger;
-4. update the context ledger and traceability map after those contracts are accepted;
-5. rerun the current corpus and a fixed LongMemEval slice;
-6. then choose between source adapters and GroupTags as the next measured capability.
+1. **Implemented:** split role/modality and correct Mem0-derived atom classification;
+2. **Implemented:** add provenance-aware and role-aware evidence packing;
+3. restore and gate the optional generated-query-tag path in normal retrieval;
+4. specify structured tag proposals and the proposed-tag promotion/serving lifecycle;
+5. introduce the unified immutable weight-event ledger;
+6. record the payload-reference/handler contract without disrupting text ingestion;
+7. rerun real-model capability gates, then pairwise integrations and a fixed LongMemEval slice;
+8. then choose among source adapters, bounded recursive traversal, and GroupTags as the next
+   measured capability.
 
 This order protects current data before adding ranking complexity. It also gives GroupTags,
 recursive traversal, exploration, adaptive profiles, remote workers, and procedures the durable

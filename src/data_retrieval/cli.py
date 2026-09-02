@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import psycopg
 
+from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.evaluation import EvaluationRunner
@@ -279,6 +280,14 @@ def build_parser() -> argparse.ArgumentParser:
     retrieve.add_argument("--range-start", type=_aware_datetime)
     retrieve.add_argument("--range-end", type=_aware_datetime)
     retrieve.add_argument("--reference-time", type=_aware_datetime)
+    retrieve.add_argument(
+        "--tag-model",
+        default=os.getenv("OLLAMA_TAG_MODEL"),
+        help=(
+            "optional Ollama model for generated query tags; retrieval degrades safely "
+            "without it"
+        ),
+    )
     _add_embedding_options(retrieve, required=False)
 
     feedback = commands.add_parser(
@@ -303,7 +312,27 @@ def build_parser() -> argparse.ArgumentParser:
         sqlite_env="DATA_RETRIEVAL_EVAL_DB",
         sqlite_default="evaluation.sqlite3",
     )
+    evaluate.add_argument(
+        "--tag-model",
+        default=os.getenv("OLLAMA_TAG_MODEL"),
+        help="optional Ollama model for generated evaluation query tags",
+    )
     _add_embedding_options(evaluate, required=False)
+
+    capabilities = commands.add_parser(
+        "evaluate-capabilities",
+        help="run deterministic isolated architecture contracts",
+    )
+    capabilities.add_argument(
+        "--fixture",
+        type=Path,
+        default=Path("evals/isolated_capabilities_v1.json"),
+    )
+    capabilities.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/isolated-capabilities.json"),
+    )
     return parser
 
 
@@ -340,8 +369,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _retrieve(args)
         elif args.command == "feedback":
             output = _feedback(args)
-        else:
+        elif args.command == "evaluate":
             output = _evaluate(args)
+        else:
+            output = _evaluate_capabilities(args, parser)
     except (
         OSError,
         UnicodeError,
@@ -355,6 +386,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     print(json.dumps(output, indent=2))
+    if args.command == "evaluate-capabilities" and output["passed"] is False:
+        return 1
     return 0
 
 
@@ -808,6 +841,15 @@ def _record_interaction(args: argparse.Namespace) -> dict[str, object]:
 
 def _retrieve(args: argparse.Namespace) -> dict[str, object]:
     embedder = _embedder(args) if args.embedding_model else None
+    tag_proposer = (
+        OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=args.tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+        if args.tag_model
+        else None
+    )
     plan = QueryPlan(
         query=args.query,
         namespace=args.namespace,
@@ -821,11 +863,16 @@ def _retrieve(args: argparse.Namespace) -> dict[str, object]:
         reference_time=args.reference_time,
     )
     with _open_repository(args) as repository:
-        result = RetrievalService(repository, embedder=embedder).retrieve(plan)
+        result = RetrievalService(
+            repository,
+            tag_proposer=tag_proposer,
+            embedder=embedder,
+        ).retrieve(plan)
     return {
         "retrieval_id": result.retrieval_id,
         "resolved_temporal_mode": result.resolved_temporal_mode.value,
         "low_confidence": result.low_confidence,
+        "query_tag_model": args.tag_model,
         "diagnostics": result.diagnostics,
         "items": [
             {
@@ -878,14 +925,46 @@ def _feedback(args: argparse.Namespace) -> dict[str, object]:
 
 def _evaluate(args: argparse.Namespace) -> dict[str, object]:
     embedder = _embedder(args) if args.embedding_model else None
+    tag_proposer = (
+        OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=args.tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+        if args.tag_model
+        else None
+    )
     with _open_repository(args) as repository:
-        report = EvaluationRunner(repository, embedder=embedder).run(args.dataset)
+        report = EvaluationRunner(
+            repository,
+            tag_proposer=tag_proposer,
+            embedder=embedder,
+        ).run(args.dataset)
     return {
         **report.as_dict(),
         "dataset": str(args.dataset),
         "database": _database_label(args),
+        "query_tag_model": args.tag_model,
         "embedding_model": embedder.model if embedder else None,
     }
+
+
+def _evaluate_capabilities(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.fixture.is_file():
+        parser.error(f"capability fixture does not exist: {args.fixture}")
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    report = IsolatedCapabilitySuite().run(
+        args.fixture,
+        artifact_location=args.report,
+    )
+    payload = report.as_dict()
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
 
 
 def _add_ollama_options(parser: argparse.ArgumentParser, *, timeout_default: str) -> None:
