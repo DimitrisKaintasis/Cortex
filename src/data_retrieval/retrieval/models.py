@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from data_retrieval.domain.models import AtomKind, utc_now
+from data_retrieval.domain.models import AtomKind, AtomRole, utc_now
 
 
 class TemporalMode(StrEnum):
@@ -15,6 +15,13 @@ class TemporalMode(StrEnum):
     AS_OF = "as_of"
     RANGE = "range"
     HISTORY = "history"
+
+
+class TemporalLabel(StrEnum):
+    NONE = "none"
+    CURRENT = "current"
+    HISTORICAL = "historical"
+    CONTINUITY = "continuity"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +115,8 @@ class RetrievalItem:
     score: ScoreBreakdown
     metadata: dict[str, Any]
     lineage_atom_ids: tuple[str, ...] = ()
+    atom_role: AtomRole = AtomRole.SOURCE
+    temporal_label: TemporalLabel = TemporalLabel.NONE
 
 
 @dataclass(frozen=True, slots=True)

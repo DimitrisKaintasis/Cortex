@@ -31,7 +31,7 @@ class PostgreSQLRepositoryIntegrationTests(unittest.TestCase):
     def test_mem0_bootstrap_lineage_and_resume(self) -> None:
         namespace = f"integration-mem0-{uuid4()}"
         with PostgreSQLRepository(os.environ["DATA_RETRIEVAL_TEST_POSTGRES_DSN"]) as repository:
-            source = IngestService(repository).ingest_text(
+            IngestService(repository).ingest_text(
                 namespace=namespace,
                 source="conversation",
                 text="The project uses PostgreSQL and the Mac runs inference.",
@@ -44,13 +44,13 @@ class PostgreSQLRepositoryIntegrationTests(unittest.TestCase):
             second = service.run(namespace=namespace)
 
             self.assertEqual(first.memories_imported, 1)
-            self.assertEqual(first.source_lineage_links_created, len(source.atom_ids))
+            self.assertEqual(first.source_lineage_links_created, 1)
             self.assertEqual(second.batches_resumed, 1)
             self.assertEqual(processor.call_count, 1)
             links = repository.list_atom_links(
-                namespace=namespace, relation=AtomLinkRelation.DERIVED_FROM
+                namespace=namespace, relation=AtomLinkRelation.SUPPORTED_BY
             )
-            self.assertEqual(len(links), len(source.atom_ids))
+            self.assertEqual(len(links), 1)
 
     def test_ingestion_indexed_channels_and_staged_file(self) -> None:
         namespace = f"integration-{uuid4()}"

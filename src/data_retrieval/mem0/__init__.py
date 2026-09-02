@@ -10,6 +10,11 @@ from data_retrieval.mem0.importer import (
     Mem0Record,
     load_mem0_records,
 )
+from data_retrieval.mem0.support import (
+    LexicalSupportAligner,
+    SupportAligner,
+    SupportSelection,
+)
 
 __all__ = [
     "Mem0BootstrapResult",
@@ -19,5 +24,8 @@ __all__ = [
     "Mem0Processor",
     "Mem0PythonProcessor",
     "Mem0Record",
+    "LexicalSupportAligner",
+    "SupportAligner",
+    "SupportSelection",
     "load_mem0_records",
 ]

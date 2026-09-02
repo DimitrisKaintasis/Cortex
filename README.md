@@ -3,6 +3,8 @@
 The authoritative component boundaries, processor contracts, and isolated capability-testing
 order are documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Mem0 and Temporal
 History are replaceable processors; Data Retrieval owns canonical evidence and final retrieval.
+The final context-composition constraints are documented in
+[`docs/EVIDENCE-PACKING.md`](docs/EVIDENCE-PACKING.md).
 
 Data Retrieval is a clean successor to the original `Tags-Project`. It is a
 tag-centric retrieval engine that keeps source order, tag provenance, and
@@ -241,9 +243,9 @@ python -m data_retrieval feedback <retrieval-id> `
   --reason "used in the final answer"
 ```
 
-Feedback never rewrites source atoms or factual `SUPERSEDES`, `SUMMARIZES`, and
-`DERIVED_FROM` links. It makes small bounded changes to atom-tag weights, learned
-`CO_USED` atom links, and tag co-occurrence relations. Summary selections pass only
+Feedback never rewrites source atoms or factual `SUPERSEDES`, `SUMMARIZES`,
+`SUPPORTED_BY`, and `DERIVED_FROM` links. It makes small bounded changes to atom-tag weights,
+learned `CO_USED` atom links, and tag co-occurrence relations. Summary selections pass only
 partial credit to their source lineage.
 
 Import a Mem0 JSON/JSONL export. Records become native atoms; the embedding model enables
@@ -260,9 +262,10 @@ python -m data_retrieval import-mem0 .\mem0-export.json `
 
 Existing native atoms can also be distilled through self-hosted Mem0. The job reads one
 bounded batch at a time, sends only conversation content plus internal lineage identifiers,
-imports the distilled memories, creates `DERIVED_FROM` links to every source atom, and writes
-stable completion signals. A rerun resumes completed batches without calling Mem0 or changing
-weights again:
+aligns each distilled fact to a bounded subset of source atoms, creates factual `SUPPORTED_BY`
+links, and preserves the wider batch only as audit metadata. An output that cannot be aligned
+is counted as `memories_unaligned` and is not imported. A rerun resumes completed batches
+without calling Mem0 or changing weights again:
 
 ```powershell
 python -m pip install -e ".[mem0]"

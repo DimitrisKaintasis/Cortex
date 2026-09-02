@@ -66,13 +66,22 @@ python -m data_retrieval bootstrap-mem0 `
   --max-documents 1
 ```
 
-Inspect `memories_returned`, `memories_imported`, `source_lineage_links_created`, and
-`calibration_signals_created`. Run the same command again: it should report resumed batches and
-zero newly processed batches. Then raise the cap or select a namespace prefix.
+Inspect `memories_returned`, `memories_unaligned`, `memories_imported`,
+`source_lineage_links_created`, and `calibration_signals_created`. A fact uses processor-declared
+`support_atom_ids` when available; otherwise a deterministic bounded lexical alignment selects
+up to three source atoms. Only those atoms receive `SUPPORTED_BY` links. The complete input batch
+is retained separately as `batch_atom_ids` audit metadata. Run the same command again: it should
+report resumed batches and zero newly processed batches. Then raise the cap or select a namespace
+prefix.
 
 An empty Mem0 result is reported as an `empty_batch` and remains retryable because some local
 models turn malformed extraction output into an empty result. After inspecting a genuinely
 unmemorable batch, `--accept-empty` can mark it complete explicitly.
+
+A non-empty fact that cannot be aligned in a multi-atom batch is reported as
+`memories_unaligned`, is not admitted as canonical derived evidence, and is marked processed for
+that processor/alignment profile. Changing either profile creates new completion identities and
+allows a later, stronger aligner to reconsider it.
 
 The bridge never sends arbitrary source metadata. This is particularly important for benchmark
 data: expected answers and evidence labels stay outside the Mem0 prompt. Mem0 output documents

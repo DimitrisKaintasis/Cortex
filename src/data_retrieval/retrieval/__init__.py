@@ -7,7 +7,13 @@ from data_retrieval.retrieval.models import (
     RetrievalItem,
     RetrievalResult,
     ScoreBreakdown,
+    TemporalLabel,
     TemporalMode,
+)
+from data_retrieval.retrieval.packing import (
+    EvidencePacker,
+    EvidencePackingPolicy,
+    EvidencePackingResult,
 )
 
 __all__ = [
@@ -17,5 +23,9 @@ __all__ = [
     "RetrievalItem",
     "RetrievalResult",
     "ScoreBreakdown",
+    "TemporalLabel",
     "TemporalMode",
+    "EvidencePacker",
+    "EvidencePackingPolicy",
+    "EvidencePackingResult",
 ]

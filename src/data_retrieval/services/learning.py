@@ -158,12 +158,7 @@ class LearningService:
             if atom.role is AtomRole.SOURCE:
                 credit[selected_id] = 1.0
                 continue
-            stack = [
-                link.to_atom_id
-                for link in self.repository.get_atom_links(selected_id)
-                if link.relation
-                in {AtomLinkRelation.SUMMARIZES, AtomLinkRelation.DERIVED_FROM}
-            ]
+            stack = list(self._lineage_targets(selected_id))
             visited: set[str] = set()
             credited_source = False
             while stack:
@@ -176,17 +171,27 @@ class LearningService:
                     credit[atom_id] = max(credit.get(atom_id, 0.0), self.summary_credit)
                     credited_source = True
                 else:
-                    stack.extend(
-                        link.to_atom_id
-                        for link in self.repository.get_atom_links(atom_id)
-                        if link.relation
-                        in {AtomLinkRelation.SUMMARIZES, AtomLinkRelation.DERIVED_FROM}
-                    )
+                    stack.extend(self._lineage_targets(atom_id))
             if not credited_source:
                 # A useful derived artifact without raw lineage must still be able to learn.
                 # Its role remains derived; this is feedback credit, not source authority.
                 credit[selected_id] = 1.0
         return credit
+
+    def _lineage_targets(self, atom_id: str) -> tuple[str, ...]:
+        atom = self.repository.get_atom(atom_id)
+        links = self.repository.get_atom_links(atom_id)
+        if atom is not None and atom.metadata.get("source_system") == "mem0":
+            # Legacy Mem0 DERIVED_FROM links represented whole input batches. Only
+            # v2 fact-level support is safe for outcome-credit propagation.
+            allowed = {AtomLinkRelation.SUPPORTED_BY}
+        else:
+            allowed = {
+                AtomLinkRelation.SUMMARIZES,
+                AtomLinkRelation.DERIVED_FROM,
+                AtomLinkRelation.SUPPORTED_BY,
+            }
+        return tuple(link.to_atom_id for link in links if link.relation in allowed)
 
     def _co_used_updates(
         self,

@@ -57,6 +57,7 @@ class PayloadModality(StrEnum):
 class AtomLinkRelation(StrEnum):
     SUMMARIZES = "summarizes"
     DERIVED_FROM = "derived_from"
+    SUPPORTED_BY = "supported_by"
     SUPERSEDES = "supersedes"
     CO_USED = "co_used"
     CONFLICTS_WITH = "conflicts_with"

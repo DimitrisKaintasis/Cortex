@@ -1,8 +1,8 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from data_retrieval.domain.models import AtomLink, AtomLinkRelation, IngestionBundle
-from data_retrieval.retrieval.models import QueryPlan, TemporalMode
+from data_retrieval.domain.models import AtomLink, AtomLinkRelation, AtomRole, IngestionBundle
+from data_retrieval.retrieval.models import QueryPlan, TemporalLabel, TemporalMode
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.retrieval import RetrievalService
@@ -71,8 +71,12 @@ class RetrievalServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(retrieved.items[0].atom_id, result.atom_ids[0])
+        self.assertEqual(retrieved.items[0].atom_role, AtomRole.SOURCE)
+        self.assertEqual(retrieved.items[0].temporal_label, TemporalLabel.NONE)
+        self.assertEqual(retrieved.items[0].role, "source")
         self.assertGreater(retrieved.items[0].score.tag, 0.0)
         self.assertIn("tag=architecture", retrieved.items[0].score.evidence)
+        self.assertEqual(retrieved.diagnostics["packing"]["source_selected"], 1)
         self.assertEqual(retrieved.resolved_temporal_mode, TemporalMode.NONE)
 
     def test_semantic_channel_finds_an_atom_without_shared_words(self) -> None:
@@ -164,8 +168,15 @@ class RetrievalServiceTests(unittest.TestCase):
 
         self.assertEqual(current.resolved_temporal_mode, TemporalMode.CURRENT_STATE)
         self.assertEqual(current.items[0].atom_id, new.atom_ids[0])
+        self.assertEqual(current.items[0].temporal_label, TemporalLabel.CURRENT)
+        self.assertEqual(current.items[0].role, "current")
         self.assertNotIn(old.atom_ids[0], {item.atom_id for item in current.items})
         self.assertIn(old.atom_ids[0], {item.atom_id for item in historical.items})
+        historical_item = next(
+            item for item in historical.items if item.atom_id == old.atom_ids[0]
+        )
+        self.assertEqual(historical_item.temporal_label, TemporalLabel.HISTORICAL)
+        self.assertEqual(historical_item.role, "historical")
         self.assertNotIn(new.atom_ids[0], {item.atom_id for item in historical.items})
 
     def test_range_mode_excludes_untimed_and_out_of_range_atoms(self) -> None:

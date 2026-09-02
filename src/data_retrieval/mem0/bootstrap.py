@@ -8,8 +8,13 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Protocol
 
 from data_retrieval.core.identifiers import content_hash, stable_id
-from data_retrieval.domain.models import Atom, CalibrationSignal, CalibrationTarget
+from data_retrieval.domain.models import Atom, AtomRole, CalibrationSignal, CalibrationTarget
 from data_retrieval.mem0.importer import Mem0ImportService, Mem0Record
+from data_retrieval.mem0.support import (
+    LexicalSupportAligner,
+    SupportAligner,
+    SupportSelection,
+)
 from data_retrieval.storage.repository import Repository
 
 MEM0_BOOTSTRAP_PROFILE = "mem0-bootstrap-v4"
@@ -201,6 +206,7 @@ class Mem0BootstrapResult:
     source_atoms_processed: int
     source_atoms_resumed: int
     memories_returned: int
+    memories_unaligned: int
     empty_batches: int
     memories_imported: int
     exact_duplicates: int
@@ -222,6 +228,7 @@ class Mem0BootstrapService:
         atom_batch_size: int = DEFAULT_ATOM_BATCH_SIZE,
         max_batch_chars: int = DEFAULT_MAX_BATCH_CHARS,
         accept_empty: bool = False,
+        support_aligner: SupportAligner | None = None,
     ) -> None:
         if atom_batch_size <= 0:
             raise ValueError("atom_batch_size must be positive")
@@ -233,8 +240,12 @@ class Mem0BootstrapService:
         self.atom_batch_size = atom_batch_size
         self.max_batch_chars = max_batch_chars
         self.accept_empty = accept_empty
+        self.support_aligner = support_aligner or LexicalSupportAligner()
         self.processor_profile = str(
             getattr(processor, "profile_id", f"{MEM0_BOOTSTRAP_PROFILE}:default")
+        )
+        self.pipeline_profile = (
+            f"{self.processor_profile}+support:{self.support_aligner.profile_id}"
         )
 
     def run(
@@ -268,7 +279,11 @@ class Mem0BootstrapService:
                 for atom_ids in self.repository.iter_atom_ids_for_document(
                     document_id=document_id, batch_size=self.atom_batch_size
                 ):
-                    atoms = self.repository.get_atoms(atom_ids)
+                    atoms = tuple(
+                        atom
+                        for atom in self.repository.get_atoms(atom_ids)
+                        if atom.role is AtomRole.SOURCE
+                    )
                     for batch in self._batches(atoms):
                         self._process_batch(
                             namespace=namespace,
@@ -288,6 +303,7 @@ class Mem0BootstrapService:
             source_atoms_processed=counters["source_atoms_processed"],
             source_atoms_resumed=counters["source_atoms_resumed"],
             memories_returned=counters["memories_returned"],
+            memories_unaligned=counters["memories_unaligned"],
             empty_batches=counters["empty_batches"],
             memories_imported=counters["memories_imported"],
             exact_duplicates=counters["exact_duplicates"],
@@ -333,17 +349,18 @@ class Mem0BootstrapService:
                 "bootstrap_batch_id": batch_id,
                 "bootstrap_profile": MEM0_BOOTSTRAP_PROFILE,
                 "processor_profile": self.processor_profile,
+                "support_profile": self.support_aligner.profile_id,
             },
         )
-        records = self._records(
+        records, unaligned = self._records(
             raw_results,
             namespace=namespace,
             batch_id=batch_id,
             source_atom_ids=source_atom_ids,
-            tags=self._inherited_tags(source_atom_ids),
             atoms=atoms,
         )
-        counters["memories_returned"] += len(records)
+        counters["memories_returned"] += len(records) + unaligned
+        counters["memories_unaligned"] += unaligned
         if records:
             imported = self.importer.import_records(namespace=namespace, records=records)
             counters["memories_imported"] += len(imported.imported_record_ids)
@@ -355,7 +372,7 @@ class Mem0BootstrapService:
             counters["calibration_signals_created"] += (
                 imported.calibration_signals_created
             )
-        else:
+        elif unaligned == 0:
             counters["empty_batches"] += 1
             if not self.accept_empty:
                 counters["batches_processed"] += 1
@@ -373,11 +390,13 @@ class Mem0BootstrapService:
                 confidence=1.0,
                 multiplier=1.0,
                 provider="mem0",
-                profile_version=self.processor_profile,
+                profile_version=self.pipeline_profile,
                 source_reference=batch_id,
                 metadata={
                     "memories_returned": len(records),
+                    "memories_unaligned": unaligned,
                     "processor_profile": self.processor_profile,
+                    "support_profile": self.support_aligner.profile_id,
                 },
             )
             for marker_id, atom_id in zip(marker_ids, source_atom_ids, strict=True)
@@ -440,23 +459,29 @@ class Mem0BootstrapService:
             if tag_id in tags_by_id
         )
 
-    @staticmethod
     def _records(
+        self,
         raw_results: tuple[dict[str, Any], ...],
         *,
         namespace: str,
         batch_id: str,
         source_atom_ids: tuple[str, ...],
-        tags: tuple[str, ...],
         atoms: tuple[Atom, ...],
-    ) -> tuple[Mem0Record, ...]:
+    ) -> tuple[tuple[Mem0Record, ...], int]:
         records: list[Mem0Record] = []
-        occurred_values = [atom.occurred_at for atom in atoms if atom.occurred_at]
-        occurred_at = max(occurred_values) if occurred_values else None
+        unaligned = 0
+        atoms_by_id = {atom.atom_id: atom for atom in atoms}
         for index, item in enumerate(raw_results):
             content = str(item.get("memory") or item.get("content") or "").strip()
             if not content:
                 continue
+            support = self._support_selection(item=item, fact=content, atoms=atoms)
+            if not support.atom_ids:
+                unaligned += 1
+                continue
+            support_atoms = tuple(atoms_by_id[atom_id] for atom_id in support.atom_ids)
+            occurred_values = [atom.occurred_at for atom in support_atoms if atom.occurred_at]
+            occurred_at = max(occurred_values) if occurred_values else None
             remote_id = str(item.get("id") or item.get("memory_id") or index)
             record_id = stable_id(
                 "mem0-bootstrap-output",
@@ -469,21 +494,67 @@ class Mem0BootstrapService:
                 Mem0Record(
                     record_id=record_id,
                     content=content,
-                    tags=tags,
+                    tags=self._inherited_tags(support.atom_ids),
                     occurred_at=occurred_at,
+                    support_atom_ids=support.atom_ids,
+                    batch_atom_ids=source_atom_ids,
+                    support_method=support.method,
+                    support_confidence=support.confidence,
                     metadata={
-                        "source_atom_ids": list(source_atom_ids),
                         "bootstrap_batch_id": batch_id,
                         "mem0_remote_id": remote_id,
                         "mem0_event": str(item.get("event") or "ADD"),
+                        "processor_profile": self.processor_profile,
+                        "support_profile": self.support_aligner.profile_id,
+                        "support_scores": {
+                            atom_id: round(support.scores.get(atom_id, 0.0), 6)
+                            for atom_id in support.atom_ids
+                        },
                     },
                 )
             )
-        return tuple(records)
+        return tuple(records), unaligned
+
+    def _support_selection(
+        self,
+        *,
+        item: Mapping[str, Any],
+        fact: str,
+        atoms: tuple[Atom, ...],
+    ) -> SupportSelection:
+        item_metadata = item.get("metadata")
+        metadata = item_metadata if isinstance(item_metadata, Mapping) else {}
+        declared: object | None = item.get("support_atom_ids")
+        if declared is None:
+            declared = metadata.get("support_atom_ids")
+        if declared is None:
+            return self.support_aligner.align(fact=fact, atoms=atoms)
+        if not isinstance(declared, list | tuple):
+            raise ValueError("Mem0 support_atom_ids must be a list")
+
+        requested = tuple(dict.fromkeys(str(value) for value in declared if str(value).strip()))
+        available = {atom.atom_id for atom in atoms}
+        invalid = tuple(atom_id for atom_id in requested if atom_id not in available)
+        if invalid:
+            raise ValueError(
+                "Mem0 result declared support outside its input batch: " + ", ".join(invalid)
+            )
+        raw_confidence = item.get(
+            "support_confidence", metadata.get("support_confidence", 1.0)
+        )
+        confidence = float(raw_confidence)
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError("Mem0 support_confidence must be between 0 and 1")
+        return SupportSelection(
+            requested,
+            "processor_declared",
+            confidence,
+            {atom_id: confidence for atom_id in requested},
+        )
 
     def _marker_id(self, *, namespace: str, batch_id: str, atom_id: str) -> str:
         return stable_id(
-            "calibration", namespace, self.processor_profile, batch_id, atom_id
+            "calibration", namespace, self.pipeline_profile, batch_id, atom_id
         )
 
     @staticmethod

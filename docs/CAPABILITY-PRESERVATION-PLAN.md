@@ -99,9 +99,8 @@ The plan must preserve Cortex's intent while accounting for what its code actual
    multiple workers.
 7. Cortex's Mem0 bridge imports native atoms, deduplicates, records batch lineage, and boosts
    interaction learning when Mem0 was used. Data Retrieval's newer bridge adds chronological
-   reverse ingestion, stable completion markers, replay-safe calibration signals, and source
-   lineage, but currently classifies distilled outputs too much like source evidence and uses
-   batch-wide rather than fact-level support.
+   reverse ingestion, stable completion markers, replay-safe calibration signals, derived roles,
+   and fact-level `SUPPORTED_BY` lineage. Full batch membership remains separate audit metadata.
 8. Cortex's benchmark harness is valuable infrastructure, but its committed 300-atom/900-query
    dataset is synthetic and its recorded direct-tag baseline is zero. Its passing result proves
    harness execution and regression protection, not general long-memory quality.

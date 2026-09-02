@@ -221,10 +221,11 @@ lineage.
 
 ## Implementation order
 
-1. Add canonical evidence role and payload modality while retaining legacy kind compatibility.
-2. Correct Mem0 outputs to role `derived` and make learning role-aware.
-3. Define and validate fact-level support lineage for Mem0 outputs.
-4. Add role/provenance-aware evidence packing.
+1. **Implemented:** add canonical evidence role and payload modality while retaining legacy kind
+   compatibility.
+2. **Implemented:** correct Mem0 outputs to role `derived` and make learning role-aware.
+3. **Implemented:** define and validate fact-level support lineage for Mem0 outputs.
+4. **Implemented:** add role/provenance-aware evidence packing.
 5. Build isolated capability fixtures and reports.
 6. Run pairwise integrations.
 7. Decide which upstream serving functions Tags has earned the right to replace.

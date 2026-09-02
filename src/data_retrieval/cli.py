@@ -723,6 +723,7 @@ def _bootstrap_mem0(
         ),
         "source_atoms_resumed": sum(result.source_atoms_resumed for result in results),
         "memories_returned": sum(result.memories_returned for result in results),
+        "memories_unaligned": sum(result.memories_unaligned for result in results),
         "empty_batches": sum(result.empty_batches for result in results),
         "memories_imported": sum(result.memories_imported for result in results),
         "exact_duplicates": sum(result.exact_duplicates for result in results),
@@ -833,6 +834,8 @@ def _retrieve(args: argparse.Namespace) -> dict[str, object]:
                 "kind": item.kind.value,
                 "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
                 "role": item.role,
+                "atom_role": item.atom_role.value,
+                "temporal_label": item.temporal_label.value,
                 "lineage_atom_ids": item.lineage_atom_ids,
                 "score": {
                     "tag": item.score.tag,

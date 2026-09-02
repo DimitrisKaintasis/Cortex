@@ -132,7 +132,8 @@ class CalibrationAndMem0Tests(unittest.TestCase):
 
         self.assertEqual(first.batches_processed, 1)
         self.assertEqual(first.memories_imported, 1)
-        self.assertEqual(first.source_lineage_links_created, len(ingested.atom_ids))
+        self.assertEqual(first.source_lineage_links_created, 1)
+        self.assertEqual(first.memories_unaligned, 0)
         self.assertGreater(first.calibration_signals_created, len(ingested.atom_ids))
         self.assertEqual(second.batches_resumed, 1)
         self.assertEqual(second.batches_processed, 0)
@@ -142,9 +143,82 @@ class CalibrationAndMem0Tests(unittest.TestCase):
         self.assertNotIn("evidence_atom_ids", sent_metadata)
         self.assertEqual(sent_metadata["source_atom_ids"], list(ingested.atom_ids))
         links = repository.list_atom_links(
-            namespace="project-a", relation=AtomLinkRelation.DERIVED_FROM
+            namespace="project-a", relation=AtomLinkRelation.SUPPORTED_BY
         )
-        self.assertEqual(len(links), len(ingested.atom_ids))
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].to_atom_id, ingested.atom_ids[0])
+        memory = repository.get_atom(links[0].from_atom_id)
+        self.assertEqual(memory.metadata["support_atom_ids"], [ingested.atom_ids[0]])
+        self.assertEqual(memory.metadata["batch_atom_ids"], list(ingested.atom_ids))
+        retrieval = RetrievalService(repository).retrieve(
+            QueryPlan(query="PostgreSQL durable data", namespace="project-a")
+        )
+        memory_item = next(
+            item for item in retrieval.items if item.atom_id == memory.atom_id
+        )
+        self.assertEqual(memory_item.lineage_atom_ids, (ingested.atom_ids[0],))
+        self.assertEqual(memory_item.atom_role, AtomRole.DERIVED)
+        self.assertEqual(memory_item.role, "derived")
+
+    def test_mem0_prefers_processor_declared_fact_support(self) -> None:
+        repository = InMemoryRepository()
+        ingested = IngestService(
+            repository, chunker=TextChunker(max_chars=100, overlap_chars=0)
+        ).ingest_text(
+            namespace="project-a",
+            source="two-facts",
+            text=(
+                "PostgreSQL stores durable project records and preserves every audited change.\n\n"
+                "The Mac Mini runs the inference worker overnight and returns results remotely."
+            ),
+        )
+        processor = _FakeMem0Processor(
+            (
+                {
+                    "id": "memory-1",
+                    "memory": "A remote machine performs overnight work.",
+                    "support_atom_ids": [ingested.atom_ids[1]],
+                    "support_confidence": 0.9,
+                },
+            )
+        )
+
+        result = Mem0BootstrapService(repository, processor).run(namespace="project-a")
+
+        self.assertEqual(result.source_lineage_links_created, 1)
+        link = repository.list_atom_links(
+            namespace="project-a", relation=AtomLinkRelation.SUPPORTED_BY
+        )[0]
+        self.assertEqual(link.to_atom_id, ingested.atom_ids[1])
+        self.assertEqual(link.confidence, 0.9)
+        self.assertEqual(link.metadata["support_method"], "processor_declared")
+
+    def test_mem0_quarantines_unaligned_multi_atom_fact(self) -> None:
+        repository = InMemoryRepository()
+        IngestService(
+            repository, chunker=TextChunker(max_chars=100, overlap_chars=0)
+        ).ingest_text(
+            namespace="project-a",
+            source="unrelated",
+            text=(
+                "PostgreSQL stores durable project records and preserves every audited change.\n\n"
+                "The Mac Mini runs the inference worker overnight and returns results remotely."
+            ),
+        )
+        processor = _FakeMem0Processor(
+            ({"id": "memory-1", "memory": "Bananas are harvested underwater."},)
+        )
+        service = Mem0BootstrapService(repository, processor)
+
+        first = service.run(namespace="project-a")
+        resumed = service.run(namespace="project-a")
+
+        self.assertEqual(first.memories_returned, 1)
+        self.assertEqual(first.memories_unaligned, 1)
+        self.assertEqual(first.memories_imported, 0)
+        self.assertEqual(first.source_lineage_links_created, 0)
+        self.assertEqual(resumed.batches_resumed, 1)
+        self.assertEqual(len(processor.calls), 1)
 
     def test_mem0_empty_result_is_retryable_by_default(self) -> None:
         repository = InMemoryRepository()
@@ -280,6 +354,59 @@ class CalibrationAndMem0Tests(unittest.TestCase):
                 namespace="project-a", relation_type="co_occurs"
             )[0].weight_raw,
             first_weight,
+        )
+
+    def test_mem0_fact_support_rejects_non_source_atoms(self) -> None:
+        repository = InMemoryRepository()
+        derived = IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="derived-input",
+            text="A model-generated interpretation.",
+            atom_role=AtomRole.DERIVED,
+        )
+        record = Mem0Record(
+            record_id="memory-with-invalid-support",
+            content="A second model-generated interpretation.",
+            support_atom_ids=derived.atom_ids,
+            support_method="declared",
+        )
+
+        with self.assertRaisesRegex(ValueError, "source-role atoms"):
+            Mem0ImportService(repository).import_records(
+                namespace="project-a", records=(record,)
+            )
+        self.assertEqual(repository.atom_count, 1)
+
+    def test_mem0_exact_raw_duplicate_does_not_turn_source_into_derived_fact(self) -> None:
+        repository = InMemoryRepository()
+        duplicate = IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="original-fact",
+            text="PostgreSQL stores the durable project data.",
+        )
+        other = IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="other-source",
+            text="The Mac Mini runs inference.",
+        )
+        record = Mem0Record(
+            record_id="raw-duplicate",
+            content="PostgreSQL stores the durable project data.",
+            support_atom_ids=other.atom_ids,
+            support_method="declared",
+        )
+
+        result = Mem0ImportService(repository).import_records(
+            namespace="project-a", records=(record,)
+        )
+
+        self.assertEqual(result.record_atom_ids[record.record_id], duplicate.atom_ids)
+        self.assertEqual(result.source_lineage_links_created, 0)
+        self.assertEqual(
+            repository.list_atom_links(
+                namespace="project-a", relation=AtomLinkRelation.SUPPORTED_BY
+            ),
+            (),
         )
 
     def test_mem0_conflicts_are_explicit_uncertainty_links(self) -> None:

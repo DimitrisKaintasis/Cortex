@@ -36,6 +36,10 @@ class Mem0Record:
     tags: tuple[str, ...] = ()
     occurred_at: datetime | None = None
     conflicts_with: tuple[str, ...] = ()
+    support_atom_ids: tuple[str, ...] = ()
+    batch_atom_ids: tuple[str, ...] = ()
+    support_method: str | None = None
+    support_confidence: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -45,6 +49,8 @@ class Mem0Record:
             raise ValueError("Mem0 content cannot be empty")
         if self.occurred_at is not None and self.occurred_at.tzinfo is None:
             raise ValueError("Mem0 occurred_at must include a timezone")
+        if self.support_confidence is not None and not 0.0 <= self.support_confidence <= 1.0:
+            raise ValueError("Mem0 support_confidence must be between 0 and 1")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +106,10 @@ class Mem0ImportService:
             if record.record_id in seen_record_ids:
                 raise ValueError(f"duplicate Mem0 record_id in batch: {record.record_id}")
             seen_record_ids.add(record.record_id)
+        for record in records:
+            self._validated_support_ids(namespace=namespace, record=record)
+
+        for record in records:
             record_hash = content_hash(record.content)
             exact_documents = self.repository.find_documents_by_content_hash(
                 namespace=namespace, content_hash=record_hash
@@ -137,6 +147,10 @@ class Mem0ImportService:
                             "source_system": "mem0",
                             "mem0_record_id": record.record_id,
                             "lineage_relation": "derived_from_mem0",
+                            "support_atom_ids": list(record.support_atom_ids),
+                            "batch_atom_ids": list(record.batch_atom_ids),
+                            "support_method": record.support_method,
+                            "support_confidence": record.support_confidence,
                         },
                     )
                     atom_ids = result.atom_ids
@@ -200,37 +214,27 @@ class Mem0ImportService:
     ) -> tuple[int, int]:
         """Connect a distilled Mem0 memory to the native atoms that produced it."""
 
-        raw_source_ids = record.metadata.get("source_atom_ids", ())
-        if not isinstance(raw_source_ids, list | tuple):
-            return 0, 0
-        requested_source_ids = tuple(
-            dict.fromkeys(str(value) for value in raw_source_ids if str(value).strip())
+        requested_source_ids = self._validated_support_ids(
+            namespace=namespace, record=record
         )
         if not requested_source_ids:
             return 0, 0
-        sources = {
-            atom.atom_id: atom for atom in self.repository.get_atoms(requested_source_ids)
-        }
-        invalid_ids = tuple(
-            atom_id
-            for atom_id in requested_source_ids
-            if atom_id not in sources or sources[atom_id].namespace != namespace
-        )
-        if invalid_ids:
-            raise ValueError(
-                "Mem0 source_atom_ids must reference atoms in the import namespace: "
-                + ", ".join(invalid_ids)
-            )
 
         proposed: dict[str, tuple[CalibrationSignal, AtomLink]] = {}
-        for output_atom_id in atom_ids:
+        support_confidence = (
+            record.support_confidence
+            if record.support_confidence is not None
+            else 1.0
+        )
+        eligible_output_ids = self._mem0_output_atom_ids(atom_ids)
+        for output_atom_id in eligible_output_ids:
             for source_atom_id in requested_source_ids:
                 if output_atom_id == source_atom_id:
                     continue
                 signal_id = stable_id(
                     "calibration",
                     namespace,
-                    "mem0-source-lineage-v1",
+                    "mem0-fact-support-v2",
                     record.record_id,
                     output_atom_id,
                     source_atom_id,
@@ -241,25 +245,35 @@ class Mem0ImportService:
                     target_type=CalibrationTarget.ATOM_LINK,
                     target_id=output_atom_id,
                     related_id=source_atom_id,
-                    relation_type=AtomLinkRelation.DERIVED_FROM.value,
-                    signal_type="mem0_source_lineage",
+                    relation_type=AtomLinkRelation.SUPPORTED_BY.value,
+                    signal_type="mem0_fact_support",
                     value=1.0,
-                    confidence=1.0,
+                    confidence=support_confidence,
                     multiplier=MEM0_LEARNING_MULTIPLIER,
                     provider="mem0",
-                    profile_version="mem0-source-lineage-v1",
+                    profile_version="mem0-fact-support-v2",
                     source_reference=record.record_id,
+                    metadata={
+                        "support_method": record.support_method or "legacy_declared",
+                        "batch_atom_ids": list(record.batch_atom_ids),
+                    },
                 )
                 proposed[signal_id] = (
                     signal,
                     AtomLink(
                         from_atom_id=output_atom_id,
                         to_atom_id=source_atom_id,
-                        relation=AtomLinkRelation.DERIVED_FROM,
+                        relation=AtomLinkRelation.SUPPORTED_BY,
                         weight_raw=1.0,
-                        confidence=1.0,
+                        confidence=support_confidence,
                         evidence_sources=(f"calibration:{signal_id}",),
-                        metadata={"source_system": "mem0", "lineage": True},
+                        metadata={
+                            "source_system": "mem0",
+                            "lineage": True,
+                            "support_scope": "fact",
+                            "support_method": record.support_method or "legacy_declared",
+                            "batch_atom_ids": list(record.batch_atom_ids),
+                        },
                     ),
                 )
         existing = self.repository.get_calibration_signal_ids(tuple(proposed))
@@ -275,9 +289,44 @@ class Mem0ImportService:
             )
         return len(pending), len(pending)
 
+    def _validated_support_ids(
+        self, *, namespace: str, record: Mem0Record
+    ) -> tuple[str, ...]:
+        raw_source_ids: object = record.support_atom_ids
+        if not raw_source_ids:
+            # Compatibility for trusted imports created before Mem0Record exposed
+            # fact-level support as a first-class field.
+            raw_source_ids = record.metadata.get("source_atom_ids", ())
+        if not isinstance(raw_source_ids, list | tuple):
+            return ()
+        requested_source_ids = tuple(
+            dict.fromkeys(str(value) for value in raw_source_ids if str(value).strip())
+        )
+        if not requested_source_ids:
+            return ()
+        sources = {
+            atom.atom_id: atom for atom in self.repository.get_atoms(requested_source_ids)
+        }
+        invalid_ids = tuple(
+            atom_id
+            for atom_id in requested_source_ids
+            if (
+                atom_id not in sources
+                or sources[atom_id].namespace != namespace
+                or sources[atom_id].role is not AtomRole.SOURCE
+            )
+        )
+        if invalid_ids:
+            raise ValueError(
+                "Mem0 support_atom_ids must reference source-role atoms in the import namespace: "
+                + ", ".join(invalid_ids)
+            )
+        return requested_source_ids
+
     def _persist_lineage(
         self, *, namespace: str, record_id: str, atom_ids: tuple[str, ...]
     ) -> int:
+        derived_atom_ids = self._mem0_output_atom_ids(atom_ids)
         signals = tuple(
             CalibrationSignal(
                 signal_id=stable_id(
@@ -294,7 +343,7 @@ class Mem0ImportService:
                 profile_version="mem0-lineage-v1",
                 source_reference=record_id,
             )
-            for atom_id in atom_ids
+            for atom_id in derived_atom_ids
         )
         existing = self.repository.get_calibration_signal_ids(
             tuple(signal.signal_id for signal in signals)
@@ -308,6 +357,14 @@ class Mem0ImportService:
                 tag_relations=(),
             )
         return len(pending)
+
+    def _mem0_output_atom_ids(self, atom_ids: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(
+            atom.atom_id
+            for atom in self.repository.get_atoms(atom_ids)
+            if atom.role is AtomRole.DERIVED
+            and atom.metadata.get("source_system") == "mem0"
+        )
 
     def _semantic_duplicate(self, namespace: str, content: str) -> str | None:
         if self.embedder is None:
@@ -477,6 +534,25 @@ def _record(raw: object, index: int) -> Mem0Record:
         if isinstance(raw_conflicts, list | tuple)
         else ()
     )
+    raw_support = raw.get(
+        "support_atom_ids",
+        metadata.get("support_atom_ids", metadata.get("source_atom_ids", ())),
+    )
+    support_atom_ids = (
+        tuple(dict.fromkeys(str(atom_id) for atom_id in raw_support))
+        if isinstance(raw_support, list | tuple)
+        else ()
+    )
+    raw_batch = raw.get("batch_atom_ids", metadata.get("batch_atom_ids", ()))
+    batch_atom_ids = (
+        tuple(dict.fromkeys(str(atom_id) for atom_id in raw_batch))
+        if isinstance(raw_batch, list | tuple)
+        else ()
+    )
+    raw_confidence = raw.get("support_confidence", metadata.get("support_confidence"))
+    support_confidence = float(raw_confidence) if raw_confidence is not None else None
+    support_method_value = raw.get("support_method", metadata.get("support_method"))
+    support_method = str(support_method_value) if support_method_value is not None else None
     occurred_at = _optional_datetime(
         raw.get("updated_at") or raw.get("created_at") or raw.get("timestamp")
     )
@@ -490,6 +566,11 @@ def _record(raw: object, index: int) -> Mem0Record:
         "value",
         "tags",
         "conflicts_with",
+        "support_atom_ids",
+        "source_atom_ids",
+        "batch_atom_ids",
+        "support_method",
+        "support_confidence",
         "metadata",
         "updated_at",
         "created_at",
@@ -502,6 +583,10 @@ def _record(raw: object, index: int) -> Mem0Record:
         tags=tags,
         occurred_at=occurred_at,
         conflicts_with=conflicts,
+        support_atom_ids=support_atom_ids,
+        batch_atom_ids=batch_atom_ids,
+        support_method=support_method,
+        support_confidence=support_confidence,
         metadata=metadata,
     )
 

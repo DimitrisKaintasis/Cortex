@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 from uuid import uuid4
 
-from data_retrieval.domain.models import Atom, AtomKind, AtomLinkRelation, utc_now
+from data_retrieval.domain.models import Atom, AtomKind, AtomLinkRelation, AtomRole, utc_now
 from data_retrieval.retrieval.embedding import Embedder, cosine_similarity
 from data_retrieval.retrieval.models import (
     QueryPlan,
@@ -13,8 +13,10 @@ from data_retrieval.retrieval.models import (
     RetrievalResult,
     ScoreBreakdown,
     SearchHit,
+    TemporalLabel,
     TemporalMode,
 )
+from data_retrieval.retrieval.packing import EvidencePacker
 from data_retrieval.retrieval.planning import QueryPlanner
 from data_retrieval.retrieval.temporal_lens import TemporalLens
 from data_retrieval.storage.repository import Repository
@@ -40,6 +42,7 @@ class RetrievalService:
         candidate_limit: int = 500,
         catalog_hint_limit: int = 500,
         tag_canonicalizer: SemanticTagCanonicalizer | None = None,
+        evidence_packer: EvidencePacker | None = None,
     ) -> None:
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
@@ -56,6 +59,7 @@ class RetrievalService:
         self.tag_canonicalizer = tag_canonicalizer or (
             SemanticTagCanonicalizer(embedder) if embedder is not None else None
         )
+        self.evidence_packer = evidence_packer or EvidencePacker()
 
     def retrieve(self, requested_plan: QueryPlan) -> RetrievalResult:
         auto_temporal = requested_plan.temporal_mode is TemporalMode.AUTO
@@ -123,10 +127,16 @@ class RetrievalService:
         channel_weights = self._channel_weights(
             has_tags=bool(query_tags), has_semantic=bool(semantic_scores)
         )
-        lineage = self._summary_lineage(links)
+        lineage = self._summary_lineage(links, atom_lookup)
         ranked: list[RetrievalItem] = []
         for atom_id in candidate_ids:
             atom = atom_lookup[atom_id]
+            atom_role = atom.role or AtomRole.SOURCE
+            temporal_label = self._temporal_label(
+                atom=atom,
+                assessment_role=assessment.roles.get(atom_id),
+                mode=assessment.resolved_mode,
+            )
             tag_score = tag_scores.get(atom_id, 0.0)
             lexical_score = lexical_scores.get(atom_id, 0.0)
             semantic_score = semantic_scores.get(atom_id, 0.0)
@@ -155,11 +165,10 @@ class RetrievalService:
                     content=atom.content,
                     kind=atom.kind,
                     occurred_at=atom.occurred_at,
-                    role=assessment.roles.get(
-                        atom_id,
-                        "continuity"
-                        if atom.kind is AtomKind.TEMPORAL_SUMMARY
-                        else "source_evidence",
+                    role=(
+                        temporal_label.value
+                        if temporal_label is not TemporalLabel.NONE
+                        else atom_role.value
                     ),
                     score=ScoreBreakdown(
                         tag=tag_score,
@@ -172,11 +181,14 @@ class RetrievalService:
                     ),
                     metadata=atom.metadata,
                     lineage_atom_ids=lineage.get(atom_id, ()),
+                    atom_role=atom_role,
+                    temporal_label=temporal_label,
                 )
             )
 
         ranked.sort(key=self._sort_key, reverse=True)
-        selected = self._pack_without_duplicate_summaries(ranked, plan.top_k)
+        packed = self.evidence_packer.pack(ranked, top_k=plan.top_k)
+        selected = list(packed.items)
         top_score = selected[0].score.final if selected else 0.0
         retrieval_id = str(uuid4())
         result = RetrievalResult(
@@ -196,6 +208,7 @@ class RetrievalService:
                     "eligible_union": len(candidate_ids),
                 },
                 "superseded_atom_ids": sorted(assessment.superseded_atom_ids),
+                "packing": packed.diagnostics,
                 "warnings": warnings,
             },
         )
@@ -207,6 +220,15 @@ class RetrievalService:
                 "query_tags": list(query_tags),
                 "temporal_mode": assessment.resolved_mode.value,
                 "returned_atom_ids": [item.atom_id for item in selected],
+                "packing": packed.diagnostics,
+                "labels": {
+                    item.atom_id: {
+                        "atom_role": item.atom_role.value,
+                        "temporal": item.temporal_label.value,
+                        "display": item.role,
+                    }
+                    for item in selected
+                },
                 "scores": {
                     item.atom_id: {
                         "tag": item.score.tag,
@@ -524,12 +546,21 @@ class RetrievalService:
         return {channel: weight / total for channel, weight in raw.items()}
 
     @staticmethod
-    def _summary_lineage(links) -> dict[str, tuple[str, ...]]:
+    def _summary_lineage(
+        links, atoms_by_id: dict[str, Atom]
+    ) -> dict[str, tuple[str, ...]]:
         lineage: dict[str, list[str]] = defaultdict(list)
         for link in links:
-            if link.relation in {
+            source = atoms_by_id.get(link.from_atom_id)
+            is_legacy_mem0_batch_link = (
+                link.relation is AtomLinkRelation.DERIVED_FROM
+                and source is not None
+                and source.metadata.get("source_system") == "mem0"
+            )
+            if not is_legacy_mem0_batch_link and link.relation in {
                 AtomLinkRelation.SUMMARIZES,
                 AtomLinkRelation.DERIVED_FROM,
+                AtomLinkRelation.SUPPORTED_BY,
             }:
                 lineage[link.from_atom_id].append(link.to_atom_id)
         return {atom_id: tuple(sorted(set(targets))) for atom_id, targets in lineage.items()}
@@ -540,18 +571,15 @@ class RetrievalService:
         return item.score.final, timestamp, item.atom_id
 
     @staticmethod
-    def _pack_without_duplicate_summaries(
-        ranked: list[RetrievalItem], top_k: int
-    ) -> list[RetrievalItem]:
-        selected: list[RetrievalItem] = []
-        selected_source_ids: set[str] = set()
-        for item in ranked:
-            if item.kind is AtomKind.TEMPORAL_SUMMARY and item.lineage_atom_ids:
-                if set(item.lineage_atom_ids).issubset(selected_source_ids):
-                    continue
-            selected.append(item)
-            if item.kind is AtomKind.SOURCE:
-                selected_source_ids.add(item.atom_id)
-            if len(selected) >= top_k:
-                break
-        return selected
+    def _temporal_label(
+        *, atom: Atom, assessment_role: str | None, mode: TemporalMode
+    ) -> TemporalLabel:
+        if assessment_role == "continuity" or atom.kind is AtomKind.TEMPORAL_SUMMARY:
+            return TemporalLabel.CONTINUITY
+        if mode in {TemporalMode.AS_OF, TemporalMode.HISTORY, TemporalMode.RANGE}:
+            return TemporalLabel.HISTORICAL
+        if assessment_role == "current_state":
+            return TemporalLabel.CURRENT
+        if assessment_role in {"historical_superseded", "state_evidence"}:
+            return TemporalLabel.HISTORICAL
+        return TemporalLabel.NONE
