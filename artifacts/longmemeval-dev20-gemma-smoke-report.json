@@ -1,0 +1,102 @@
+{
+  "dataset_id": "longmemeval-dev20-gemma-smoke",
+  "dataset_hash": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+  "case_count": 1,
+  "evaluated_case_count": 1,
+  "abstention_case_count": 0,
+  "top_k": 10,
+  "session_hit_at_k": 1.0,
+  "session_recall_at_k": 1.0,
+  "turn_hit_at_k": 1.0,
+  "turn_recall_at_k": 0.5,
+  "mean_reciprocal_rank": 1.0,
+  "direct_session_hit_at_k": 1.0,
+  "direct_session_recall_at_k": 1.0,
+  "direct_turn_hit_at_k": 1.0,
+  "direct_turn_recall_at_k": 0.5,
+  "direct_mean_reciprocal_rank": 1.0,
+  "mean_retrieval_latency_ms": 1142.7716000034707,
+  "metric_semantics": {
+    "lineage": "session_hit_at_k, turn_hit_at_k, recalls, and mean_reciprocal_rank credit source atoms covered by a retrieved Temporal summary",
+    "direct": "direct_* metrics credit only exact retrieved raw source atoms, not a Temporal summary's broader provenance"
+  },
+  "category_metrics": {
+    "temporal-reasoning": {
+      "case_count": 1.0,
+      "session_hit_at_k": 1.0,
+      "session_recall_at_k": 1.0,
+      "turn_hit_at_k": 1.0,
+      "turn_recall_at_k": 0.5,
+      "mean_reciprocal_rank": 1.0,
+      "direct_session_hit_at_k": 1.0,
+      "direct_session_recall_at_k": 1.0,
+      "direct_turn_hit_at_k": 1.0,
+      "direct_turn_recall_at_k": 0.5,
+      "direct_mean_reciprocal_rank": 1.0
+    }
+  },
+  "cases": [
+    {
+      "question_id": "gpt4_2655b836",
+      "question_type": "temporal-reasoning",
+      "evaluable": true,
+      "session_hit": true,
+      "session_recall": 1.0,
+      "turn_hit": true,
+      "turn_recall": 0.5,
+      "reciprocal_rank": 1.0,
+      "direct_session_hit": true,
+      "direct_session_recall": 1.0,
+      "direct_turn_hit": true,
+      "direct_turn_recall": 0.5,
+      "direct_reciprocal_rank": 1.0,
+      "retrieval_latency_ms": 1142.7716000034707,
+      "resolved_temporal_mode": "none",
+      "low_confidence": false,
+      "retrieved_atom_ids": [
+        "atom_1eb2f667338602224a25cbdfd292af7b",
+        "atom_a61058550a25c45022e384bd7985c16e",
+        "atom_961bbc554dfaa5011086f327f84ae99c",
+        "atom_e30438900e714daea43c9891f5ac9e76",
+        "atom_de9f8f4d6205968d50dc07b23be56f95",
+        "atom_522ba36cd856050f9a96e00eebc573bf",
+        "atom_93eb6b6e4bf2a9ec6249b5a708c86251",
+        "atom_2b1ea8bdcc7012e1d1bce098f784f074",
+        "atom_9eef2e15228c34436b84761139643d56",
+        "atom_b9606ba5a35f798ca2d03a911369fbd0"
+      ],
+      "retrieved_source_atom_ids": [
+        [
+          "atom_1eb2f667338602224a25cbdfd292af7b"
+        ],
+        [
+          "atom_a61058550a25c45022e384bd7985c16e"
+        ],
+        [
+          "atom_961bbc554dfaa5011086f327f84ae99c"
+        ],
+        [
+          "atom_e30438900e714daea43c9891f5ac9e76"
+        ],
+        [
+          "atom_de9f8f4d6205968d50dc07b23be56f95"
+        ],
+        [
+          "atom_522ba36cd856050f9a96e00eebc573bf"
+        ],
+        [
+          "atom_93eb6b6e4bf2a9ec6249b5a708c86251"
+        ],
+        [
+          "atom_2b1ea8bdcc7012e1d1bce098f784f074"
+        ],
+        [
+          "atom_9eef2e15228c34436b84761139643d56"
+        ],
+        [
+          "atom_b9606ba5a35f798ca2d03a911369fbd0"
+        ]
+      ]
+    }
+  ]
+}

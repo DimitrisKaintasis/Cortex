@@ -2,7 +2,12 @@ import unittest
 from datetime import UTC, datetime, timedelta
 
 from data_retrieval.domain.models import AtomLink, AtomLinkRelation, AtomRole, IngestionBundle
-from data_retrieval.retrieval.models import QueryPlan, TemporalLabel, TemporalMode
+from data_retrieval.retrieval.models import (
+    QueryPlan,
+    RetrievalChannels,
+    TemporalLabel,
+    TemporalMode,
+)
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.retrieval import RetrievalService
@@ -91,6 +96,37 @@ class RetrievalServiceTests(unittest.TestCase):
             "tag_proposer_unavailable:RuntimeError",
             retrieved.diagnostics["warnings"],
         )
+
+    def test_channel_switches_disable_unselected_candidate_sources(self) -> None:
+        repository = InMemoryRepository()
+        IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="tag-only",
+            text="No shared query words are present.",
+            explicit_tags=("architecture",),
+        )
+
+        retrieved = RetrievalService(
+            repository,
+            channels=RetrievalChannels(
+                tags=False,
+                lexical=True,
+                semantic=False,
+                relationships=False,
+                temporal=False,
+                temporal_summaries=False,
+            ),
+        ).retrieve(
+            QueryPlan(
+                query="How is ingestion designed?",
+                namespace="project-a",
+                query_tags=("architecture",),
+            )
+        )
+
+        self.assertEqual(retrieved.items, ())
+        self.assertEqual(retrieved.diagnostics["query_tags"], ())
+        self.assertFalse(retrieved.diagnostics["channels"]["tags"])
 
     def test_relative_time_uses_query_reference_time(self) -> None:
         repository = InMemoryRepository()

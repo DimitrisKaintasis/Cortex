@@ -15,6 +15,7 @@ import psycopg
 from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
 from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuite
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
+from data_retrieval.benchmarks.longmemeval_ablation import LongMemEvalAblationSuite
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
@@ -111,7 +112,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="bounded number of LongMemEval cases processed concurrently",
     )
     pipeline.add_argument("--top-k", type=int, default=10)
+    pipeline.add_argument(
+        "--evaluation-only",
+        action="store_true",
+        help=(
+            "reuse persisted enrichments and run retrieval only; configured tag and "
+            "embedding models remain available for query understanding"
+        ),
+    )
     pipeline.add_argument("--skip-tags", action="store_true")
+    pipeline.add_argument(
+        "--resolve-benchmark-tags",
+        action="store_true",
+        help=(
+            "benchmark only: promote exact proposal families above a confidence threshold; "
+            "normal ingestion remains quarantined"
+        ),
+    )
+    pipeline.add_argument(
+        "--benchmark-tag-min-confidence",
+        type=float,
+        default=0.65,
+    )
     pipeline.add_argument("--skip-temporal", action="store_true")
     pipeline.add_argument("--skip-embeddings", action="store_true")
     pipeline.add_argument(
@@ -149,6 +171,66 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pipeline.add_argument("--temporal-state", type=Path)
     pipeline.add_argument("--report", type=Path)
+
+    ablation = commands.add_parser(
+        "evaluate-longmemeval-ablation",
+        help="compare frozen-query retrieval channels over a persisted LongMemEval corpus",
+    )
+    ablation.add_argument("path", type=Path)
+    _add_storage_options(ablation)
+    ablation.add_argument("--dataset-id", required=True)
+    ablation.add_argument("--namespace-prefix", default="longmemeval")
+    ablation.add_argument("--timezone", default="UTC", dest="timezone_name")
+    ablation.add_argument("--max-cases", type=int)
+    ablation.add_argument(
+        "--question-id",
+        action="append",
+        dest="question_ids",
+        help="evaluate only selected question IDs; repeat for multiple cases",
+    )
+    ablation.add_argument("--max-workers", type=int, default=1)
+    ablation.add_argument("--top-k", type=int, action="append", dest="top_ks")
+    ablation.add_argument(
+        "--inference-provider",
+        choices=("ollama", "openrouter"),
+        default="ollama",
+    )
+    ablation.add_argument("--tag-model")
+    ablation.add_argument(
+        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
+    )
+    ablation.add_argument(
+        "--embedding-profile",
+        choices=tuple(EMBEDDING_PROFILES),
+        default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
+    )
+    ablation.add_argument(
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+    )
+    ablation.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "240")),
+    )
+    ablation.add_argument(
+        "--openrouter-url",
+        default=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+    )
+    ablation.add_argument(
+        "--openrouter-timeout",
+        type=float,
+        default=float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "180")),
+    )
+    ablation.add_argument(
+        "--query-features",
+        type=Path,
+        default=Path("data/results/longmemeval-query-features-v1.json"),
+    )
+    ablation.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/longmemeval-ablation-v1.json"),
+    )
 
     tags = commands.add_parser(
         "enrich-tags", help="add Ollama tag proposals to an ingested document"
@@ -435,6 +517,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _ingest_longmemeval(args, parser)
         elif args.command == "run-longmemeval":
             output = _run_longmemeval(args, parser)
+        elif args.command == "evaluate-longmemeval-ablation":
+            output = _evaluate_longmemeval_ablation(args, parser)
         elif args.command == "enrich-tags":
             output = _enrich_tags(args)
         elif args.command == "list-tag-candidates":
@@ -570,7 +654,7 @@ def _run_longmemeval(
     temporal_model = _inference_model(args.inference_provider, args.temporal_model)
     if not args.skip_tags and not tag_model:
         parser.error("--tag-model or the selected provider's model environment is required")
-    if not args.skip_temporal and not temporal_model:
+    if not args.evaluation_only and not args.skip_temporal and not temporal_model:
         parser.error("--temporal-model or the selected provider's model environment is required")
     if not args.skip_embeddings and not args.embedding_model:
         parser.error(
@@ -581,7 +665,7 @@ def _run_longmemeval(
     api_key = (
         _openrouter_api_key(parser)
         if args.inference_provider == "openrouter"
-        and (not args.skip_tags or not args.skip_temporal)
+        and (not args.skip_tags or (not args.evaluation_only and not args.skip_temporal))
         else None
     )
     if args.skip_tags:
@@ -602,7 +686,7 @@ def _run_longmemeval(
             timeout_seconds=args.ollama_timeout,
         )
     embedder = None if args.skip_embeddings else _embedder(args)
-    if args.skip_temporal:
+    if args.skip_temporal or args.evaluation_only:
         temporal_bridge = None
     elif args.inference_provider == "openrouter":
         assert api_key is not None and temporal_model is not None
@@ -649,9 +733,13 @@ def _run_longmemeval(
             max_cases=args.max_cases,
             question_ids=tuple(args.question_ids) if args.question_ids else None,
             top_k=args.top_k,
-            enrich_tags=not args.skip_tags,
-            enrich_temporal=not args.skip_temporal,
-            enrich_embeddings=not args.skip_embeddings,
+            enrich_tags=not args.skip_tags and not args.evaluation_only,
+            enrich_temporal=not args.skip_temporal and not args.evaluation_only,
+            enrich_embeddings=not args.skip_embeddings and not args.evaluation_only,
+            resolve_benchmark_tags=(
+                args.resolve_benchmark_tags and not args.evaluation_only
+            ),
+            benchmark_tag_min_confidence=args.benchmark_tag_min_confidence,
             max_workers=args.max_workers,
             progress=progress,
         )
@@ -663,9 +751,70 @@ def _run_longmemeval(
         **report.as_dict(include_cases=False),
         "inference_provider": args.inference_provider,
         "tag_model": tag_model if not args.skip_tags else None,
-        "temporal_model": temporal_model if not args.skip_temporal else None,
+        "temporal_model": (
+            temporal_model
+            if not args.skip_temporal and not args.evaluation_only
+            else None
+        ),
         "embedding_model": embedder.model if embedder else None,
         "report": str(report_path),
+        "database": _database_label(args),
+    }
+
+
+def _evaluate_longmemeval_ablation(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.path.is_file():
+        parser.error(f"input file does not exist: {args.path}")
+    tag_model = _inference_model(args.inference_provider, args.tag_model)
+    if not tag_model:
+        parser.error("--tag-model or the selected provider's model environment is required")
+    if not args.embedding_model:
+        parser.error("--embedding-model or OLLAMA_EMBEDDING_MODEL is required")
+
+    if args.inference_provider == "openrouter":
+        tag_proposer = OpenRouterTagProposer(
+            api_key=_openrouter_api_key(parser),
+            model=tag_model,
+            base_url=args.openrouter_url,
+            timeout_seconds=args.openrouter_timeout,
+        )
+    else:
+        tag_proposer = OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+    embedder = _embedder(args)
+    with _open_repository(args) as repository:
+        report = LongMemEvalAblationSuite(
+            repository,
+            tag_proposer=tag_proposer,
+            embedder=embedder,
+        ).run(
+            dataset_path=args.path,
+            dataset_id=args.dataset_id,
+            query_feature_path=args.query_features,
+            namespace_prefix=args.namespace_prefix,
+            timezone_name=args.timezone_name,
+            max_cases=args.max_cases,
+            question_ids=tuple(args.question_ids) if args.question_ids else None,
+            top_ks=tuple(args.top_ks or (3, 5, 10)),
+            max_workers=args.max_workers,
+        )
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(
+        json.dumps(report, indent=2), encoding="utf-8", newline="\n"
+    )
+    return {
+        "dataset_id": report["dataset_id"],
+        "case_count": report["case_count"],
+        "profiles": report["profiles"],
+        "top_ks": report["top_ks"],
+        "query_features_reused": report["query_features"]["reused"],
+        "query_features": str(args.query_features),
+        "report": str(args.report),
         "database": _database_label(args),
     }
 
@@ -830,6 +979,9 @@ def _import_mem0(
     conflict_links = 0
     source_lineage_links = 0
     calibration_signals = 0
+    mem0_relationship_signals = 0
+    vector_corroboration_signals = 0
+    calibration_warnings: set[str] = set()
     with _open_repository(args) as repository:
         service = Mem0ImportService(
             repository,
@@ -847,6 +999,11 @@ def _import_mem0(
             conflict_links += result.conflict_links_created
             source_lineage_links += result.source_lineage_links_created
             calibration_signals += result.calibration_signals_created
+            mem0_relationship_signals += result.mem0_relationship_signals_created
+            vector_corroboration_signals += (
+                result.vector_corroboration_signals_created
+            )
+            calibration_warnings.update(result.calibration_warnings)
     return {
         "record_count": len(records),
         "imported": imported,
@@ -855,6 +1012,9 @@ def _import_mem0(
         "conflict_links_created": conflict_links,
         "source_lineage_links_created": source_lineage_links,
         "calibration_signals_created": calibration_signals,
+        "mem0_relationship_signals_created": mem0_relationship_signals,
+        "vector_corroboration_signals_created": vector_corroboration_signals,
+        "calibration_warnings": sorted(calibration_warnings),
         "database": _database_label(args),
     }
 
@@ -934,6 +1094,19 @@ def _bootstrap_mem0(
         ),
         "calibration_signals_created": sum(
             result.calibration_signals_created for result in results
+        ),
+        "mem0_relationship_signals_created": sum(
+            result.mem0_relationship_signals_created for result in results
+        ),
+        "vector_corroboration_signals_created": sum(
+            result.vector_corroboration_signals_created for result in results
+        ),
+        "calibration_warnings": sorted(
+            {
+                warning
+                for result in results
+                for warning in result.calibration_warnings
+            }
         ),
         "scope_truncated": len(results) < len(namespaces)
         or any(result.truncated for result in results),

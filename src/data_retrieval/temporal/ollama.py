@@ -27,11 +27,14 @@ class OllamaTemporalSummarizer(TemporalSummarizer):
     model: str
     timeout_seconds: float = 240.0
     max_input_chars: int = 60_000
+    max_retries: int = 2
 
     def __post_init__(self) -> None:
         OllamaJsonClient(self.base_url, self.model, self.timeout_seconds)
         if self.max_input_chars < 4_000:
             raise ValueError("max_input_chars must be at least 4000")
+        if self.max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
 
     @property
     def model_name(self) -> str:
@@ -116,14 +119,33 @@ class OllamaTemporalSummarizer(TemporalSummarizer):
         items: list[dict[str, Any]],
         metadata: dict[str, Any],
     ) -> SummaryContent:
-        result = OllamaJsonClient(self.base_url, self.model, self.timeout_seconds).chat_json(
-            system=self._system_prompt(),
-            user=self._user_prompt(period, item_kind, items, metadata),
-        )
-        try:
-            return SummaryContent.model_validate(result)
-        except ValueError as error:
-            raise OllamaError("Ollama returned an invalid Temporal summary") from error
+        client = OllamaJsonClient(self.base_url, self.model, self.timeout_seconds)
+        user_prompt = self._user_prompt(period, item_kind, items, metadata)
+        correction = ""
+        last_error: OllamaError | None = None
+        for _ in range(self.max_retries + 1):
+            try:
+                result = client.chat_json(
+                    system=self._system_prompt() + correction,
+                    user=user_prompt,
+                )
+                return SummaryContent.model_validate(result)
+            except OllamaError as error:
+                last_error = error
+                correction = (
+                    " Your previous response was not valid JSON for the required schema. "
+                    "Return all required keys with summary_text as a string and every other "
+                    "field as an array of strings."
+                )
+            except ValueError as error:
+                last_error = OllamaError("Ollama returned an invalid Temporal summary")
+                correction = (
+                    " Your previous response failed schema validation: "
+                    f"{str(error)[:500]}. Correct it and return only the required JSON object."
+                )
+        if last_error is None:
+            raise OllamaError("Temporal summary failed without an error")
+        raise last_error
 
     @staticmethod
     def _system_prompt() -> str:

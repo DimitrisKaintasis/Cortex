@@ -6,7 +6,9 @@ from unittest.mock import patch
 from temporal_history.core import NormalizedEvent, Period
 
 from data_retrieval.domain.models import TagLevel
+from data_retrieval.inference.openrouter import OpenRouterError, OpenRouterJsonClient
 from data_retrieval.tagging.openrouter import OpenRouterTagProposer
+from data_retrieval.tagging.proposals import TagProposal
 from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
 
 
@@ -76,6 +78,56 @@ class OpenRouterTagProposerTests(unittest.TestCase):
         schema = payload["response_format"]["json_schema"]["schema"]
         self.assertEqual(schema["properties"]["items"]["minItems"], 2)
         self.assertEqual(request.headers["Authorization"], "Bearer test-key")
+
+    @patch.object(OpenRouterTagProposer, "_call_batch")
+    def test_splits_batch_after_bounded_failures(self, mock_call_batch) -> None:
+        first = (TagProposal("first", 0.9, TagLevel.SPECIFIC),)
+        second = (TagProposal("second", 0.8, TagLevel.BROAD),)
+        mock_call_batch.side_effect = [
+            OpenRouterError("provider rejected batch"),
+            (first,),
+            (second,),
+        ]
+        proposer = OpenRouterTagProposer(api_key="test-key", max_retries=0)
+
+        result = proposer.propose_tags_batch(
+            texts=("First atom", "Second atom"),
+            namespace="project-a",
+            existing_tags=(),
+        )
+
+        self.assertEqual(result, (first, second))
+        self.assertEqual(mock_call_batch.call_count, 3)
+
+
+class OpenRouterJsonClientTests(unittest.TestCase):
+    @patch("data_retrieval.inference.openrouter.time.sleep")
+    @patch("data_retrieval.inference.openrouter.urlopen")
+    def test_retries_invalid_model_json(self, mock_open, mock_sleep) -> None:
+        mock_open.side_effect = [
+            FakeResponse({"choices": [{"message": {"content": "not json"}}]}),
+            FakeResponse({"choices": [{"message": {"content": '{"ok":true}'}}]}),
+        ]
+        client = OpenRouterJsonClient(
+            api_key="test-key",
+            max_retries=1,
+        )
+
+        result = client.chat_json(
+            system="Return JSON.",
+            user="Confirm.",
+            schema_name="probe",
+            schema={
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+                "additionalProperties": False,
+            },
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(mock_open.call_count, 2)
+        mock_sleep.assert_called_once_with(1)
 
 
 class OpenRouterTemporalSummarizerTests(unittest.TestCase):

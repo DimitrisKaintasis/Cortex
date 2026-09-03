@@ -67,7 +67,8 @@ python -m data_retrieval bootstrap-mem0 `
 ```
 
 Inspect `memories_returned`, `memories_unaligned`, `memories_imported`,
-`source_lineage_links_created`, and `calibration_signals_created`. A fact uses processor-declared
+`source_lineage_links_created`, `mem0_relationship_signals_created`,
+`vector_corroboration_signals_created`, and `calibration_signals_created`. A fact uses processor-declared
 `support_atom_ids` when available; otherwise a deterministic bounded lexical alignment selects
 up to three source atoms. Only those atoms receive `SUPPORTED_BY` links. The complete input batch
 is retained separately as `batch_atom_ids` audit metadata. Run the same command again: it should
@@ -111,3 +112,15 @@ If Ollama, the tunnel, Mem0, or PostgreSQL fails, the current batch is not marke
 output is also retryable by default. A later run retries that batch. Mem0 may have accepted the remote call before a
 laptop failure, but exact/semantic deduplication plus stable native calibration IDs prevent
 duplicate native evidence from repeatedly changing weights.
+
+## Joint initial relationship calibration
+
+Every admitted Mem0-derived fact proposes atom-to-tag priors and a `co_occurs` relationship for
+each pair of its accepted canonical tags. When `--embedding-model` is configured, the importer
+also embeds the fact, its tag labels, and any missing exact-support atoms. It stores vector
+agreement as a separate calibration signal and applies a smaller corroboration increment.
+
+The Mem0 proposal is structural evidence; the vector is supporting evidence from the same source.
+Consequently, a vector never creates a typed relationship on its own and its maximum configured
+step is half the Mem0 step. A vector-provider failure reports `calibration_warnings` and continues
+with Mem0-only calibration. Repeating an unchanged Mem0/embedding profile is idempotent.

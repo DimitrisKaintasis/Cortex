@@ -95,6 +95,8 @@ class LongMemEvalTests(unittest.TestCase):
         self.assertEqual(report.direct_session_hit_at_k, 1.0)
         self.assertEqual(report.direct_turn_hit_at_k, 1.0)
         self.assertGreater(report.direct_mean_reciprocal_rank, 0.0)
+        self.assertGreater(report.turn_mean_reciprocal_rank, 0.0)
+        self.assertGreater(report.direct_turn_mean_reciprocal_rank, 0.0)
         self.assertIn("metric_semantics", report.as_dict())
 
     def test_pipeline_excludes_abstention_suffix_from_retrieval_metrics(self) -> None:

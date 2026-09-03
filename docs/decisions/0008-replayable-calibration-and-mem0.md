@@ -25,7 +25,17 @@ large backfills unsafe and impossible to compare.
 - Mem0 imports become native atoms and may use existing tag and embedding providers.
 - Exact duplicates and semantic near-duplicates at 0.92 reuse native atoms while preserving
   record-level Mem0 lineage.
-- Mem0-backed calibration and outcome learning use the accepted 2x multiplier.
+- Mem0 lineage/conflict calibration and the existing outcome-learning path retain the accepted
+  2x multiplier. Relationship bootstrap uses the explicit bounded steps below instead.
+- Mem0-derived atom-tag and tag co-occurrence proposals now use a joint cold-start profile.
+  The Mem0 proposal and embedding corroboration are stored as separate immutable signals.
+- Embeddings may add at most half the corresponding Mem0 proposal step. This recognizes their
+  same-source correlation and prevents semantic proximity from manufacturing a typed edge.
+- Vector corroboration compares the derived fact with its canonical tag labels and, when exact
+  source lineage is available, with its supporting source atoms. Missing or failed embeddings
+  leave the Mem0-only proposal usable and are reported rather than blocking import.
+- The joint profile includes the embedding provider and model. Replaying the same profile is
+  idempotent, while a changed profile is distinguishable and auditable.
 - Declared conflicts become explicit 0.5-confidence `CONFLICTS_WITH` links instead of silent
   overwrites.
 - Mem0 import batches are bounded at 500 records.
@@ -57,5 +67,7 @@ large backfills unsafe and impossible to compare.
 - Calibration consumes rows proportional to evidence volume, trading storage for auditability.
 - Profile changes create new signals rather than mutating history, so backfills stay explicit.
 - Semantic deduplication requires an embedding provider; exact deduplication remains free.
+- Without an embedding provider, Mem0 still initializes relationships but receives no vector
+  corroboration increment.
 - The bridge does not make Mem0 a serving dependency: retrieval still works if Mem0 or the Mac
   is offline.

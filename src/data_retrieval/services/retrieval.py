@@ -3,12 +3,14 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
+from dataclasses import replace
 from uuid import uuid4
 
 from data_retrieval.domain.models import Atom, AtomKind, AtomLinkRelation, AtomRole, utc_now
 from data_retrieval.retrieval.embedding import Embedder, cosine_similarity
 from data_retrieval.retrieval.models import (
     QueryPlan,
+    RetrievalChannels,
     RetrievalItem,
     RetrievalResult,
     ScoreBreakdown,
@@ -43,6 +45,7 @@ class RetrievalService:
         catalog_hint_limit: int = 500,
         tag_canonicalizer: SemanticTagCanonicalizer | None = None,
         evidence_packer: EvidencePacker | None = None,
+        channels: RetrievalChannels | None = None,
     ) -> None:
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
@@ -60,23 +63,40 @@ class RetrievalService:
             SemanticTagCanonicalizer(embedder) if embedder is not None else None
         )
         self.evidence_packer = evidence_packer or EvidencePacker()
+        self.channels = channels or RetrievalChannels()
 
     def retrieve(self, requested_plan: QueryPlan) -> RetrievalResult:
         auto_temporal = requested_plan.temporal_mode is TemporalMode.AUTO
         plan = self.planner.resolve(requested_plan)
-        query_tags, tag_warnings = self._query_tags(plan)
+        query_tags, tag_warnings = (
+            self._query_tags(plan)
+            if self.channels.tags or self.channels.relationships
+            else ((), [])
+        )
 
-        tag_hits = self.repository.search_tag_hits(
-            namespace=plan.namespace,
-            canonical_tags=query_tags,
-            limit=self.candidate_limit,
+        tag_hits = (
+            self.repository.search_tag_hits(
+                namespace=plan.namespace,
+                canonical_tags=query_tags,
+                limit=self.candidate_limit,
+            )
+            if self.channels.tags
+            else ()
         )
-        lexical_hits = self.repository.search_lexical_hits(
-            namespace=plan.namespace,
-            query=plan.query,
-            limit=self.candidate_limit,
+        lexical_hits = (
+            self.repository.search_lexical_hits(
+                namespace=plan.namespace,
+                query=plan.query,
+                limit=self.candidate_limit,
+            )
+            if self.channels.lexical
+            else ()
         )
-        semantic_hits, semantic_warning = self._bounded_semantic_hits(plan)
+        semantic_hits, semantic_warning = (
+            self._bounded_semantic_hits(plan)
+            if self.channels.semantic
+            else ((), None)
+        )
         raw_tag_scores, tag_evidence = self._hit_maps(tag_hits)
         raw_lexical_scores, lexical_evidence = self._hit_maps(lexical_hits)
         raw_semantic_scores, semantic_evidence = self._hit_maps(semantic_hits)
@@ -88,18 +108,32 @@ class RetrievalService:
         lexical_scores = self._normalize(raw_lexical_scores)
         semantic_scores = self._normalize(raw_semantic_scores)
         base_candidate_ids = set(tag_scores) | set(lexical_scores) | set(semantic_scores)
-        raw_relationship_scores, relationship_evidence = self._bounded_relationship_scores(
-            namespace=plan.namespace,
-            query_tags=query_tags,
-            seed_atom_ids=base_candidate_ids,
+        raw_relationship_scores, relationship_evidence = (
+            self._bounded_relationship_scores(
+                namespace=plan.namespace,
+                query_tags=query_tags,
+                seed_atom_ids=base_candidate_ids,
+            )
+            if self.channels.relationships
+            else ({}, {})
         )
         relationship_scores = self._normalize(raw_relationship_scores)
         candidate_ids = base_candidate_ids | set(relationship_scores)
 
-        links = self.repository.get_atom_links_touching(atom_ids=tuple(candidate_ids))
+        links = (
+            self.repository.get_atom_links_touching(atom_ids=tuple(candidate_ids))
+            if (
+                self.channels.relationships
+                or self.channels.temporal
+                or self.channels.temporal_summaries
+                or self.channels.lineage
+            )
+            else ()
+        )
         for link in links:
             if (
-                link.relation is AtomLinkRelation.SUPERSEDES
+                (self.channels.relationships or self.channels.temporal)
+                and link.relation is AtomLinkRelation.SUPERSEDES
                 and link.to_atom_id in candidate_ids
             ):
                 candidate_ids.add(link.from_atom_id)
@@ -116,18 +150,31 @@ class RetrievalService:
         atoms = self.repository.get_atoms(tuple(sorted(context_ids)))
         atom_lookup = {atom.atom_id: atom for atom in atoms}
         candidate_ids.intersection_update(atom_lookup)
+        if not self.channels.temporal_summaries:
+            candidate_ids = {
+                atom_id
+                for atom_id in candidate_ids
+                if atom_lookup[atom_id].kind is not AtomKind.TEMPORAL_SUMMARY
+            }
+        assessment_plan = (
+            plan
+            if self.channels.temporal
+            else replace(plan, temporal_mode=TemporalMode.NONE)
+        )
         assessment = self.temporal_lens.assess(
-            plan=plan,
+            plan=assessment_plan,
             atoms=atoms,
             links=links,
-            auto_detect_state=auto_temporal,
+            auto_detect_state=auto_temporal and self.channels.temporal,
         )
         candidate_ids.intersection_update(assessment.eligible_atom_ids)
 
         channel_weights = self._channel_weights(
-            has_tags=bool(query_tags), has_semantic=bool(semantic_scores)
+            has_tags=bool(query_tags) and self.channels.tags,
+            has_lexical=self.channels.lexical,
+            has_semantic=bool(semantic_scores),
         )
-        lineage = self._summary_lineage(links, atom_lookup)
+        lineage = self._summary_lineage(links, atom_lookup) if self.channels.lineage else {}
         ranked: list[RetrievalItem] = []
         for atom_id in candidate_ids:
             atom = atom_lookup[atom_id]
@@ -199,6 +246,15 @@ class RetrievalService:
             low_confidence=top_score < self.low_confidence_threshold,
             diagnostics={
                 "query_tags": query_tags,
+                "channels": {
+                    "tags": self.channels.tags,
+                    "lexical": self.channels.lexical,
+                    "semantic": self.channels.semantic,
+                    "relationships": self.channels.relationships,
+                    "temporal": self.channels.temporal,
+                    "temporal_summaries": self.channels.temporal_summaries,
+                    "lineage": self.channels.lineage,
+                },
                 "channel_weights": channel_weights,
                 "candidate_counts": {
                     "tag": len(tag_scores),
@@ -245,6 +301,15 @@ class RetrievalService:
         )
         return result
 
+    def prepare_query_tags(
+        self, requested_plan: QueryPlan
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Resolve and canonicalize query tags without running retrieval."""
+
+        plan = self.planner.resolve(requested_plan)
+        tags, warnings = self._query_tags(plan)
+        return tags, tuple(warnings)
+
     @staticmethod
     def _hit_maps(
         hits: tuple[SearchHit, ...],
@@ -260,7 +325,11 @@ class RetrievalService:
         if self.embedder is None:
             return (), None
         try:
-            query_vector = self.embedder.embed_query(plan.query)
+            query_vector = (
+                plan.query_vector
+                if plan.query_vector is not None
+                else self.embedder.embed_query(plan.query)
+            )
             if not query_vector:
                 return (), "semantic_query_embedding_invalid"
             return (
@@ -536,13 +605,17 @@ class RetrievalService:
         return {atom_id: min(1.0, score / maximum) for atom_id, score in scores.items()}
 
     @staticmethod
-    def _channel_weights(*, has_tags: bool, has_semantic: bool) -> dict[str, float]:
+    def _channel_weights(
+        *, has_tags: bool, has_lexical: bool, has_semantic: bool
+    ) -> dict[str, float]:
         raw = {
             "tag": 0.45 if has_tags else 0.0,
-            "lexical": 0.25,
+            "lexical": 0.25 if has_lexical else 0.0,
             "semantic": 0.30 if has_semantic else 0.0,
         }
         total = sum(raw.values())
+        if total <= 0.0:
+            return {channel: 0.0 for channel in raw}
         return {channel: weight / total for channel, weight in raw.items()}
 
     @staticmethod

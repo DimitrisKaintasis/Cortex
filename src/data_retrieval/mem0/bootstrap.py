@@ -213,6 +213,9 @@ class Mem0BootstrapResult:
     semantic_duplicates: int
     source_lineage_links_created: int
     calibration_signals_created: int
+    mem0_relationship_signals_created: int
+    vector_corroboration_signals_created: int
+    calibration_warnings: tuple[str, ...]
     truncated: bool
 
 
@@ -246,6 +249,7 @@ class Mem0BootstrapService:
         )
         self.pipeline_profile = (
             f"{self.processor_profile}+support:{self.support_aligner.profile_id}"
+            f"+importer:{self.importer.profile_id}"
         )
 
     def run(
@@ -310,6 +314,19 @@ class Mem0BootstrapService:
             semantic_duplicates=counters["semantic_duplicates"],
             source_lineage_links_created=counters["source_lineage_links_created"],
             calibration_signals_created=counters["calibration_signals_created"],
+            mem0_relationship_signals_created=counters[
+                "mem0_relationship_signals_created"
+            ],
+            vector_corroboration_signals_created=counters[
+                "vector_corroboration_signals_created"
+            ],
+            calibration_warnings=tuple(
+                sorted(
+                    key.removeprefix("calibration_warning:")
+                    for key in counters
+                    if key.startswith("calibration_warning:")
+                )
+            ),
             truncated=truncated,
         )
 
@@ -361,6 +378,7 @@ class Mem0BootstrapService:
         )
         counters["memories_returned"] += len(records) + unaligned
         counters["memories_unaligned"] += unaligned
+        calibration_incomplete = False
         if records:
             imported = self.importer.import_records(namespace=namespace, records=records)
             counters["memories_imported"] += len(imported.imported_record_ids)
@@ -372,12 +390,28 @@ class Mem0BootstrapService:
             counters["calibration_signals_created"] += (
                 imported.calibration_signals_created
             )
+            counters["mem0_relationship_signals_created"] += (
+                imported.mem0_relationship_signals_created
+            )
+            counters["vector_corroboration_signals_created"] += (
+                imported.vector_corroboration_signals_created
+            )
+            for warning in imported.calibration_warnings:
+                counters[f"calibration_warning:{warning}"] += 1
+            calibration_incomplete = bool(imported.calibration_warnings)
         elif unaligned == 0:
             counters["empty_batches"] += 1
             if not self.accept_empty:
                 counters["batches_processed"] += 1
                 counters["source_atoms_processed"] += len(atoms)
                 return
+
+        if calibration_incomplete:
+            # Mem0 evidence has been persisted idempotently, but the profile marker
+            # remains absent so a later run can add the missing vector evidence.
+            counters["batches_processed"] += 1
+            counters["source_atoms_processed"] += len(atoms)
+            return
 
         markers = tuple(
             CalibrationSignal(

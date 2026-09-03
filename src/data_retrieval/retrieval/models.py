@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -25,10 +26,24 @@ class TemporalLabel(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievalChannels:
+    """Feature switches used for controlled retrieval comparisons."""
+
+    tags: bool = True
+    lexical: bool = True
+    semantic: bool = True
+    relationships: bool = True
+    temporal: bool = True
+    temporal_summaries: bool = True
+    lineage: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class QueryPlan:
     query: str
     namespace: str
     query_tags: tuple[str, ...] = ()
+    query_vector: tuple[float, ...] | None = None
     top_k: int = 10
     timeline_id: str | None = None
     temporal_mode: TemporalMode = TemporalMode.AUTO
@@ -44,6 +59,10 @@ class QueryPlan:
             raise ValueError("namespace cannot be empty")
         if self.top_k <= 0:
             raise ValueError("top_k must be positive")
+        if self.query_vector is not None and (
+            not self.query_vector or any(not math.isfinite(value) for value in self.query_vector)
+        ):
+            raise ValueError("query_vector must contain finite values")
         for name, value in (
             ("as_of", self.as_of),
             ("range_start", self.range_start),

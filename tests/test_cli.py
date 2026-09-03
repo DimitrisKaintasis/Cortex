@@ -58,6 +58,56 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.embedding_model, "harrier-v1")
         self.assertEqual(args.limit, 25)
 
+    def test_longmemeval_can_explicitly_enable_benchmark_tag_resolution(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "run-longmemeval",
+                "dataset.json",
+                "--dataset-id",
+                "dev20",
+                "--resolve-benchmark-tags",
+                "--benchmark-tag-min-confidence",
+                "0.7",
+            ]
+        )
+
+        self.assertTrue(args.resolve_benchmark_tags)
+        self.assertEqual(args.benchmark_tag_min_confidence, 0.7)
+
+    def test_longmemeval_can_run_evaluation_without_reenrichment(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "run-longmemeval",
+                "dataset.json",
+                "--dataset-id",
+                "dev20",
+                "--evaluation-only",
+                "--tag-model",
+                "query-tagger",
+                "--embedding-model",
+                "query-embedder",
+            ]
+        )
+
+        self.assertTrue(args.evaluation_only)
+        self.assertEqual(args.tag_model, "query-tagger")
+
+    def test_longmemeval_ablation_accepts_repeatable_top_k_values(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "evaluate-longmemeval-ablation",
+                "dataset.json",
+                "--dataset-id",
+                "dev20",
+                "--top-k",
+                "3",
+                "--top-k",
+                "10",
+            ]
+        )
+
+        self.assertEqual(args.top_ks, [3, 10])
+
     def test_tag_candidate_review_commands_are_exposed(self) -> None:
         listed = build_parser().parse_args(
             ["list-tag-candidates", "--namespace", "project-a", "--state", "proposed"]

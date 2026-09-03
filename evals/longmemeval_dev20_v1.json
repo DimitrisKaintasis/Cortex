@@ -1,0 +1,46 @@
+{
+  "fixture_id": "longmemeval-dev20-v1",
+  "source": "data/benchmarks/longmemeval/longmemeval_oracle.json",
+  "purpose": "Public development slice for repository feature extraction; never tune on the final benchmark.",
+  "question_ids": [
+    "gpt4_2655b836",
+    "gpt4_2487a7cb",
+    "gpt4_76048e76",
+    "gpt4_2312f94c",
+    "0a995998",
+    "6d550036",
+    "gpt4_59c863d7",
+    "b5ef892d",
+    "6a1eabeb",
+    "6aeb4375",
+    "830ce83f",
+    "8a2466db",
+    "06878be2",
+    "75832dbd",
+    "7161e7e2",
+    "c4f10528",
+    "89527b6b",
+    "e47becba",
+    "118b2229",
+    "51a45a95"
+  ],
+  "category_counts": {
+    "temporal-reasoning": 4,
+    "multi-session": 4,
+    "knowledge-update": 3,
+    "single-session-preference": 3,
+    "single-session-assistant": 3,
+    "single-session-user": 3
+  },
+  "pipeline": {
+    "namespace_prefix": "longmemeval-dev20-v1",
+    "dataset_id": "longmemeval-dev20-v1",
+    "tag_model": "gemma4:e2b-mlx",
+    "temporal_model": "qwen3.5:4b",
+    "embedding_provider": "ollama",
+    "embedding_model": "hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16::harrier-retrieval-v1",
+    "benchmark_tag_resolution_profile": "benchmark-exact-tag-resolution-v1",
+    "benchmark_tag_min_confidence": 0.65,
+    "max_workers": 2
+  }
+}

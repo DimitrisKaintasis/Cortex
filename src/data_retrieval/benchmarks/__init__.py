@@ -16,26 +16,44 @@ from data_retrieval.benchmarks.longmemeval import (
     LongMemEvalIngestService,
     iter_longmemeval_cases,
 )
+from data_retrieval.benchmarks.longmemeval_ablation import (
+    DEFAULT_RETRIEVAL_PROFILES,
+    FrozenQueryFeatures,
+    LongMemEvalAblationSuite,
+    LongMemEvalQueryFeatureCache,
+    RetrievalProfile,
+)
 from data_retrieval.benchmarks.review_cascade import (
     CascadeScenarioResult,
     ReviewCascadeReport,
     ReviewCascadeSuite,
 )
+from data_retrieval.benchmarks.tag_catalog import (
+    BenchmarkTagCatalogResolver,
+    BenchmarkTagResolutionResult,
+)
 
 __all__ = [
     "CapabilityGateReport",
+    "BenchmarkTagCatalogResolver",
+    "BenchmarkTagResolutionResult",
     "CascadeScenarioResult",
     "CollectiveTransferReport",
     "CollectiveTransferSuite",
     "ExperimentCheck",
+    "DEFAULT_RETRIEVAL_PROFILES",
+    "FrozenQueryFeatures",
     "GateCheck",
     "IsolatedCapabilitySuite",
     "IsolatedCapabilitySuiteReport",
     "LongMemEvalCase",
     "LongMemEvalImportResult",
     "LongMemEvalIngestService",
+    "LongMemEvalAblationSuite",
+    "LongMemEvalQueryFeatureCache",
     "PolicyVariantResult",
     "ReviewCascadeReport",
     "ReviewCascadeSuite",
+    "RetrievalProfile",
     "iter_longmemeval_cases",
 ]

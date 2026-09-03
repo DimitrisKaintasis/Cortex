@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import timedelta
@@ -15,7 +15,12 @@ from data_retrieval.benchmarks.longmemeval import (
 )
 from data_retrieval.core.identifiers import stable_id
 from data_retrieval.retrieval.embedding import Embedder
-from data_retrieval.retrieval.models import QueryPlan, RetrievalItem, TemporalMode
+from data_retrieval.retrieval.models import (
+    QueryPlan,
+    RetrievalChannels,
+    RetrievalItem,
+    TemporalMode,
+)
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
@@ -24,6 +29,8 @@ from data_retrieval.storage.repository import Repository
 from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.proposals import TagProposer
 from data_retrieval.temporal.bridge import TemporalBridge
+
+from .tag_catalog import BenchmarkTagCatalogResolver
 
 ProgressCallback = Callable[[int, int, str], None]
 
@@ -41,11 +48,15 @@ class LongMemEvalPipelineReport:
     turn_hit_at_k: float
     turn_recall_at_k: float
     mean_reciprocal_rank: float
+    session_mean_reciprocal_rank: float
+    turn_mean_reciprocal_rank: float
     direct_session_hit_at_k: float
     direct_session_recall_at_k: float
     direct_turn_hit_at_k: float
     direct_turn_recall_at_k: float
     direct_mean_reciprocal_rank: float
+    direct_session_mean_reciprocal_rank: float
+    direct_turn_mean_reciprocal_rank: float
     mean_retrieval_latency_ms: float
     category_metrics: dict[str, dict[str, float]]
     cases: tuple[dict[str, Any], ...]
@@ -63,11 +74,17 @@ class LongMemEvalPipelineReport:
             "turn_hit_at_k": self.turn_hit_at_k,
             "turn_recall_at_k": self.turn_recall_at_k,
             "mean_reciprocal_rank": self.mean_reciprocal_rank,
+            "session_mean_reciprocal_rank": self.session_mean_reciprocal_rank,
+            "turn_mean_reciprocal_rank": self.turn_mean_reciprocal_rank,
             "direct_session_hit_at_k": self.direct_session_hit_at_k,
             "direct_session_recall_at_k": self.direct_session_recall_at_k,
             "direct_turn_hit_at_k": self.direct_turn_hit_at_k,
             "direct_turn_recall_at_k": self.direct_turn_recall_at_k,
             "direct_mean_reciprocal_rank": self.direct_mean_reciprocal_rank,
+            "direct_session_mean_reciprocal_rank": (
+                self.direct_session_mean_reciprocal_rank
+            ),
+            "direct_turn_mean_reciprocal_rank": self.direct_turn_mean_reciprocal_rank,
             "mean_retrieval_latency_ms": self.mean_retrieval_latency_ms,
             "metric_semantics": {
                 "lineage": (
@@ -77,6 +94,11 @@ class LongMemEvalPipelineReport:
                 "direct": (
                     "direct_* metrics credit only exact retrieved raw source atoms, not "
                     "a Temporal summary's broader provenance"
+                ),
+                "reciprocal_rank": (
+                    "legacy mean_reciprocal_rank fields accept either a relevant session "
+                    "or answer-bearing turn; use the explicit session_* and turn_* MRR "
+                    "fields for controlled comparisons"
                 ),
             },
             "category_metrics": self.category_metrics,
@@ -116,13 +138,20 @@ class LongMemEvalPipelineRunner:
         enrich_tags: bool = False,
         enrich_temporal: bool = False,
         enrich_embeddings: bool = False,
+        resolve_benchmark_tags: bool = False,
+        benchmark_tag_min_confidence: float = 0.65,
         max_workers: int = 1,
+        retrieval_channels: RetrievalChannels | None = None,
+        query_tags_by_question: Mapping[str, tuple[str, ...]] | None = None,
+        query_vectors_by_question: Mapping[str, tuple[float, ...]] | None = None,
         progress: ProgressCallback | None = None,
     ) -> LongMemEvalPipelineReport:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
         if enrich_tags and self.tag_proposer is None:
             raise ValueError("tag enrichment requires a tag proposer")
+        if resolve_benchmark_tags and not enrich_tags:
+            raise ValueError("benchmark tag resolution requires tag enrichment")
         if enrich_temporal and self.temporal_bridge is None:
             raise ValueError("Temporal enrichment requires a Temporal bridge")
         if enrich_temporal and temporal_state_path is None:
@@ -155,10 +184,26 @@ class LongMemEvalPipelineRunner:
                 enrich_tags=enrich_tags,
                 enrich_temporal=enrich_temporal,
                 enrich_embeddings=enrich_embeddings,
+                resolve_benchmark_tags=resolve_benchmark_tags,
+                benchmark_tag_min_confidence=benchmark_tag_min_confidence,
             )
             if progress:
                 progress(index, total, "retrieving")
-            return index - 1, self._evaluate_case(case, top_k=top_k)
+            return index - 1, self._evaluate_case(
+                case,
+                top_k=top_k,
+                retrieval_channels=retrieval_channels,
+                query_tags=(
+                    query_tags_by_question.get(case.question_id, ())
+                    if query_tags_by_question is not None
+                    else ()
+                ),
+                query_vector=(
+                    query_vectors_by_question.get(case.question_id)
+                    if query_vectors_by_question is not None
+                    else None
+                ),
+            )
 
         if max_workers == 1:
             for index, case in enumerate(imported.cases, start=1):
@@ -209,6 +254,8 @@ class LongMemEvalPipelineRunner:
         enrich_tags: bool,
         enrich_temporal: bool,
         enrich_embeddings: bool,
+        resolve_benchmark_tags: bool,
+        benchmark_tag_min_confidence: float,
     ) -> None:
         tag_service = (
             TagEnrichmentService(
@@ -244,6 +291,12 @@ class LongMemEvalPipelineRunner:
             if tag_service is not None:
                 tag_service.enrich_document(projection.bundle.document.document_id)
 
+        if resolve_benchmark_tags:
+            BenchmarkTagCatalogResolver(
+                self.repository,
+                minimum_confidence=benchmark_tag_min_confidence,
+            ).resolve_namespace(case.namespace)
+
         if enrich_embeddings:
             if self.embedder is None:
                 raise ValueError("embedding enrichment is not configured")
@@ -252,18 +305,27 @@ class LongMemEvalPipelineRunner:
             ).enrich_namespace(case.namespace)
 
     def _evaluate_case(
-        self, case: ImportedLongMemEvalCase, *, top_k: int
+        self,
+        case: ImportedLongMemEvalCase,
+        *,
+        top_k: int,
+        retrieval_channels: RetrievalChannels | None = None,
+        query_tags: tuple[str, ...] = (),
+        query_vector: tuple[float, ...] | None = None,
     ) -> dict[str, Any]:
         retrieval = RetrievalService(
             self.repository,
             tag_proposer=self.tag_proposer,
             embedder=self.embedder,
+            channels=retrieval_channels,
         )
         started = time.perf_counter()
         result = retrieval.retrieve(
             QueryPlan(
                 query=case.question,
                 namespace=case.namespace,
+                query_tags=query_tags,
+                query_vector=query_vector,
                 top_k=top_k,
                 timeline_id=case.question_id,
                 temporal_mode=TemporalMode.AUTO,
@@ -281,7 +343,11 @@ class LongMemEvalPipelineRunner:
         answer_sessions = set(case.answer_session_ids)
         evidence_atoms = set(case.evidence_atom_ids)
         relevant_ranks: list[int] = []
+        session_relevant_ranks: list[int] = []
+        turn_relevant_ranks: list[int] = []
         direct_relevant_ranks: list[int] = []
+        direct_session_relevant_ranks: list[int] = []
+        direct_turn_relevant_ranks: list[int] = []
         found_sessions: set[str] = set()
         found_evidence_atoms: set[str] = set()
         direct_found_sessions: set[str] = set()
@@ -305,6 +371,10 @@ class LongMemEvalPipelineRunner:
             }
             if matched_atoms or matched_sessions:
                 relevant_ranks.append(rank)
+            if matched_sessions:
+                session_relevant_ranks.append(rank)
+            if matched_atoms:
+                turn_relevant_ranks.append(rank)
             found_evidence_atoms.update(matched_atoms)
             found_sessions.update(matched_sessions)
 
@@ -320,6 +390,10 @@ class LongMemEvalPipelineRunner:
             )
             if direct_atoms or direct_sessions:
                 direct_relevant_ranks.append(rank)
+            if direct_sessions:
+                direct_session_relevant_ranks.append(rank)
+            if direct_atoms:
+                direct_turn_relevant_ranks.append(rank)
             direct_found_evidence_atoms.update(direct_atoms)
             direct_found_sessions.update(direct_sessions)
 
@@ -339,6 +413,12 @@ class LongMemEvalPipelineRunner:
                 len(found_evidence_atoms) / len(evidence_atoms) if evidence_atoms else 0.0
             ),
             "reciprocal_rank": 1.0 / min(relevant_ranks) if relevant_ranks else 0.0,
+            "session_reciprocal_rank": (
+                1.0 / min(session_relevant_ranks) if session_relevant_ranks else 0.0
+            ),
+            "turn_reciprocal_rank": (
+                1.0 / min(turn_relevant_ranks) if turn_relevant_ranks else 0.0
+            ),
             "direct_session_hit": bool(direct_found_sessions) if evaluable else False,
             "direct_session_recall": (
                 len(direct_found_sessions) / len(answer_sessions) if answer_sessions else 0.0
@@ -352,11 +432,22 @@ class LongMemEvalPipelineRunner:
             "direct_reciprocal_rank": (
                 1.0 / min(direct_relevant_ranks) if direct_relevant_ranks else 0.0
             ),
+            "direct_session_reciprocal_rank": (
+                1.0 / min(direct_session_relevant_ranks)
+                if direct_session_relevant_ranks
+                else 0.0
+            ),
+            "direct_turn_reciprocal_rank": (
+                1.0 / min(direct_turn_relevant_ranks)
+                if direct_turn_relevant_ranks
+                else 0.0
+            ),
             "retrieval_latency_ms": latency_ms,
             "resolved_temporal_mode": result.resolved_temporal_mode.value,
             "low_confidence": result.low_confidence,
             "retrieved_atom_ids": [item.atom_id for item in result.items],
             "retrieved_source_atom_ids": [sorted(ids) for ids in credited_source_ids],
+            "retrieval_diagnostics": result.diagnostics,
         }
 
     @staticmethod
@@ -385,6 +476,12 @@ class LongMemEvalPipelineRunner:
                 "turn_hit_at_k": _mean(category_results, "turn_hit"),
                 "turn_recall_at_k": _mean(category_results, "turn_recall"),
                 "mean_reciprocal_rank": _mean(category_results, "reciprocal_rank"),
+                "session_mean_reciprocal_rank": _mean(
+                    category_results, "session_reciprocal_rank"
+                ),
+                "turn_mean_reciprocal_rank": _mean(
+                    category_results, "turn_reciprocal_rank"
+                ),
                 "direct_session_hit_at_k": _mean(
                     category_results, "direct_session_hit"
                 ),
@@ -397,6 +494,12 @@ class LongMemEvalPipelineRunner:
                 ),
                 "direct_mean_reciprocal_rank": _mean(
                     category_results, "direct_reciprocal_rank"
+                ),
+                "direct_session_mean_reciprocal_rank": _mean(
+                    category_results, "direct_session_reciprocal_rank"
+                ),
+                "direct_turn_mean_reciprocal_rank": _mean(
+                    category_results, "direct_turn_reciprocal_rank"
                 ),
             }
             for category, category_results in sorted(by_category.items())
@@ -413,11 +516,21 @@ class LongMemEvalPipelineRunner:
             turn_hit_at_k=_mean(evaluated, "turn_hit"),
             turn_recall_at_k=_mean(evaluated, "turn_recall"),
             mean_reciprocal_rank=_mean(evaluated, "reciprocal_rank"),
+            session_mean_reciprocal_rank=_mean(
+                evaluated, "session_reciprocal_rank"
+            ),
+            turn_mean_reciprocal_rank=_mean(evaluated, "turn_reciprocal_rank"),
             direct_session_hit_at_k=_mean(evaluated, "direct_session_hit"),
             direct_session_recall_at_k=_mean(evaluated, "direct_session_recall"),
             direct_turn_hit_at_k=_mean(evaluated, "direct_turn_hit"),
             direct_turn_recall_at_k=_mean(evaluated, "direct_turn_recall"),
             direct_mean_reciprocal_rank=_mean(evaluated, "direct_reciprocal_rank"),
+            direct_session_mean_reciprocal_rank=_mean(
+                evaluated, "direct_session_reciprocal_rank"
+            ),
+            direct_turn_mean_reciprocal_rank=_mean(
+                evaluated, "direct_turn_reciprocal_rank"
+            ),
             mean_retrieval_latency_ms=_mean(results, "retrieval_latency_ms"),
             category_metrics=category_metrics,
             cases=tuple(results),

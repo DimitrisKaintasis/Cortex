@@ -22,6 +22,7 @@ class OpenRouterTagProposer:
     catalog_limit: int = 100
     max_batch_size: int = 24
     max_batch_chars: int = 48_000
+    max_retries: int = 2
 
     def __post_init__(self) -> None:
         self._client()
@@ -33,6 +34,8 @@ class OpenRouterTagProposer:
             raise ValueError("max_batch_size must be positive")
         if self.max_batch_chars <= 0:
             raise ValueError("max_batch_chars must be positive")
+        if self.max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
 
     @property
     def evidence_source(self) -> str:
@@ -74,7 +77,7 @@ class OpenRouterTagProposer:
                 or current_chars + len(text) > self.max_batch_chars
             ):
                 results.extend(
-                    self._call_batch(
+                    self._propose_validated_batch(
                         texts=tuple(current),
                         namespace=namespace,
                         existing_tags=existing_tags,
@@ -86,13 +89,48 @@ class OpenRouterTagProposer:
             current_chars += len(text)
         if current:
             results.extend(
-                self._call_batch(
+                self._propose_validated_batch(
                     texts=tuple(current),
                     namespace=namespace,
                     existing_tags=existing_tags,
                 )
             )
         return tuple(results)
+
+    def _propose_validated_batch(
+        self,
+        *,
+        texts: tuple[str, ...],
+        namespace: str,
+        existing_tags: tuple[str, ...],
+    ) -> tuple[tuple[TagProposal, ...], ...]:
+        last_error: OpenRouterError | None = None
+        for _ in range(self.max_retries + 1):
+            try:
+                return self._call_batch(
+                    texts=texts,
+                    namespace=namespace,
+                    existing_tags=existing_tags,
+                )
+            except OpenRouterError as error:
+                last_error = error
+        if len(texts) > 1:
+            midpoint = len(texts) // 2
+            return (
+                *self._propose_validated_batch(
+                    texts=texts[:midpoint],
+                    namespace=namespace,
+                    existing_tags=existing_tags,
+                ),
+                *self._propose_validated_batch(
+                    texts=texts[midpoint:],
+                    namespace=namespace,
+                    existing_tags=existing_tags,
+                ),
+            )
+        if last_error is None:
+            raise OpenRouterError("tag proposal failed without an error")
+        raise last_error
 
     def _call_batch(
         self,

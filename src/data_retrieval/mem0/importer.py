@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from data_retrieval.calibration.teachers import TeacherCalibrationService
 from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import (
     AtomLink,
@@ -23,6 +22,8 @@ from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.storage.repository import Repository
 from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.proposals import TagProposer
+
+from .calibration import Mem0RelationshipCalibrationService
 
 MEM0_BATCH_LIMIT = 500
 MEM0_NEAR_DUPLICATE_THRESHOLD = 0.92
@@ -62,6 +63,9 @@ class Mem0ImportResult:
     conflict_links_created: int
     source_lineage_links_created: int
     calibration_signals_created: int
+    mem0_relationship_signals_created: int
+    vector_corroboration_signals_created: int
+    calibration_warnings: tuple[str, ...] = ()
 
 
 class Mem0ImportService:
@@ -81,7 +85,13 @@ class Mem0ImportService:
         self.embedder = embedder
         self.tag_proposer = tag_proposer
         self.near_duplicate_threshold = near_duplicate_threshold
-        self.calibrator = TeacherCalibrationService(repository)
+        self.relationship_calibrator = Mem0RelationshipCalibrationService(
+            repository, embedder=embedder
+        )
+
+    @property
+    def profile_id(self) -> str:
+        return self.relationship_calibrator.profile_id
 
     def import_records(
         self,
@@ -99,6 +109,9 @@ class Mem0ImportService:
         semantic_duplicates: list[str] = []
         record_atom_ids: dict[str, tuple[str, ...]] = {}
         calibration_count = 0
+        mem0_relationship_signal_count = 0
+        vector_corroboration_signal_count = 0
+        calibration_warnings: list[str] = []
         source_lineage_count = 0
         seen_record_ids: set[str] = set()
 
@@ -129,7 +142,13 @@ class Mem0ImportService:
                 atom_ids = (exact_atoms[0].atom_id,)
                 exact_duplicates.append(record.record_id)
             else:
-                semantic_atom_id = self._semantic_duplicate(namespace, record.content)
+                semantic_atom_id: str | None = None
+                try:
+                    semantic_atom_id = self._semantic_duplicate(namespace, record.content)
+                except Exception as error:  # noqa: BLE001 - exact import can still proceed
+                    calibration_warnings.append(
+                        f"semantic_deduplication_unavailable:{type(error).__name__}"
+                    )
                 if semantic_atom_id:
                     atom_ids = (semantic_atom_id,)
                     semantic_duplicates.append(record.record_id)
@@ -164,7 +183,12 @@ class Mem0ImportService:
                                 else None
                             ),
                         ).enrich_document(result.document_id)
-                    self._embed_new_atoms(atom_ids)
+                    try:
+                        self._embed_new_atoms(atom_ids)
+                    except Exception as error:  # noqa: BLE001 - calibration can degrade
+                        calibration_warnings.append(
+                            f"embedding_persistence_unavailable:{type(error).__name__}"
+                        )
                     imported.append(record.record_id)
 
             record_atom_ids[record.record_id] = atom_ids
@@ -180,15 +204,17 @@ class Mem0ImportService:
             )
             source_lineage_count += created_links
             calibration_count += created_signals
-            for document_id, selected_ids in self._group_by_document(atom_ids).items():
-                calibrated = self.calibrator.calibrate_document(
-                    document_id,
-                    provider="mem0",
-                    multiplier=MEM0_LEARNING_MULTIPLIER,
-                    source_reference=record.record_id,
-                    atom_ids=selected_ids,
-                )
-                calibration_count += calibrated.signal_count
+            calibrated = self.relationship_calibrator.calibrate_record(
+                namespace=namespace,
+                record_id=record.record_id,
+                output_atom_ids=atom_ids,
+                support_atom_ids=record.support_atom_ids,
+                support_confidence=record.support_confidence,
+            )
+            calibration_count += calibrated.signal_count
+            mem0_relationship_signal_count += calibrated.mem0_signal_count
+            vector_corroboration_signal_count += calibrated.vector_signal_count
+            calibration_warnings.extend(calibrated.warnings)
 
         conflict_count, conflict_signals = self._persist_conflicts(
             namespace=namespace,
@@ -203,6 +229,9 @@ class Mem0ImportService:
             conflict_links_created=conflict_count,
             source_lineage_links_created=source_lineage_count,
             calibration_signals_created=calibration_count + conflict_signals,
+            mem0_relationship_signals_created=mem0_relationship_signal_count,
+            vector_corroboration_signals_created=vector_corroboration_signal_count,
+            calibration_warnings=tuple(dict.fromkeys(calibration_warnings)),
         )
 
     def _persist_source_lineage(
@@ -401,14 +430,6 @@ class Mem0ImportService:
                 for atom, vector in zip(atoms, vectors, strict=True)
             )
         )
-
-    def _group_by_document(
-        self, atom_ids: tuple[str, ...]
-    ) -> dict[str, tuple[str, ...]]:
-        grouped: dict[str, list[str]] = {}
-        for atom in self.repository.get_atoms(atom_ids):
-            grouped.setdefault(atom.document_id, []).append(atom.atom_id)
-        return {document_id: tuple(ids) for document_id, ids in grouped.items()}
 
     def _persist_conflicts(
         self,

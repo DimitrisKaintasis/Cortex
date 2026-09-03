@@ -86,24 +86,35 @@ class OpenRouterJsonClient:
             },
             "max_tokens": self.max_output_tokens,
         }
-        response = self._post_with_retries("/chat/completions", payload)
-        try:
-            choice = response["choices"][0]
-            message = choice["message"]
-            refusal = message.get("refusal")
-            if refusal:
-                raise OpenRouterError(f"OpenRouter model refused the request: {refusal}")
-            content = message["content"]
-            if not isinstance(content, str):
-                raise TypeError("message content must be text")
-            parsed = json.loads(content)
-        except OpenRouterError:
-            raise
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-            raise OpenRouterError("OpenRouter returned an invalid structured response") from error
-        if not isinstance(parsed, dict):
-            raise OpenRouterError("OpenRouter structured response must be a JSON object")
-        return parsed
+        last_error: OpenRouterError | None = None
+        for attempt in range(self.max_retries + 1):
+            response = self._post_with_retries("/chat/completions", payload)
+            try:
+                choice = response["choices"][0]
+                message = choice["message"]
+                refusal = message.get("refusal")
+                if refusal:
+                    raise OpenRouterError(
+                        f"OpenRouter model refused the request: {refusal}"
+                    )
+                content = message["content"]
+                if not isinstance(content, str):
+                    raise TypeError("message content must be text")
+                parsed = json.loads(content)
+                if not isinstance(parsed, dict):
+                    raise TypeError("structured response must be a JSON object")
+                return parsed
+            except OpenRouterError:
+                raise
+            except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+                last_error = OpenRouterError(
+                    "OpenRouter returned an invalid structured response"
+                )
+                if attempt >= self.max_retries:
+                    raise last_error from error
+                time.sleep(min(2**attempt, 8))
+        assert last_error is not None
+        raise last_error
 
     def _post_with_retries(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         last_error: OpenRouterError | None = None

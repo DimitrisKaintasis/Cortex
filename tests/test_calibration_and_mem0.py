@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from data_retrieval.calibration import TeacherCalibrationService
-from data_retrieval.domain.models import AtomLinkRelation, AtomRole
+from data_retrieval.domain.models import AtomLinkRelation, AtomRole, CalibrationTarget
 from data_retrieval.ingestion.chunker import TextChunker
 from data_retrieval.mem0 import (
     Mem0BootstrapService,
@@ -16,7 +16,7 @@ from data_retrieval.mem0 import (
     Mem0Record,
     load_mem0_records,
 )
-from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan
+from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, RetrievalChannels
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
@@ -52,6 +52,30 @@ class _FakeMem0Processor:
             }
         )
         return self.results
+
+
+class _StubEmbedder:
+    provider = "stub"
+    model = "joint-calibration-v1"
+
+    def __init__(
+        self,
+        vectors: dict[str, tuple[float, ...]],
+        *,
+        unavailable: bool = False,
+    ) -> None:
+        self.vectors = vectors
+        self.unavailable = unavailable
+
+    def embed_documents(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+        if self.unavailable:
+            raise RuntimeError("embedding provider unavailable")
+        return tuple(self.vectors[text] for text in texts)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        if self.unavailable:
+            raise RuntimeError("embedding provider unavailable")
+        return self.vectors[text]
 
 
 class CalibrationAndMem0Tests(unittest.TestCase):
@@ -150,7 +174,10 @@ class CalibrationAndMem0Tests(unittest.TestCase):
         memory = repository.get_atom(links[0].from_atom_id)
         self.assertEqual(memory.metadata["support_atom_ids"], [ingested.atom_ids[0]])
         self.assertEqual(memory.metadata["batch_atom_ids"], list(ingested.atom_ids))
-        retrieval = RetrievalService(repository).retrieve(
+        retrieval = RetrievalService(
+            repository,
+            channels=RetrievalChannels(temporal_summaries=False),
+        ).retrieve(
             QueryPlan(query="PostgreSQL durable data", namespace="project-a")
         )
         memory_item = next(
@@ -355,6 +382,127 @@ class CalibrationAndMem0Tests(unittest.TestCase):
             )[0].weight_raw,
             first_weight,
         )
+
+    def test_mem0_and_vectors_separately_calibrate_initial_relationship_weights(self) -> None:
+        source_text = "The Mac Mini runs remote inference for the retrieval worker."
+        memory_text = "A Mac Mini provides remote inference."
+        record_tags = ("mac mini", "remote inference")
+
+        mem0_only_repository = InMemoryRepository()
+        mem0_only_source = IngestService(mem0_only_repository).ingest_text(
+            namespace="project-a", source="source", text=source_text
+        )
+        mem0_only_result = Mem0ImportService(mem0_only_repository).import_records(
+            namespace="project-a",
+            records=(
+                Mem0Record(
+                    record_id="memory-1",
+                    content=memory_text,
+                    tags=record_tags,
+                    support_atom_ids=mem0_only_source.atom_ids,
+                    support_confidence=0.9,
+                ),
+            ),
+        )
+        mem0_only_weight = mem0_only_repository.list_tag_relations(
+            namespace="project-a", relation_type="co_occurs"
+        )[0].weight_raw
+
+        joint_repository = InMemoryRepository()
+        joint_source = IngestService(joint_repository).ingest_text(
+            namespace="project-a", source="source", text=source_text
+        )
+        embedder = _StubEmbedder(
+            {
+                source_text: (1.0, 0.0),
+                memory_text: (1.0, 0.0),
+                "mac mini": (1.0, 0.0),
+                "remote inference": (0.8, 0.6),
+            }
+        )
+        service = Mem0ImportService(joint_repository, embedder=embedder)
+        joint_record = Mem0Record(
+            record_id="memory-1",
+            content=memory_text,
+            tags=record_tags,
+            support_atom_ids=joint_source.atom_ids,
+            support_confidence=0.9,
+        )
+
+        joint_result = service.import_records(
+            namespace="project-a", records=(joint_record,)
+        )
+        joint_relation = joint_repository.list_tag_relations(
+            namespace="project-a", relation_type="co_occurs"
+        )[0]
+        first_joint_weight = joint_relation.weight_raw
+        replay = service.import_records(namespace="project-a", records=(joint_record,))
+
+        self.assertEqual(mem0_only_result.mem0_relationship_signals_created, 3)
+        self.assertEqual(mem0_only_result.vector_corroboration_signals_created, 0)
+        self.assertEqual(joint_result.mem0_relationship_signals_created, 3)
+        self.assertEqual(joint_result.vector_corroboration_signals_created, 3)
+        self.assertGreater(first_joint_weight, mem0_only_weight)
+        self.assertEqual(replay.mem0_relationship_signals_created, 0)
+        self.assertEqual(replay.vector_corroboration_signals_created, 0)
+        self.assertEqual(
+            joint_repository.list_tag_relations(
+                namespace="project-a", relation_type="co_occurs"
+            )[0].weight_raw,
+            first_joint_weight,
+        )
+        relation_events = joint_repository.list_weight_events(
+            namespace="project-a", target_type=CalibrationTarget.TAG_RELATION
+        )
+        self.assertTrue(
+            any(
+                "mem0:mem0-joint-bootstrap-v1" in event.policy_version
+                and "embedding:stub:mem0-joint-bootstrap-v1" in event.policy_version
+                for event in relation_events
+            )
+        )
+
+    def test_mem0_bootstrap_retries_vector_calibration_without_reapplying_mem0(self) -> None:
+        repository = InMemoryRepository()
+        source_text = "The Mac Mini runs remote inference."
+        memory_text = "A Mac Mini provides remote inference."
+        IngestService(repository).ingest_text(
+            namespace="project-a",
+            source="source",
+            text=source_text,
+            explicit_tags=("mac mini", "remote inference"),
+        )
+        processor = _FakeMem0Processor(
+            ({"id": "memory-1", "memory": memory_text},)
+        )
+        embedder = _StubEmbedder(
+            {
+                source_text: (1.0, 0.0),
+                memory_text: (1.0, 0.0),
+                "mac mini": (1.0, 0.0),
+                "remote inference": (0.8, 0.6),
+            },
+            unavailable=True,
+        )
+        service = Mem0BootstrapService(
+            repository,
+            processor,
+            importer=Mem0ImportService(repository, embedder=embedder),
+        )
+
+        degraded = service.run(namespace="project-a")
+        embedder.unavailable = False
+        recovered = service.run(namespace="project-a")
+        resumed = service.run(namespace="project-a")
+
+        self.assertGreater(degraded.mem0_relationship_signals_created, 0)
+        self.assertEqual(degraded.vector_corroboration_signals_created, 0)
+        self.assertTrue(degraded.calibration_warnings)
+        self.assertEqual(recovered.mem0_relationship_signals_created, 0)
+        self.assertGreater(recovered.vector_corroboration_signals_created, 0)
+        self.assertEqual(recovered.calibration_warnings, ())
+        self.assertEqual(resumed.batches_resumed, 1)
+        self.assertEqual(len(processor.calls), 2)
 
     def test_mem0_fact_support_rejects_non_source_atoms(self) -> None:
         repository = InMemoryRepository()

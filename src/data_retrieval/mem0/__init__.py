@@ -4,6 +4,11 @@ from data_retrieval.mem0.bootstrap import (
     Mem0Processor,
     Mem0PythonProcessor,
 )
+from data_retrieval.mem0.calibration import (
+    Mem0RelationshipCalibrationProfile,
+    Mem0RelationshipCalibrationResult,
+    Mem0RelationshipCalibrationService,
+)
 from data_retrieval.mem0.importer import (
     Mem0ImportResult,
     Mem0ImportService,
@@ -24,6 +29,9 @@ __all__ = [
     "Mem0Processor",
     "Mem0PythonProcessor",
     "Mem0Record",
+    "Mem0RelationshipCalibrationProfile",
+    "Mem0RelationshipCalibrationResult",
+    "Mem0RelationshipCalibrationService",
     "LexicalSupportAligner",
     "SupportAligner",
     "SupportSelection",
