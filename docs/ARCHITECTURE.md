@@ -174,11 +174,15 @@ Mem0 owns its tested memory extraction and entity-relationship inference, not ca
 serving retrieval. The bootstrap leaves normal `Memory.add(infer=True)` behavior intact and
 projects only provenance-valid entities into Cortex. Each entity becomes a private, batch-scoped
 derived atom. `SUPPORTED_BY` links point to exact source evidence, while typed Mem0 relationships
-become `MEM0_ENTITY_RELATION` atom links. No evidence tags are copied onto entity atoms.
+become inactive `MEM0_ENTITY_RELATION` proposals. ADR-0016 allows a separate vector/lexical gate
+to assign only bounded provisional weight; held and rejected proposals remain at zero. No
+evidence tags are copied onto entity atoms.
 
 The adapter adds evidence IDs only to relationship extraction and strips them before Mem0 stores
 its normal triples. Missing or invented IDs are quarantined; Cortex does not guess lineage after
 the call. Mem0 availability is never required for retrieval after the projection is imported.
+Vector similarity corroborates topical alignment but does not certify predicate truth or
+direction, so full-strength promotion still requires stronger evidence or review.
 
 Replacement candidates that require evidence:
 

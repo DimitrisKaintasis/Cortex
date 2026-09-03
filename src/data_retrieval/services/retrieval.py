@@ -447,6 +447,8 @@ class RetrievalService:
             related_via: dict[str, str] = {}
             for link in relation_links[: self.candidate_limit * 4]:
                 strength = max(0.0, link.weight_raw * link.confidence)
+                if strength <= 0.0:
+                    continue
                 if link.from_atom_id in bounded_entities:
                     path = bounded_entities[link.from_atom_id] * strength
                     related_strength[link.to_atom_id] = max(

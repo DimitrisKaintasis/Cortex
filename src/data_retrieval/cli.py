@@ -17,6 +17,7 @@ from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuit
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_ablation import LongMemEvalAblationSuite
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
+from data_retrieval.benchmarks.mem0_cold_start import Mem0ColdStartSuite
 from data_retrieval.benchmarks.mem0_entity_quality import Mem0EntityQualitySuite
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
@@ -27,6 +28,8 @@ from data_retrieval.mem0 import (
     Mem0BootstrapService,
     Mem0ImportService,
     Mem0PythonProcessor,
+    Mem0VectorAdmissionPolicy,
+    Mem0VectorCalibrationService,
     load_mem0_records,
 )
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
@@ -337,6 +340,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="global safety cap across all selected namespaces",
     )
+    mem0_vectors = commands.add_parser(
+        "calibrate-mem0-vectors",
+        help="assign bounded provisional weights to Mem0 entity proposals",
+    )
+    _add_storage_options(mem0_vectors)
+    mem0_vectors.add_argument("--namespace", required=True)
+    _add_embedding_options(mem0_vectors)
+    mem0_vectors.add_argument("--max-links", type=int)
+    mem0_vectors.add_argument("--reject-below-similarity", type=float, default=0.60)
+    mem0_vectors.add_argument("--provisional-above-similarity", type=float, default=0.80)
+    mem0_vectors.add_argument("--provisional-weight-cap", type=float, default=0.25)
     calibration = commands.add_parser(
         "backfill-calibration",
         help="replay missing teacher priors and initial relationships without re-embedding",
@@ -504,6 +518,29 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/results/mem0-entity-quality-v1.json"),
     )
+    cold_start = commands.add_parser(
+        "evaluate-mem0-cold-start",
+        help="compare baseline, vector, Mem0, and guarded joint typed-edge profiles",
+    )
+    cold_start.add_argument(
+        "--fixture",
+        type=Path,
+        default=Path("evals/mem0_entity_quality_v1.json"),
+    )
+    cold_start.add_argument(
+        "--mem0-report",
+        type=Path,
+        default=Path("data/results/mem0-entity-quality-v1.json"),
+    )
+    cold_start.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/mem0-cold-start-v1.json"),
+    )
+    _add_embedding_options(cold_start)
+    cold_start.add_argument("--reject-below-similarity", type=float, default=0.60)
+    cold_start.add_argument("--provisional-above-similarity", type=float, default=0.80)
+    cold_start.add_argument("--provisional-weight-cap", type=float, default=0.25)
     repository_features = commands.add_parser(
         "observe-repository-features",
         help="run payload-free collective triage without feature-path mutations",
@@ -552,6 +589,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _import_mem0(args, parser)
         elif args.command == "bootstrap-mem0":
             output = _bootstrap_mem0(args, parser)
+        elif args.command == "calibrate-mem0-vectors":
+            output = _calibrate_mem0_vectors(args)
         elif args.command == "backfill-calibration":
             output = _backfill_calibration(args)
         elif args.command == "audit-weights":
@@ -572,6 +611,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _evaluate_review_cascade(args, parser)
         elif args.command == "evaluate-mem0-entities":
             output = _evaluate_mem0_entities(args, parser)
+        elif args.command == "evaluate-mem0-cold-start":
+            output = _evaluate_mem0_cold_start(args, parser)
         else:
             output = _observe_repository_features(args, parser)
     except (
@@ -592,6 +633,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evaluate-collective-transfer",
         "evaluate-review-cascade",
         "evaluate-mem0-entities",
+        "evaluate-mem0-cold-start",
     } and output["passed"] is False:
         return 1
     return 0
@@ -1111,6 +1153,22 @@ def _bootstrap_mem0(
     }
 
 
+def _calibrate_mem0_vectors(args: argparse.Namespace) -> dict[str, object]:
+    embedder = _embedder(args)
+    policy = Mem0VectorAdmissionPolicy(
+        reject_below_similarity=args.reject_below_similarity,
+        provisional_above_similarity=args.provisional_above_similarity,
+        provisional_weight_cap=args.provisional_weight_cap,
+    )
+    with _open_repository(args) as repository:
+        result = Mem0VectorCalibrationService(
+            repository,
+            embedder,
+            policy=policy,
+        ).calibrate_namespace(args.namespace, max_links=args.max_links)
+    return {**result.as_dict(), "database": _database_label(args)}
+
+
 def _backfill_calibration(args: argparse.Namespace) -> dict[str, object]:
     with _open_repository(args) as repository:
         service = CalibrationBackfillService(
@@ -1394,6 +1452,33 @@ def _evaluate_mem0_entities(
         case_ids=tuple(args.case_ids) if args.case_ids else None,
     )
     payload = report.as_dict()
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _evaluate_mem0_cold_start(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.fixture.is_file():
+        parser.error(f"Mem0 entity quality fixture does not exist: {args.fixture}")
+    if not args.mem0_report.is_file():
+        parser.error(f"Mem0 entity quality report does not exist: {args.mem0_report}")
+    policy = Mem0VectorAdmissionPolicy(
+        reject_below_similarity=args.reject_below_similarity,
+        provisional_above_similarity=args.provisional_above_similarity,
+        provisional_weight_cap=args.provisional_weight_cap,
+    )
+    report = Mem0ColdStartSuite().run(
+        fixture_path=args.fixture,
+        mem0_report_path=args.mem0_report,
+        embedder=_embedder(args),
+        policy=policy,
+    )
+    payload = report.as_dict()
+    args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

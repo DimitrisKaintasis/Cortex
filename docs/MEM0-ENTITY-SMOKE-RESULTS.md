@@ -3,6 +3,10 @@
 Date: 2026-09-03
 Status: structural gate passed; cheap-model promotion gate failed
 
+> This smoke preceded ADR-0016's inactive-proposal lifecycle. The same imported relationship now
+> starts at weight zero and requires explicit calibration before it can contribute a relationship
+> path score.
+
 ## Setup
 
 - Mem0: 1.0.1, normal `Memory.add(infer=True)` behavior
@@ -61,9 +65,10 @@ the first atom, and the model improved the predicate to `runs_jobs_for`. Replay 
 model calls and zero writes.
 
 A second identical bootstrap resumed the completed batch with zero model calls and zero new
-links. Persisted entity atoms had zero tags. A tags-disabled query for Project Helios surfaced
-the canonical source atom with a non-zero `mem0_entity_path` score, confirming serving retrieval
-does not depend on Mem0 or Kuzu after import.
+links. Persisted entity atoms had zero tags. Under the then-active relationship policy, a
+tags-disabled query for Project Helios surfaced the canonical source atom with a non-zero
+`mem0_entity_path` score, confirming serving retrieval did not depend on Mem0 or Kuzu after
+import. ADR-0016 subsequently moved new relationship proposals behind explicit admission.
 
 ## Labeled quality gate
 

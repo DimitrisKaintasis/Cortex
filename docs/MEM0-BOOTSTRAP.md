@@ -12,14 +12,16 @@ source evidence atoms
     -> normal Mem0 inference
          -> normal Mem0 facts and graph (rebuildable working state)
          -> entity relationships carrying exact source-atom IDs
-    -> private entity-mention atoms in Cortex
+         -> private entity-mention atoms in Cortex
          -> SUPPORTED_BY -> source evidence atoms
-         -> MEM0_ENTITY_RELATION -> other entity-mention atoms
+         -> inactive MEM0_ENTITY_RELATION proposal -> explicit admission
 ```
 
-Entity atoms receive no copied tags. Retrieval reaches source evidence through bounded graph
-paths. This prevents a private proper name such as `Alice` from becoming a globally shared tag
-that could collide with another user's unrelated Alice.
+Entity atoms receive no copied tags. New relationship proposals start at weight zero; the
+separate vector calibration command may grant only bounded provisional weight. Retrieval reaches
+source evidence through admitted bounded graph paths. This prevents a private proper name such as
+`Alice` from becoming a globally shared tag that could collide with another user's unrelated
+Alice.
 
 ## What runs where
 
@@ -145,6 +147,11 @@ Inspect these counters:
 
 Run the same command again. It should report resumed batches and zero newly processed batches.
 Then raise the cap or select a namespace prefix.
+
+At this point entity relationships are auditable proposals, not active serving edges. For an
+isolated test namespace, run `calibrate-mem0-vectors` as documented in
+`MEM0-VECTOR-COLD-START.md`. The current policy is experimental and failed its semantic promotion
+gate, so do not apply it unattended to a large namespace.
 
 An empty graph result remains retryable by default because a local model or parser failure can
 look like a legitimate empty result. After inspection, `--accept-empty` marks empty batches

@@ -30,14 +30,16 @@ would require ambiguous lexical, vector, or model-based alignment.
   missing, malformed, or invented provenance; never repair them through post-hoc matching.
 - Import each accepted Mem0 entity as a private, batch-scoped, derived entity-mention atom.
 - Connect entity mentions to exact source atoms with `SUPPORTED_BY` and to one another with
-  `MEM0_ENTITY_RELATION`. Keep the Mem0 predicate in link metadata.
+  `MEM0_ENTITY_RELATION`. Keep the Mem0 predicate in link metadata. ADR-0016 keeps new
+  relationship proposals at zero active weight until explicit admission.
 - Copy no source tags onto entity atoms. Retrieval traverses bounded
   evidence/entity/relationship/evidence paths instead.
 - Store stable calibration signals for replay protection, not for hidden all-pairs tag boosts.
 - Keep PostgreSQL authoritative. Mem0's Qdrant, history database, and Kuzu graph are rebuildable
   working state and are not serving dependencies.
-- Pin the integration to Mem0 major version 1 and fail clearly when the private graph methods
-  required by the narrow adapter are incompatible.
+- Pin the integration to tested Mem0 1.0.1 and fail clearly when the private graph methods
+  required by the narrow adapter are incompatible. Upgrades require compatibility and quality
+  reruns.
 
 ## Consequences
 

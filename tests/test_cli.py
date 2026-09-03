@@ -53,6 +53,34 @@ class CliParserTests(unittest.TestCase):
         )
         self.assertEqual(args.case_ids, ["person-leads-project"])
 
+    def test_mem0_vector_calibration_exposes_bounded_policy_controls(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "calibrate-mem0-vectors",
+                "--namespace",
+                "project-a",
+                "--embedding-model",
+                "embedder-v1",
+                "--provisional-weight-cap",
+                "0.2",
+            ]
+        )
+
+        self.assertEqual(args.namespace, "project-a")
+        self.assertEqual(args.embedding_model, "embedder-v1")
+        self.assertEqual(args.provisional_weight_cap, 0.2)
+
+    def test_mem0_cold_start_comparison_uses_frozen_report(self) -> None:
+        args = build_parser().parse_args(
+            ["evaluate-mem0-cold-start", "--embedding-model", "embedder-v1"]
+        )
+
+        self.assertEqual(args.fixture.as_posix(), "evals/mem0_entity_quality_v1.json")
+        self.assertEqual(
+            args.mem0_report.as_posix(), "data/results/mem0-entity-quality-v1.json"
+        )
+        self.assertEqual(args.embedding_model, "embedder-v1")
+
     def test_repository_feature_observer_accepts_cached_embedding_identity(self) -> None:
         args = build_parser().parse_args(
             [

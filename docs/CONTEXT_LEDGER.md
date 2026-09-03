@@ -160,6 +160,11 @@ These may reference atoms but must not replace atom-to-atom associative weights.
   MLX compute/Metal out-of-memory errors on the Mac Mini.
 - Mem0 entity output therefore remains proposal-only until a selective reviewer passes the
   checked-in quality gate. Canonical retrieval remains independent of Mem0/Kuzu/Ollama.
+- ADR-0016 makes that boundary executable: proposals start at zero weight; vectors evaluate only
+  the proposed relation against exact evidence and can grant at most `0.25` provisional weight.
+  The first joint test reduced wrong weight by 89.5% but failed semantic promotion because high
+  similarity does not prove predicate truth. Do not restore all-pairs calibration or treat vector
+  agreement as verification.
 
 ## Superseded or rejected
 

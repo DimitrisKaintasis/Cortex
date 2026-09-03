@@ -379,6 +379,21 @@ python -m data_retrieval bootstrap-mem0 `
   --max-documents 10
 ```
 
+The bootstrap persists typed relationships as inactive proposals. For a small test namespace,
+apply the experimental bounded vector corroboration stage separately:
+
+```powershell
+python -m data_retrieval calibrate-mem0-vectors `
+  --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `
+  --namespace <namespace> `
+  --embedding-model qwen3-embedding:0.6b
+```
+
+This stage never generates arbitrary vector edges. It scores only Mem0 proposals against their
+exact evidence and caps provisional weight at `0.25`. The first quality experiment reduced noise
+but failed promotion, so keep it limited to snapshots until a semantic validator passes. See
+[the cold-start experiment](docs/MEM0-VECTOR-COLD-START.md).
+
 Use a small cap first. The Mem0 configuration chooses its LLM, embedder, vector store, and
 required graph store; embedded Kuzu keeps the graph cache small and avoids another server.
 Provider credentials belong in environment variables, not the JSON file. In the current

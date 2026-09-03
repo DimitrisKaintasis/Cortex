@@ -23,7 +23,7 @@ from data_retrieval.domain.models import (
 from data_retrieval.mem0.provenance import PROVENANCE_FIELD
 from data_retrieval.storage.repository import Repository
 
-MEM0_ENTITY_PROFILE = "mem0-entity-graph-v1"
+MEM0_ENTITY_PROFILE = "mem0-entity-graph-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +522,9 @@ class Mem0EntityImportService:
         links: list[AtomLink] = []
         for (source_atom_id, target_atom_id), additions in sorted(grouped.items()):
             previous = current.get((source_atom_id, target_atom_id))
+            previous_is_candidate = previous is not None and (
+                "proposal_weight_raw" in previous.metadata
+            )
             predicates = {
                 str(value)
                 for value in (previous.metadata.get("predicates", ()) if previous else ())
@@ -531,21 +534,28 @@ class Mem0EntityImportService:
                 for value in (previous.metadata.get("support_atom_ids", ()) if previous else ())
             }
             evidence_sources = set(previous.evidence_sources if previous else ())
-            increment = 0.0
+            proposal_increment = 0.0
             confidence = previous.confidence if previous else 0.0
             for signal_id, relationship in additions:
                 predicates.add(relationship.predicate)
                 support_atom_ids.update(relationship.support_atom_ids)
                 evidence_sources.add(f"calibration:{signal_id}")
-                increment += relationship.confidence
+                proposal_increment += relationship.confidence
                 confidence = max(confidence, relationship.confidence)
+            previous_proposal_weight = (
+                float(previous.metadata.get("proposal_weight_raw", 0.0)) if previous else 0.0
+            )
             now = utc_now()
             links.append(
                 AtomLink(
                     from_atom_id=source_atom_id,
                     to_atom_id=target_atom_id,
                     relation=AtomLinkRelation.MEM0_ENTITY_RELATION,
-                    weight_raw=(previous.weight_raw if previous else 0.0) + increment,
+                    # Mem0 output is a proposal. It becomes a serving edge only
+                    # after an explicit calibration/admission stage.
+                    weight_raw=(
+                        previous.weight_raw if previous_is_candidate and previous else 0.0
+                    ),
                     confidence=confidence,
                     evidence_sources=tuple(sorted(evidence_sources)),
                     created_at=previous.created_at if previous else now,
@@ -555,6 +565,13 @@ class Mem0EntityImportService:
                         "source_system": "mem0",
                         "predicates": sorted(predicates),
                         "support_atom_ids": sorted(support_atom_ids),
+                        "proposal_weight_raw": previous_proposal_weight
+                        + proposal_increment,
+                        "admission_state": (
+                            previous.metadata.get("admission_state", "unreviewed")
+                            if previous_is_candidate and previous
+                            else "unreviewed"
+                        ),
                         "copies_source_tags": False,
                     },
                 )

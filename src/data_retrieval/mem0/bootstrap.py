@@ -18,7 +18,7 @@ from data_retrieval.mem0.ollama_compat import configure_ollama_llm
 from data_retrieval.mem0.provenance import Mem0ProvenanceAdapter
 from data_retrieval.storage.repository import Repository
 
-MEM0_BOOTSTRAP_PROFILE = "mem0-bootstrap-v4"
+MEM0_BOOTSTRAP_PROFILE = "mem0-bootstrap-v5"
 DEFAULT_ATOM_BATCH_SIZE = 32
 DEFAULT_MAX_BATCH_CHARS = 24_000
 SAFE_ROLES = frozenset({"user", "assistant", "system"})

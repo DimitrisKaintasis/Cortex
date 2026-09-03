@@ -1,3 +1,10 @@
+from data_retrieval.mem0.admission import (
+    Mem0AdmissionDecision,
+    Mem0AdmissionDisposition,
+    Mem0VectorAdmissionPolicy,
+    Mem0VectorCalibrationResult,
+    Mem0VectorCalibrationService,
+)
 from data_retrieval.mem0.bootstrap import (
     Mem0BootstrapResult,
     Mem0BootstrapService,
@@ -25,6 +32,8 @@ from data_retrieval.mem0.support import (
 )
 
 __all__ = [
+    "Mem0AdmissionDecision",
+    "Mem0AdmissionDisposition",
     "Mem0BootstrapResult",
     "Mem0BootstrapService",
     "Mem0Entity",
@@ -36,6 +45,9 @@ __all__ = [
     "Mem0Processor",
     "Mem0PythonProcessor",
     "Mem0ProcessResult",
+    "Mem0VectorAdmissionPolicy",
+    "Mem0VectorCalibrationResult",
+    "Mem0VectorCalibrationService",
     "Mem0Record",
     "LexicalSupportAligner",
     "SupportAligner",

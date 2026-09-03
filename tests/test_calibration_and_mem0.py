@@ -16,6 +16,7 @@ from data_retrieval.mem0 import (
     Mem0ImportService,
     Mem0ProcessResult,
     Mem0Record,
+    Mem0VectorCalibrationService,
     load_mem0_records,
     normalize_mem0_response,
 )
@@ -55,6 +56,17 @@ class _FakeMem0Processor:
             }
         )
         return self.result
+
+
+class _AlignedEmbedder:
+    provider = "fixture"
+    model = "aligned-v1"
+
+    def embed_documents(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+        return tuple((1.0, 0.0) for _ in texts)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return (1.0, 0.0)
 
 
 class CalibrationAndMem0Tests(unittest.TestCase):
@@ -253,6 +265,24 @@ class CalibrationAndMem0Tests(unittest.TestCase):
             )
         )
         Mem0BootstrapService(repository, processor).run(namespace="project-a")
+        before = RetrievalService(
+            repository,
+            channels=RetrievalChannels(
+                tags=False,
+                semantic=False,
+                temporal=False,
+                temporal_summaries=False,
+            ),
+        ).retrieve(QueryPlan(query="Alice", namespace="project-a"))
+        self.assertFalse(
+            any(
+                item.atom_id == second.atom_ids[0] and item.score.relationship > 0.0
+                for item in before.items
+            )
+        )
+        Mem0VectorCalibrationService(repository, _AlignedEmbedder()).calibrate_namespace(
+            "project-a"
+        )
         result = RetrievalService(
             repository,
             channels=RetrievalChannels(
