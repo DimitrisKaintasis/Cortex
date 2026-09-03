@@ -33,10 +33,13 @@ class LearningPolicy:
     learn_atom_tags: bool = True
     learn_co_used: bool = True
     learn_tag_relations: bool = True
+    tag_relation_scope: str = "all_pairs"
 
     def __post_init__(self) -> None:
         if not self.policy_id.strip():
             raise ValueError("policy_id cannot be empty")
+        if self.tag_relation_scope not in {"all_pairs", "query_to_evidence"}:
+            raise ValueError("tag_relation_scope must be all_pairs or query_to_evidence")
 
 
 ALL_PAIRS_LEARNING_POLICY = LearningPolicy(policy_id="bounded-feedback-v1")
@@ -44,9 +47,26 @@ ATOM_CO_USED_LEARNING_POLICY = LearningPolicy(
     policy_id="bounded-atom-co-used-v1",
     learn_tag_relations=False,
 )
+ATOM_TAG_ONLY_LEARNING_POLICY = LearningPolicy(
+    policy_id="bounded-atom-tag-only-v1",
+    learn_co_used=False,
+    learn_tag_relations=False,
+)
+CO_USED_ONLY_LEARNING_POLICY = LearningPolicy(
+    policy_id="bounded-co-used-only-v1",
+    learn_atom_tags=False,
+    learn_tag_relations=False,
+)
+QUERY_EVIDENCE_LEARNING_POLICY = LearningPolicy(
+    policy_id="bounded-query-evidence-v1",
+    tag_relation_scope="query_to_evidence",
+)
 LEARNING_POLICY_PROFILES = {
     "all_pairs": ALL_PAIRS_LEARNING_POLICY,
     "atom_co_used": ATOM_CO_USED_LEARNING_POLICY,
+    "atom_tags_only": ATOM_TAG_ONLY_LEARNING_POLICY,
+    "co_used_only": CO_USED_ONLY_LEARNING_POLICY,
+    "query_evidence": QUERY_EVIDENCE_LEARNING_POLICY,
 }
 
 
@@ -143,17 +163,45 @@ class LearningService:
                     namespace=namespace, canonical_texts=tuple(sorted(query_tags))
                 )
             }
-            relationship_tag_ids = [*sorted(query_tag_ids)]
-            relationship_tag_ids.extend(
-                tag_id for tag_id in sorted(credited_tag_ids) if tag_id not in query_tag_ids
-            )
-            tag_relation_updates = self._tag_relation_updates(
-                namespace=namespace,
-                tag_ids=tuple(relationship_tag_ids[: self.maximum_relationship_nodes]),
-                sign=sign,
-                feedback_id=request.feedback_id,
-                multiplier=learning_multiplier,
-            )
+            if self.policy.tag_relation_scope == "query_to_evidence":
+                bounded_tag_ids = [*sorted(query_tag_ids)]
+                bounded_tag_ids.extend(
+                    tag_id for tag_id in sorted(credited_tag_ids) if tag_id not in query_tag_ids
+                )
+                allowed_tag_ids = set(
+                    bounded_tag_ids[: self.maximum_relationship_nodes]
+                )
+                pairs = tuple(
+                    sorted(
+                        {
+                            tuple(sorted((query_tag_id, evidence_tag_id)))
+                            for query_tag_id in query_tag_ids
+                            for evidence_tag_id in credited_tag_ids
+                            if query_tag_id != evidence_tag_id
+                            and query_tag_id in allowed_tag_ids
+                            and evidence_tag_id in allowed_tag_ids
+                        }
+                    )
+                )
+                tag_relation_updates = self._tag_relation_pair_updates(
+                    namespace=namespace,
+                    pairs=pairs,
+                    sign=sign,
+                    feedback_id=request.feedback_id,
+                    multiplier=learning_multiplier,
+                )
+            else:
+                relationship_tag_ids = [*sorted(query_tag_ids)]
+                relationship_tag_ids.extend(
+                    tag_id for tag_id in sorted(credited_tag_ids) if tag_id not in query_tag_ids
+                )
+                tag_relation_updates = self._tag_relation_updates(
+                    namespace=namespace,
+                    tag_ids=tuple(relationship_tag_ids[: self.maximum_relationship_nodes]),
+                    sign=sign,
+                    feedback_id=request.feedback_id,
+                    multiplier=learning_multiplier,
+                )
         now = utc_now()
         feedback_event: dict[str, object] = {
             "feedback_id": request.feedback_id,
@@ -170,6 +218,7 @@ class LearningService:
                 "atom_tags": self.policy.learn_atom_tags,
                 "co_used": self.policy.learn_co_used,
                 "tag_relations": self.policy.learn_tag_relations,
+                "tag_relation_scope": self.policy.tag_relation_scope,
             },
             "created_at": now.isoformat(),
         }
@@ -286,6 +335,24 @@ class LearningService:
         feedback_id: str,
         multiplier: float,
     ) -> tuple[TagRelation, ...]:
+        return self._tag_relation_pair_updates(
+            namespace=namespace,
+            pairs=tuple(combinations(tag_ids, 2)),
+            sign=sign,
+            feedback_id=feedback_id,
+            multiplier=multiplier,
+        )
+
+    def _tag_relation_pair_updates(
+        self,
+        *,
+        namespace: str,
+        pairs: tuple[tuple[str, str], ...],
+        sign: float,
+        feedback_id: str,
+        multiplier: float,
+    ) -> tuple[TagRelation, ...]:
+        tag_ids = tuple(sorted({tag_id for pair in pairs for tag_id in pair}))
         existing = {
             (edge.source_tag_id, edge.target_tag_id): edge
             for edge in self.repository.get_tag_relations_touching(
@@ -293,7 +360,7 @@ class LearningService:
             )
         }
         updates: list[TagRelation] = []
-        for left, right in combinations(tag_ids, 2):
+        for left, right in pairs:
             key = tuple(sorted((left, right)))
             edge = existing.get(key)
             if edge is None:

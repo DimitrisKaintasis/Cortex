@@ -405,14 +405,15 @@ Copy-Item `
 python -m data_retrieval evaluate-mem0-experience `
   --db .\artifacts\longmemeval-dev6-entity-experiment-copy.sqlite3 `
   --feedback-selection all_relevant `
-  --learning-policy atom_co_used `
+  --learning-policy query_evidence `
   --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
   --embedding-profile harrier-retrieval-v1
 ```
 
-Run it only on a copy because feedback intentionally mutates learned weights. The first policy
-ablation retained the retrieval gain with 88.2% fewer transitions by disabling all-pairs tag
-updates; see
+Run it only on a copy because feedback intentionally mutates learned weights. The fixture also
+evaluates never-rewarded paraphrases. The current query-to-selected-evidence candidate matches
+the all-pairs final quality with 48.8% fewer transitions, but transient held-out regression still
+blocks promotion; see
 [the experience benchmark](docs/MEM0-EXPERIENCE-BENCHMARK.md).
 
 Use a small cap first. The Mem0 configuration chooses its LLM, embedder, vector store, and

@@ -150,6 +150,24 @@ class LongMemEvalTests(unittest.TestCase):
         self.assertEqual(report.case_count, 1)
         self.assertEqual(report.cases[0]["question_id"], "question-2")
 
+    def test_pipeline_can_evaluate_an_unseen_query_for_existing_labels(self) -> None:
+        case = _case()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "query-override.json"
+            path.write_text(json.dumps([case]), encoding="utf-8")
+            report = LongMemEvalPipelineRunner(InMemoryRepository()).run(
+                dataset_path=path,
+                dataset_id="query-override-test",
+                query_text_by_question={"question-1": "What happened when I moved to Athens?"},
+                top_k=5,
+            )
+
+        self.assertEqual(
+            report.cases[0]["query_text"],
+            "What happened when I moved to Athens?",
+        )
+        self.assertEqual(report.turn_hit_at_k, 1.0)
+
     def test_streams_cases_and_preserves_session_structure_without_label_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "oracle.json"

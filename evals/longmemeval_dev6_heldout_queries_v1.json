@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "suite_id": "longmemeval-dev6-heldout-paraphrases-v1",
+  "description": "Unseen wording for the six development histories; never used as feedback.",
+  "queries": [
+    {
+      "question_id": "gpt4_2655b836",
+      "query": "Following the initial service of my new vehicle, what problem showed up first?",
+      "query_tags": [
+        "car maintenance",
+        "car service experience",
+        "service inquiry"
+      ]
+    },
+    {
+      "question_id": "6d550036",
+      "query": "What is the total number of projects for which I have been the lead, including ongoing ones?",
+      "query_tags": [
+        "academic project",
+        "business metrics"
+      ]
+    },
+    {
+      "question_id": "6aeb4375",
+      "query": "Counting them all, how many local Korean restaurants have I visited?",
+      "query_tags": [
+        "korean restaurants",
+        "llm limitations",
+        "restaurant search"
+      ]
+    },
+    {
+      "question_id": "75832dbd",
+      "query": "Which up-to-date papers or conferences fit my research interests?",
+      "query_tags": [
+        "medical imaging",
+        "research query",
+        "research recommendation"
+      ]
+    },
+    {
+      "question_id": "c4f10528",
+      "query": "Which Cihampelas Walk place in Bandung had the Nasi Goreng I liked?",
+      "query_tags": [
+        "bandung",
+        "cihampelas walk",
+        "miss bees nasi goreng",
+        "restaurants",
+        "signature dishes",
+        "travel planning"
+      ]
+    },
+    {
+      "question_id": "e47becba",
+      "query": "Which field was my university degree in?",
+      "query_tags": [
+        "personal information"
+      ]
+    }
+  ]
+}

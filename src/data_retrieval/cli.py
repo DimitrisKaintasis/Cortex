@@ -1494,6 +1494,16 @@ def _evaluate_mem0_experience(
         dataset_id = str(fixture["dataset_id"])
         namespace_prefix = str(fixture["namespace_prefix"])
         query_feature_path = Path(str(fixture["query_feature_path"]))
+        holdout_query_path = (
+            Path(str(fixture["holdout_query_path"]))
+            if fixture.get("holdout_query_path")
+            else None
+        )
+        holdout_query_feature_path = (
+            Path(str(fixture["holdout_query_feature_path"]))
+            if fixture.get("holdout_query_feature_path")
+            else None
+        )
         raw_question_ids = fixture["question_ids"]
         if not isinstance(raw_question_ids, list):
             raise TypeError("question_ids must be an array")
@@ -1511,6 +1521,8 @@ def _evaluate_mem0_experience(
         parser.error(f"LongMemEval dataset does not exist: {dataset_path}")
     if not query_feature_path.is_file():
         parser.error(f"query feature cache does not exist: {query_feature_path}")
+    if holdout_query_path is not None and not holdout_query_path.is_file():
+        parser.error(f"holdout query fixture does not exist: {holdout_query_path}")
     with _open_repository(args) as repository:
         report = Mem0ExperienceSuite(repository, embedder=_embedder(args)).run(
             suite_id=suite_id,
@@ -1521,6 +1533,8 @@ def _evaluate_mem0_experience(
             question_ids=question_ids,
             feedback_selection=args.feedback_selection,
             learning_policy=LEARNING_POLICY_PROFILES[args.learning_policy],
+            holdout_query_path=holdout_query_path,
+            holdout_query_feature_path=holdout_query_feature_path,
             usage_round_count=usage_rounds,
             top_k=top_k,
         )
@@ -1537,7 +1551,10 @@ def _evaluate_mem0_experience(
         "usage_round_count": report.usage_round_count,
         "mechanical_passed": report.mechanical_passed,
         "learning_signal_passed": report.learning_signal_passed,
+        "holdout_final_passed": report.holdout_final_passed,
+        "holdout_regression_free": report.holdout_regression_free,
         "metric_deltas": report.metric_deltas,
+        "holdout_metric_deltas": report.holdout_metric_deltas,
         "report": str(args.report),
         "database": _database_label(args),
         "passed": report.mechanical_passed,

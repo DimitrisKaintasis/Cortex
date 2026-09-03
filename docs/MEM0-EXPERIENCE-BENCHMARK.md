@@ -139,6 +139,41 @@ questions are repeated development questions, so the next iteration must isolate
 gain comes from atom-tag reinforcement, `CO_USED` links, or both, and then validate the winner on
 held-out query variations and negative/collateral cases.
 
+## Policy iterations 2–3 — channel isolation and held-out queries
+
+The next run isolated atom tags and `CO_USED`, then evaluated every policy on six unseen
+paraphrases. Feedback came only from the original questions. The paraphrases reused frozen
+semantic tags but had different text and independently embedded Harrier vectors, so this tests
+wording/vector transfer without adding tag-proposer variability.
+
+| Policy | Training hybrid MRR | Held-out recall | Held-out MRR | Held-out useful | Transitions |
+|---|---:|---:|---:|---:|---:|
+| Cold graph | 0.533 | 0.833 | 0.415 | 0.300 | 0 |
+| Atom tags only | 0.569 | 0.833 | 0.421 | 0.300 | 60 |
+| `CO_USED` only | 0.539 | 0.792 | 0.422 | 0.283 | 110 |
+| Atom tags + `CO_USED` | 0.575 | 0.792 | 0.428 | 0.283 | 170 |
+| All tag pairs | 0.575 | 0.875 | 0.428 | 0.300 | 1,445 |
+| Query tag ↔ selected-evidence tag | 0.575 | 0.875 | 0.428 | 0.300 | 740 |
+
+Atom tags mainly improve rank. `CO_USED` supplies the graph-only recall gain, but by itself it
+displaced one useful project-history turn from hybrid top 10. Tag relationships recovered an
+additional car-history turn. Updating only query-to-selected-evidence pairs matched every final
+all-pairs quality metric while reducing transitions and distinct changed edges by 48.8%.
+
+The final score hides instability: both the all-pairs and query-evidence policies fell from
+0.833 to 0.792 held-out recall during rounds three and four, then recovered to 0.875 in round
+five. The benchmark now reports separate final-held-out and every-round regression-free gates so
+this cannot be mistaken for monotonic learning.
+
+A deterministic negative test also confirms that an explicit correction exactly reverses the
+selected atom-tag, `CO_USED`, and query-evidence relation increments (within floating-point
+tolerance), leaves an unselected collateral atom unchanged, and preserves a valid weight ledger.
+
+The query-evidence policy is the current best quality/cost candidate, but the six-query sample
+and transient regression are too weak for production promotion. Next, cap or budget its
+per-feedback relation influence and validate on more paraphrases, independently generated query
+tags, negative distractors, and unrelated control queries.
+
 ## Reproduction artifacts
 
 - Fixture: `evals/mem0_experience_v1.json`
@@ -148,10 +183,13 @@ held-out query variations and negative/collateral cases.
 - All-relevant report: `data/results/longmemeval-dev6-mem0-experience-all-v1.json`
 - Atom + `CO_USED` report:
   `data/results/longmemeval-dev6-mem0-experience-atom-co-used-v1.json`
+- Held-out policy reports:
+  `data/results/longmemeval-dev6-mem0-experience-*-heldout-v1.json`
 - Cold snapshot: `artifacts/longmemeval-dev6-entity-cold-v1.sqlite3`
 - Used snapshots: `artifacts/longmemeval-dev6-entity-first-used-v1.sqlite3` and
   `artifacts/longmemeval-dev6-entity-all-used-v1.sqlite3`
 - Atom + `CO_USED` snapshot:
   `artifacts/longmemeval-dev6-entity-atom-co-used-v1.sqlite3`
+- Held-out policy snapshots: `artifacts/longmemeval-dev6-entity-*-heldout-v1.sqlite3`
 
 Runtime reports, databases, and Mem0 working stores are deliberately ignored by Git.

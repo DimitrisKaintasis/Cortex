@@ -142,6 +142,7 @@ class LongMemEvalPipelineRunner:
         benchmark_tag_min_confidence: float = 0.65,
         max_workers: int = 1,
         retrieval_channels: RetrievalChannels | None = None,
+        query_text_by_question: Mapping[str, str] | None = None,
         query_tags_by_question: Mapping[str, tuple[str, ...]] | None = None,
         query_vectors_by_question: Mapping[str, tuple[float, ...]] | None = None,
         progress: ProgressCallback | None = None,
@@ -193,6 +194,11 @@ class LongMemEvalPipelineRunner:
                 case,
                 top_k=top_k,
                 retrieval_channels=retrieval_channels,
+                query_text=(
+                    query_text_by_question.get(case.question_id, case.question)
+                    if query_text_by_question is not None
+                    else case.question
+                ),
                 query_tags=(
                     query_tags_by_question.get(case.question_id, ())
                     if query_tags_by_question is not None
@@ -310,6 +316,7 @@ class LongMemEvalPipelineRunner:
         *,
         top_k: int,
         retrieval_channels: RetrievalChannels | None = None,
+        query_text: str | None = None,
         query_tags: tuple[str, ...] = (),
         query_vector: tuple[float, ...] | None = None,
     ) -> dict[str, Any]:
@@ -320,9 +327,10 @@ class LongMemEvalPipelineRunner:
             channels=retrieval_channels,
         )
         started = time.perf_counter()
+        resolved_query = query_text if query_text is not None else case.question
         result = retrieval.retrieve(
             QueryPlan(
-                query=case.question,
+                query=resolved_query,
                 namespace=case.namespace,
                 query_tags=query_tags,
                 query_vector=query_vector,
@@ -403,6 +411,7 @@ class LongMemEvalPipelineRunner:
         return {
             "retrieval_id": result.retrieval_id,
             "question_id": case.question_id,
+            "query_text": resolved_query,
             "question_type": case.question_type,
             "evaluable": evaluable,
             "session_hit": bool(found_sessions) if evaluable else False,

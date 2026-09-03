@@ -58,7 +58,24 @@ class Mem0ExperienceSuiteTests(unittest.TestCase):
             root = Path(directory)
             dataset_path = root / "dataset.json"
             feature_path = root / "features.json"
+            holdout_query_path = root / "holdout-queries.json"
+            holdout_feature_path = root / "holdout-features.json"
             dataset_path.write_text(json.dumps(dataset), encoding="utf-8")
+            holdout_query_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "queries": [
+                            {
+                                "question_id": "question-1",
+                                "query": "Which two cities did I travel to?",
+                                "query_tags": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
             repository = InMemoryRepository()
             imported = LongMemEvalIngestService(repository).ingest_path(
                 path=dataset_path,
@@ -120,11 +137,18 @@ class Mem0ExperienceSuiteTests(unittest.TestCase):
                 question_ids=(case.question_id,),
                 feedback_selection="all_relevant",
                 learning_policy=ATOM_CO_USED_LEARNING_POLICY,
+                holdout_query_path=holdout_query_path,
+                holdout_query_feature_path=holdout_feature_path,
                 usage_round_count=1,
                 top_k=3,
             )
 
         self.assertEqual(len(report.snapshots), 2)
+        self.assertFalse(report.holdout_feature_cache_hit)
+        self.assertIsNotNone(report.holdout_metric_deltas)
+        self.assertIsInstance(report.holdout_final_passed, bool)
+        self.assertIsInstance(report.holdout_regression_free, bool)
+        self.assertIn("holdout_retrieval", report.snapshots[0])
         self.assertEqual(
             report.learning_policy["policy_id"],
             ATOM_CO_USED_LEARNING_POLICY.policy_id,

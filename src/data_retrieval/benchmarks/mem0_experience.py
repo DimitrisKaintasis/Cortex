@@ -109,11 +109,17 @@ class ExperienceReport:
     embedding_provider: str
     embedding_model: str
     query_feature_path: str
+    holdout_query_path: str | None
+    holdout_query_feature_path: str | None
+    holdout_feature_cache_hit: bool | None
     snapshots: tuple[dict[str, Any], ...]
     usage_rounds: tuple[ExperienceRound, ...]
     metric_deltas: dict[str, dict[str, float]]
+    holdout_metric_deltas: dict[str, dict[str, float]] | None
     mechanical_passed: bool
     learning_signal_passed: bool
+    holdout_final_passed: bool | None
+    holdout_regression_free: bool | None
     limitations: tuple[str, ...]
 
     def as_dict(self) -> dict[str, Any]:
@@ -143,6 +149,8 @@ class Mem0ExperienceSuite:
         question_ids: tuple[str, ...],
         feedback_selection: str,
         learning_policy: LearningPolicy = ALL_PAIRS_LEARNING_POLICY,
+        holdout_query_path: Path | None = None,
+        holdout_query_feature_path: Path | None = None,
         usage_round_count: int = 5,
         top_k: int = 10,
     ) -> ExperienceReport:
@@ -152,6 +160,8 @@ class Mem0ExperienceSuite:
             raise ValueError("usage_round_count must be positive")
         if top_k <= 0:
             raise ValueError("top_k must be positive")
+        if (holdout_query_path is None) != (holdout_query_feature_path is None):
+            raise ValueError("holdout query and feature paths must be supplied together")
         if (
             not suite_id.strip()
             or not question_ids
@@ -173,6 +183,20 @@ class Mem0ExperienceSuite:
             cases=imported.cases,
             embedder=self.embedder,
         )
+        holdout_features: dict[str, FrozenQueryFeatures] = {}
+        holdout_queries: dict[str, str] = {}
+        holdout_cache_hit: bool | None = None
+        if holdout_query_path is not None and holdout_query_feature_path is not None:
+            holdout_features, holdout_queries, holdout_cache_hit = (
+                _load_or_build_holdout_query_features(
+                    query_path=holdout_query_path,
+                    feature_path=holdout_query_feature_path,
+                    dataset_id=imported.dataset_id,
+                    dataset_hash=imported.dataset_hash,
+                    cases=imported.cases,
+                    embedder=self.embedder,
+                )
+            )
         namespaces = tuple(case.namespace for case in imported.cases)
         proposal_count = sum(
             len(
@@ -195,6 +219,8 @@ class Mem0ExperienceSuite:
             dataset_id=dataset_id,
             namespace_prefix=namespace_prefix,
             features=features,
+            holdout_features=holdout_features,
+            holdout_queries=holdout_queries,
             top_k=top_k,
         )
         snapshots.append(current)
@@ -215,6 +241,8 @@ class Mem0ExperienceSuite:
                 dataset_id=dataset_id,
                 namespace_prefix=namespace_prefix,
                 features=features,
+                holdout_features=holdout_features,
+                holdout_queries=holdout_queries,
                 top_k=top_k,
             )
             snapshots.append(current)
@@ -224,6 +252,26 @@ class Mem0ExperienceSuite:
             for namespace in namespaces
         )
         deltas = _metric_deltas(snapshots[0], snapshots[-1])
+        holdout_deltas = (
+            _metric_deltas(
+                snapshots[0],
+                snapshots[-1],
+                retrieval_key="holdout_retrieval",
+            )
+            if holdout_features
+            else None
+        )
+        holdout_final_passed = (
+            holdout_deltas["hybrid_graph"]["turn_mean_reciprocal_rank"] > 0.0
+            and holdout_deltas["hybrid_graph"]["turn_recall_at_k"] >= 0.0
+            and holdout_deltas["hybrid_graph"]["direct_turn_recall_at_k"] >= 0.0
+            and holdout_deltas["hybrid_graph"]["useful_context_fraction"] >= 0.0
+            if holdout_deltas is not None
+            else None
+        )
+        holdout_regression_free = (
+            _holdout_regression_free(snapshots) if holdout_features else None
+        )
         hybrid_delta = deltas["hybrid_graph"]
         mechanical_passed = (
             all(audit.passed for audit in audits)
@@ -237,7 +285,7 @@ class Mem0ExperienceSuite:
             and hybrid_delta["useful_context_fraction"] >= 0.0
         )
         return ExperienceReport(
-            schema_version=2,
+            schema_version=3,
             suite_id=suite_id,
             dataset_id=imported.dataset_id,
             dataset_hash=imported.dataset_hash,
@@ -249,15 +297,25 @@ class Mem0ExperienceSuite:
             embedding_provider=self.embedder.provider,
             embedding_model=self.embedder.model,
             query_feature_path=str(query_feature_path),
+            holdout_query_path=str(holdout_query_path) if holdout_query_path else None,
+            holdout_query_feature_path=(
+                str(holdout_query_feature_path) if holdout_query_feature_path else None
+            ),
+            holdout_feature_cache_hit=holdout_cache_hit,
             snapshots=tuple(snapshots),
             usage_rounds=tuple(rounds),
             metric_deltas=deltas,
+            holdout_metric_deltas=holdout_deltas,
             mechanical_passed=mechanical_passed,
             learning_signal_passed=learning_signal_passed,
+            holdout_final_passed=holdout_final_passed,
+            holdout_regression_free=holdout_regression_free,
             limitations=(
                 "This is supervised adaptation using public benchmark evidence labels.",
                 "The same development questions are reused across rounds; this is not "
                 "held-out generalization.",
+                "Held-out paraphrases reuse frozen semantic tags to isolate wording and vector "
+                "transfer; they do not test tag-proposer variation.",
                 "Positive feedback measures useful-evidence reinforcement, not answer generation.",
                 "Mem0 relationship proposals remain factual inputs; feedback updates learned "
                 "behavioral edges.",
@@ -273,6 +331,8 @@ class Mem0ExperienceSuite:
         dataset_id: str,
         namespace_prefix: str,
         features: dict[str, FrozenQueryFeatures],
+        holdout_features: dict[str, FrozenQueryFeatures],
+        holdout_queries: dict[str, str],
         top_k: int,
     ) -> dict[str, Any]:
         query_tags = {key: value.query_tags for key, value in features.items()}
@@ -297,11 +357,41 @@ class Mem0ExperienceSuite:
                 "description": profile.description,
                 **payload,
             }
-        return {
+        snapshot = {
             "name": name,
             "graph": self._graph_stats(tuple(case.namespace for case in imported)),
             "retrieval": retrieval,
         }
+        if holdout_features:
+            holdout_retrieval: dict[str, Any] = {}
+            holdout_tags = {
+                key: value.query_tags for key, value in holdout_features.items()
+            }
+            holdout_vectors = {
+                key: value.query_vector for key, value in holdout_features.items()
+            }
+            for profile in EXPERIENCE_PROFILES:
+                report = pipeline.run(
+                    dataset_path=dataset_path,
+                    dataset_id=dataset_id,
+                    namespace_prefix=namespace_prefix,
+                    question_ids=question_ids,
+                    top_k=top_k,
+                    retrieval_channels=profile.channels,
+                    query_text_by_question=holdout_queries,
+                    query_tags_by_question=holdout_tags,
+                    query_vectors_by_question=holdout_vectors,
+                )
+                payload = report.as_dict()
+                payload["experience_metrics"] = self._experience_metrics(
+                    imported, payload["cases"]
+                )
+                holdout_retrieval[profile.name] = {
+                    "description": profile.description,
+                    **payload,
+                }
+            snapshot["holdout_retrieval"] = holdout_retrieval
+        return snapshot
 
     def _apply_round(
         self,
@@ -553,7 +643,118 @@ def _load_query_features(
     return features
 
 
-def _metric_deltas(first: dict[str, Any], last: dict[str, Any]) -> dict[str, dict[str, float]]:
+def _load_or_build_holdout_query_features(
+    *,
+    query_path: Path,
+    feature_path: Path,
+    dataset_id: str,
+    dataset_hash: str,
+    cases: tuple[ImportedLongMemEvalCase, ...],
+    embedder: Embedder,
+) -> tuple[dict[str, FrozenQueryFeatures], dict[str, str], bool]:
+    payload = json.loads(query_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ValueError("holdout query fixture must be a schema-version 1 JSON object")
+    raw_queries = payload.get("queries")
+    if not isinstance(raw_queries, list):
+        raise ValueError("holdout query fixture queries must be an array")
+    raw_by_id = {
+        str(item.get("question_id")): item for item in raw_queries if isinstance(item, dict)
+    }
+    expected_ids = {case.question_id for case in cases}
+    if set(raw_by_id) != expected_ids:
+        raise ValueError("holdout query fixture must contain exactly the selected question IDs")
+
+    query_texts: dict[str, str] = {}
+    query_tags: dict[str, tuple[str, ...]] = {}
+    for case in cases:
+        raw = raw_by_id[case.question_id]
+        query = str(raw.get("query", "")).strip()
+        raw_tags = raw.get("query_tags")
+        if not query or not isinstance(raw_tags, list):
+            raise ValueError(f"invalid holdout query: {case.question_id}")
+        query_texts[case.question_id] = query
+        query_tags[case.question_id] = tuple(str(value) for value in raw_tags)
+
+    identity = {
+        "schema_version": 1,
+        "dataset_id": dataset_id,
+        "dataset_hash": dataset_hash,
+        "query_set_hash": content_hash(query_path.read_text(encoding="utf-8")),
+        "embedding_provider": embedder.provider,
+        "embedding_model": embedder.model,
+    }
+    if feature_path.is_file():
+        cached = json.loads(feature_path.read_text(encoding="utf-8"))
+        if isinstance(cached, dict) and all(
+            cached.get(key) == value for key, value in identity.items()
+        ):
+            raw_cases = cached.get("cases")
+            if isinstance(raw_cases, list):
+                cached_by_id = {
+                    str(item.get("question_id")): item
+                    for item in raw_cases
+                    if isinstance(item, dict)
+                }
+                if set(cached_by_id) == expected_ids:
+                    features: dict[str, FrozenQueryFeatures] = {}
+                    for case in cases:
+                        raw = cached_by_id[case.question_id]
+                        feature = FrozenQueryFeatures(
+                            question_id=case.question_id,
+                            namespace=str(raw["namespace"]),
+                            question_hash=str(raw["question_hash"]),
+                            query_tags=tuple(str(value) for value in raw["query_tags"]),
+                            query_vector=tuple(float(value) for value in raw["query_vector"]),
+                            warnings=tuple(str(value) for value in raw.get("warnings", ())),
+                        )
+                        if (
+                            feature.namespace != case.namespace
+                            or feature.question_hash
+                            != content_hash(query_texts[case.question_id])
+                            or feature.query_tags != query_tags[case.question_id]
+                            or not feature.query_vector
+                        ):
+                            break
+                        features[case.question_id] = feature
+                    else:
+                        return features, query_texts, True
+
+    features = {
+        case.question_id: FrozenQueryFeatures(
+            question_id=case.question_id,
+            namespace=case.namespace,
+            question_hash=content_hash(query_texts[case.question_id]),
+            query_tags=query_tags[case.question_id],
+            query_vector=embedder.embed_query(query_texts[case.question_id]),
+        )
+        for case in cases
+    }
+    feature_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = feature_path.with_suffix(f"{feature_path.suffix}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                **identity,
+                "cases": [features[case.question_id].as_dict() for case in cases],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    temporary.replace(feature_path)
+    return features, query_texts, False
+
+
+def _metric_deltas(
+    first: dict[str, Any],
+    last: dict[str, Any],
+    *,
+    retrieval_key: str = "retrieval",
+) -> dict[str, dict[str, float]]:
     metrics = (
         "turn_recall_at_k",
         "turn_mean_reciprocal_rank",
@@ -563,8 +764,8 @@ def _metric_deltas(first: dict[str, Any], last: dict[str, Any]) -> dict[str, dic
     deltas = {
         profile.name: {
             metric: round(
-                float(last["retrieval"][profile.name][metric])
-                - float(first["retrieval"][profile.name][metric]),
+                float(last[retrieval_key][profile.name][metric])
+                - float(first[retrieval_key][profile.name][metric]),
                 12,
             )
             for metric in metrics
@@ -573,10 +774,32 @@ def _metric_deltas(first: dict[str, Any], last: dict[str, Any]) -> dict[str, dic
     }
     for profile in EXPERIENCE_PROFILES:
         deltas[profile.name]["useful_context_fraction"] = round(
-            float(last["retrieval"][profile.name]["experience_metrics"]["useful_context_fraction"])
+            float(last[retrieval_key][profile.name]["experience_metrics"]["useful_context_fraction"])
             - float(
-                first["retrieval"][profile.name]["experience_metrics"]["useful_context_fraction"]
+                first[retrieval_key][profile.name]["experience_metrics"]["useful_context_fraction"]
             ),
             12,
         )
     return deltas
+
+
+def _holdout_regression_free(snapshots: list[dict[str, Any]]) -> bool:
+    cold = snapshots[0]["holdout_retrieval"]["hybrid_graph"]
+    metrics = (
+        ("turn_recall_at_k", cold["turn_recall_at_k"]),
+        ("turn_mean_reciprocal_rank", cold["turn_mean_reciprocal_rank"]),
+        (
+            "useful_context_fraction",
+            cold["experience_metrics"]["useful_context_fraction"],
+        ),
+    )
+    return all(
+        (
+            snapshot["holdout_retrieval"]["hybrid_graph"][metric]
+            if metric != "useful_context_fraction"
+            else snapshot["holdout_retrieval"]["hybrid_graph"]["experience_metrics"][metric]
+        )
+        >= baseline
+        for snapshot in snapshots[1:]
+        for metric, baseline in metrics
+    )
