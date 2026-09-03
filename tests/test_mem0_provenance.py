@@ -24,8 +24,6 @@ class _FakeLlm:
                                 "relationship": "works at",
                                 "destination": "OpenAI",
                                 "evidence_source_ids": ["atom-1"],
-                                "source_evidence_source_ids": ["atom-1"],
-                                "destination_evidence_source_ids": ["atom-1"],
                             }
                         ]
                     },

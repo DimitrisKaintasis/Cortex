@@ -1,0 +1,3 @@
+Alice leads Project Helios and approved PostgreSQL as its durable database.
+
+OpenAI provides the inference service used by Project Helios, while the Mac Mini runs its overnight evaluation jobs.

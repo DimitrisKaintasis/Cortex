@@ -1,0 +1,34 @@
+{
+  "vector_store": {
+    "provider": "qdrant",
+    "config": {
+      "collection_name": "data_retrieval_mem0_entity_smoke_v1",
+      "path": "artifacts/mem0-entity-smoke-qdrant",
+      "on_disk": true,
+      "embedding_model_dims": 1024
+    }
+  },
+  "graph_store": {
+    "provider": "kuzu",
+    "config": {
+      "db": "artifacts/mem0-entity-smoke-kuzu"
+    }
+  },
+  "history_db_path": "artifacts/mem0-entity-smoke-history.sqlite3",
+  "llm": {
+    "provider": "ollama",
+    "config": {
+      "model": "gemma4:e2b-mlx",
+      "temperature": 0.1,
+      "ollama_base_url": "http://127.0.0.1:11435"
+    }
+  },
+  "embedder": {
+    "provider": "ollama",
+    "config": {
+      "model": "qwen3-embedding:0.6b",
+      "embedding_dims": 1024,
+      "ollama_base_url": "http://127.0.0.1:11435"
+    }
+  }
+}

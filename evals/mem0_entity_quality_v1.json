@@ -1,0 +1,220 @@
+{
+  "suite_id": "mem0-entity-quality-v1",
+  "thresholds": {
+    "entity_precision": 0.9,
+    "entity_recall": 0.9,
+    "relationship_endpoint_precision": 0.9,
+    "relationship_endpoint_recall": 0.9,
+    "relationship_direction_accuracy": 0.95,
+    "predicate_fidelity": 0.9,
+    "evidence_precision": 0.95,
+    "evidence_recall": 0.95,
+    "maximum_quarantine_rate": 0.05,
+    "maximum_empty_output_rate": 0.1
+  },
+  "cases": [
+    {
+      "case_id": "person-leads-project",
+      "atoms": [
+        {
+          "source_id": "person-leads-project:a1",
+          "content": "Alice leads Project Helios."
+        }
+      ],
+      "expected_entities": ["Alice", "Project Helios"],
+      "expected_relationships": [
+        {
+          "source": "Alice",
+          "target": "Project Helios",
+          "accepted_predicates": ["leads"],
+          "evidence_source_ids": ["person-leads-project:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "organization-provides-service",
+      "atoms": [
+        {
+          "source_id": "organization-provides-service:a1",
+          "content": "OpenAI provides the inference service used by Project Helios."
+        }
+      ],
+      "expected_entities": ["OpenAI", "inference service", "Project Helios"],
+      "expected_relationships": [
+        {
+          "source": "OpenAI",
+          "target": "inference service",
+          "accepted_predicates": ["provides"],
+          "evidence_source_ids": ["organization-provides-service:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "machine-runs-jobs-for-project",
+      "atoms": [
+        {
+          "source_id": "machine-runs-jobs-for-project:a1",
+          "content": "The Mac Mini runs overnight evaluation jobs for Project Helios."
+        }
+      ],
+      "expected_entities": ["Mac Mini", "Project Helios"],
+      "expected_relationships": [
+        {
+          "source": "Mac Mini",
+          "target": "Project Helios",
+          "accepted_predicates": ["runs_evaluation_jobs_for", "runs_jobs_for"],
+          "evidence_source_ids": ["machine-runs-jobs-for-project:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "database-stores-records",
+      "atoms": [
+        {
+          "source_id": "database-stores-records:a1",
+          "content": "PostgreSQL stores the canonical Cortex records."
+        }
+      ],
+      "expected_entities": ["PostgreSQL", "Cortex records"],
+      "expected_relationships": [
+        {
+          "source": "PostgreSQL",
+          "target": "Cortex records",
+          "accepted_predicates": ["stores"],
+          "evidence_source_ids": ["database-stores-records:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "person-founded-organization",
+      "atoms": [
+        {
+          "source_id": "person-founded-organization:a1",
+          "content": "Mira founded Acme Labs."
+        }
+      ],
+      "expected_entities": ["Mira", "Acme Labs"],
+      "expected_relationships": [
+        {
+          "source": "Mira",
+          "target": "Acme Labs",
+          "accepted_predicates": ["founded"],
+          "evidence_source_ids": ["person-founded-organization:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "service-replaced-service",
+      "atoms": [
+        {
+          "source_id": "service-replaced-service:a1",
+          "content": "Atlas replaced Nimbus as the search backend."
+        }
+      ],
+      "expected_entities": ["Atlas", "Nimbus"],
+      "expected_relationships": [
+        {
+          "source": "Atlas",
+          "target": "Nimbus",
+          "accepted_predicates": ["replaced"],
+          "evidence_source_ids": ["service-replaced-service:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "project-depends-on-database",
+      "atoms": [
+        {
+          "source_id": "project-depends-on-database:a1",
+          "content": "Orion depends on Redis for caching."
+        }
+      ],
+      "expected_entities": ["Orion", "Redis"],
+      "expected_relationships": [
+        {
+          "source": "Orion",
+          "target": "Redis",
+          "accepted_predicates": [
+            "depends_on",
+            "depends_on_for_caching",
+            "uses_for_caching"
+          ],
+          "evidence_source_ids": ["project-depends-on-database:a1"]
+        }
+      ]
+    },
+    {
+      "case_id": "two-independent-evidence-atoms",
+      "atoms": [
+        {
+          "source_id": "two-independent-evidence-atoms:a1",
+          "content": "Priya works at Northstar Labs."
+        },
+        {
+          "source_id": "two-independent-evidence-atoms:a2",
+          "content": "Northstar Labs is based in Athens."
+        }
+      ],
+      "expected_entities": ["Priya", "Northstar Labs", "Athens"],
+      "expected_relationships": [
+        {
+          "source": "Priya",
+          "target": "Northstar Labs",
+          "accepted_predicates": ["works_at"],
+          "evidence_source_ids": ["two-independent-evidence-atoms:a1"]
+        },
+        {
+          "source": "Northstar Labs",
+          "target": "Athens",
+          "accepted_predicates": ["based_in", "is_based_in"],
+          "evidence_source_ids": ["two-independent-evidence-atoms:a2"]
+        }
+      ]
+    },
+    {
+      "case_id": "cross-atom-pronoun",
+      "atoms": [
+        {
+          "source_id": "cross-atom-pronoun:a1",
+          "content": "Leo maintains Atlas."
+        },
+        {
+          "source_id": "cross-atom-pronoun:a2",
+          "content": "He deployed Atlas to the Mac Mini."
+        }
+      ],
+      "expected_entities": ["Leo", "Atlas", "Mac Mini"],
+      "expected_relationships": [
+        {
+          "source": "Leo",
+          "target": "Atlas",
+          "accepted_predicates": ["maintains"],
+          "evidence_source_ids": ["cross-atom-pronoun:a1"]
+        },
+        {
+          "source": "Leo",
+          "target": "Atlas",
+          "accepted_predicates": ["deployed"],
+          "evidence_source_ids": ["cross-atom-pronoun:a2"]
+        },
+        {
+          "source": "Atlas",
+          "target": "Mac Mini",
+          "accepted_predicates": ["deployed_to"],
+          "evidence_source_ids": ["cross-atom-pronoun:a2"]
+        }
+      ]
+    },
+    {
+      "case_id": "no-explicit-entity-relation",
+      "atoms": [
+        {
+          "source_id": "no-explicit-entity-relation:a1",
+          "content": "Everything finished successfully."
+        }
+      ],
+      "expected_entities": [],
+      "expected_relationships": []
+    }
+  ]
+}

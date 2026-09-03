@@ -126,12 +126,6 @@ class Mem0ProvenanceAdapter:
                             "evidence_source_ids": _clean_ids(
                                 relation.get("evidence_source_ids"), allowed
                             ),
-                            "source_evidence_source_ids": _clean_ids(
-                                relation.get("source_evidence_source_ids"), allowed
-                            ),
-                            "destination_evidence_source_ids": _clean_ids(
-                                relation.get("destination_evidence_source_ids"), allowed
-                            ),
                             "provenance_valid": _provenance_valid(relation, allowed),
                             "provenance_schema": PROVENANCE_SCHEMA_VERSION,
                         }
@@ -177,9 +171,8 @@ class Mem0ProvenanceAdapter:
             )
         system_content += (
             "\n\nEvery text block begins with an EVIDENCE_SOURCE_ID marker. For each "
-            "relationship, copy only exact marker IDs into evidence_source_ids; "
-            "also identify the blocks that mention the source endpoint and the "
-            "destination endpoint. Never invent or transform an ID."
+            "relationship, copy only the exact marker IDs for the blocks that support "
+            "that relationship into evidence_source_ids. Never invent or transform an ID."
         )
         base_tool = (
             RELATIONS_STRUCT_TOOL
@@ -213,22 +206,15 @@ def _provenance_tool(base_tool: Mapping[str, Any]) -> dict[str, Any]:
         "Exact EVIDENCE_SOURCE_ID values copied from the marked input blocks; "
         "return at least one value and never invent IDs."
     )
-    for field_name in (
-        "evidence_source_ids",
-        "source_evidence_source_ids",
-        "destination_evidence_source_ids",
-    ):
-        properties[field_name] = {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "description": description,
-        }
+    properties["evidence_source_ids"] = {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1,
+        "description": description,
+    }
     item_schema["required"] = [
         *item_schema.get("required", ()),
         "evidence_source_ids",
-        "source_evidence_source_ids",
-        "destination_evidence_source_ids",
     ]
     return tool
 
@@ -244,10 +230,5 @@ def _clean_ids(value: Any, allowed: set[str]) -> list[str]:
 
 
 def _provenance_valid(item: Mapping[str, Any], allowed: set[str]) -> bool:
-    fields = (
-        "evidence_source_ids",
-        "source_evidence_source_ids",
-        "destination_evidence_source_ids",
-    )
-    values = tuple(_raw_ids(item.get(field)) for field in fields)
-    return all(value and set(value).issubset(allowed) for value in values)
+    values = _raw_ids(item.get("evidence_source_ids"))
+    return bool(values) and set(values).issubset(allowed)

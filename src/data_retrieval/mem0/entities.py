@@ -143,15 +143,10 @@ def normalize_mem0_response(
             continue
 
         relationship_support = _ids(item.get("evidence_source_ids"))
-        source_occurrences = _ids(item.get("source_evidence_source_ids"))
-        target_occurrences = _ids(item.get("destination_evidence_source_ids"))
-        declared = (*relationship_support, *source_occurrences, *target_occurrences)
         if (
             item.get("provenance_valid") is not True
             or not relationship_support
-            or not source_occurrences
-            or not target_occurrences
-            or any(atom_id not in source_atom_ids for atom_id in declared)
+            or any(atom_id not in source_atom_ids for atom_id in relationship_support)
         ):
             warnings.append("mem0_relationship_invalid_provenance")
             quarantined += 1
@@ -169,7 +164,7 @@ def normalize_mem0_response(
             entity_state,
             entity_id=source_id,
             name=_display_name(source_name),
-            support_atom_ids=source_occurrences,
+            support_atom_ids=relationship_support,
             entity_type=_optional_text(item, "source_type"),
             confidence=_confidence(item),
         )
@@ -177,7 +172,7 @@ def normalize_mem0_response(
             entity_state,
             entity_id=target_id,
             name=_display_name(target_name),
-            support_atom_ids=target_occurrences,
+            support_atom_ids=relationship_support,
             entity_type=_optional_text(item, "target_type", "destination_type"),
             confidence=_confidence(item),
         )

@@ -28,6 +28,10 @@ mac-remote-llmserver-ed25519.pub
 *.sqlite3
 *.sqlite3-*
 *.db
+/artifacts/mem0-entity-smoke-kuzu
+/artifacts/mem0-entity-smoke-qdrant/
+/artifacts/mem0-entity-quality-strong-kuzu
+/artifacts/mem0-entity-quality-strong-qdrant/
 
 # Editors and operating systems
 .idea/

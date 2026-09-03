@@ -24,7 +24,7 @@ would require ambiguous lexical, vector, or model-based alignment.
 - Do not edit the installed Mem0 package or fork its algorithms.
 - Wrap one Memory instance with an opt-in relationship-extraction extension. Entity extraction
   receives plain text; relationship extraction also receives opaque source-atom markers and a
-  tool schema requiring relationship and endpoint evidence IDs.
+  tool schema requiring exact relationship evidence IDs.
 - Strip provenance fields before Mem0 stores its normal graph triples.
 - Validate every returned evidence ID against the exact request. Quarantine relationships with
   missing, malformed, or invented provenance; never repair them through post-hoc matching.
@@ -42,8 +42,9 @@ would require ambiguous lexical, vector, or model-based alignment.
 ## Consequences
 
 - Mem0 keeps its tested core functionality and can still improve its own memory state.
-- Cortex gains exact entity lineage and useful graph traversal without turning names into global
-  concepts or manufacturing tag correlations.
+- Cortex gains exact relationship lineage and useful graph traversal without turning names into
+  global concepts or manufacturing tag correlations. Both endpoints link to the bounded source
+  atom set that supports the relationship.
 - The model performs provenance attribution in the existing relationship call, avoiding another
   model or embedding pass.
 - Invalid provenance can reduce imported graph recall, but it cannot silently contaminate the

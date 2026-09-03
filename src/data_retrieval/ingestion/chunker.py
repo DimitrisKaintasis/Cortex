@@ -83,13 +83,8 @@ class TextChunker:
 
     def _preferred_boundary(self, text: str, start: int, proposed_end: int) -> int:
         minimum = start + (self.max_chars // 2)
-        candidates = (
-            text.rfind("\n\n", minimum, proposed_end),
-            text.rfind(". ", minimum, proposed_end),
-            text.rfind("\n", minimum, proposed_end),
-            text.rfind(" ", minimum, proposed_end),
-        )
-        boundary = max(candidates)
-        if boundary < minimum:
-            return proposed_end
-        return boundary + 1
+        for separator in ("\n\n", ". ", "\n", " "):
+            boundary = text.rfind(separator, minimum, proposed_end)
+            if boundary >= minimum:
+                return boundary + 1
+        return proposed_end

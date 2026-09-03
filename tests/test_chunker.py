@@ -28,6 +28,23 @@ class TextChunkerTests(unittest.TestCase):
         for previous, current in zip(chunks, chunks[1:], strict=False):
             self.assertLess(current.char_start, previous.char_end)
 
+    def test_prefers_paragraph_boundary_over_later_space(self) -> None:
+        text = (
+            "Alice leads Project Helios.\n\n"
+            "OpenAI provides the inference service used by Project Helios.\n\n"
+            "The Mac Mini runs overnight evaluation jobs for Project Helios."
+        )
+
+        chunks = TextChunker(max_chars=100, overlap_chars=0).split(text)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(
+            chunks[0].text,
+            "Alice leads Project Helios.\n\n"
+            "OpenAI provides the inference service used by Project Helios.",
+        )
+        self.assertTrue(chunks[1].text.startswith("The Mac Mini"))
+
     def test_rejects_empty_text(self) -> None:
         with self.assertRaisesRegex(ValueError, "text cannot be empty"):
             TextChunker().split("   ")

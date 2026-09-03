@@ -39,6 +39,20 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.fixture.as_posix(), "evals/review_cascade_v1.json")
         self.assertEqual(args.report.as_posix(), "data/results/review-cascade-v1.json")
 
+    def test_mem0_entity_quality_gate_has_isolated_defaults(self) -> None:
+        args = build_parser().parse_args(
+            ["evaluate-mem0-entities", "--case-id", "person-leads-project"]
+        )
+
+        self.assertEqual(args.fixture.as_posix(), "evals/mem0_entity_quality_v1.json")
+        self.assertEqual(
+            args.mem0_config.as_posix(), "evals/mem0_entity_smoke_config.json"
+        )
+        self.assertEqual(
+            args.report.as_posix(), "data/results/mem0-entity-quality-v1.json"
+        )
+        self.assertEqual(args.case_ids, ["person-leads-project"])
+
     def test_repository_feature_observer_accepts_cached_embedding_identity(self) -> None:
         args = build_parser().parse_args(
             [

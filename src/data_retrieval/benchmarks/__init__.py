@@ -23,6 +23,16 @@ from data_retrieval.benchmarks.longmemeval_ablation import (
     LongMemEvalQueryFeatureCache,
     RetrievalProfile,
 )
+from data_retrieval.benchmarks.mem0_entity_quality import (
+    ExpectedRelationship,
+    Mem0EntityQualityCase,
+    Mem0EntityQualityReport,
+    Mem0EntityQualitySuite,
+    Mem0EntityQualityThresholds,
+    QualityAtom,
+    load_mem0_entity_quality_fixture,
+    score_mem0_entity_quality,
+)
 from data_retrieval.benchmarks.review_cascade import (
     CascadeScenarioResult,
     ReviewCascadeReport,
@@ -51,9 +61,17 @@ __all__ = [
     "LongMemEvalIngestService",
     "LongMemEvalAblationSuite",
     "LongMemEvalQueryFeatureCache",
+    "ExpectedRelationship",
+    "Mem0EntityQualityCase",
+    "Mem0EntityQualityReport",
+    "Mem0EntityQualitySuite",
+    "Mem0EntityQualityThresholds",
+    "QualityAtom",
     "PolicyVariantResult",
     "ReviewCascadeReport",
     "ReviewCascadeSuite",
     "RetrievalProfile",
     "iter_longmemeval_cases",
+    "load_mem0_entity_quality_fixture",
+    "score_mem0_entity_quality",
 ]

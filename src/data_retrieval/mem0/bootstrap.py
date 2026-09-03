@@ -14,6 +14,7 @@ from data_retrieval.mem0.entities import (
     Mem0ProcessResult,
     normalize_mem0_response,
 )
+from data_retrieval.mem0.ollama_compat import configure_ollama_llm
 from data_retrieval.mem0.provenance import Mem0ProvenanceAdapter
 from data_retrieval.storage.repository import Repository
 
@@ -55,27 +56,9 @@ class Mem0PythonProcessor:
                 "Mem0 entity ingestion requires graph_store configuration; "
                 "configure a graph backend supported by the installed Mem0 version"
             )
-        self._disable_ollama_thinking(effective_config)
+        configure_ollama_llm(self._memory.llm, enable_tools=False)
+        configure_ollama_llm(self._memory.graph.llm, enable_tools=True)
         self._provenance = Mem0ProvenanceAdapter(self._memory)
-
-    def _disable_ollama_thinking(self, config: Mapping[str, Any]) -> None:
-        llm = config.get("llm")
-        llm_mapping = llm if isinstance(llm, Mapping) else {}
-        if str(llm_mapping.get("provider", "")).casefold() != "ollama":
-            return
-        client = getattr(self._memory.llm, "client", None)
-        chat = getattr(client, "chat", None)
-        if not callable(chat):
-            return
-
-        def structured_chat(*args: Any, **kwargs: Any) -> Any:
-            # Mem0 expects short machine-readable JSON. Reasoning-capable Ollama
-            # models can otherwise exhaust num_predict in the hidden thinking
-            # channel and return an empty content string.
-            kwargs.setdefault("think", False)
-            return chat(*args, **kwargs)
-
-        client.chat = structured_chat
 
     @staticmethod
     def _profile_id(config: Mapping[str, Any]) -> str:

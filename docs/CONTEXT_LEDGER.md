@@ -150,6 +150,17 @@ These may reference atoms but must not replace atom-to-atom associative weights.
   becomes the next canonical repair only if the collective experiment reaches a proceed
   decision.
 
+## Mem0 provenance quality checkpoint — 2026-09-03
+
+- The instance-local Ollama compatibility shim restores Mem0 1.0.1 tool forwarding without
+  changing Mem0 prompts, graph algorithms, or installed package files.
+- `gemma4:e2b-mlx` is structurally compatible and exact at copying evidence IDs, but its first
+  ten-case labeled run did not meet semantic relationship precision/recall promotion thresholds.
+- `gemma4:12b-mlx` cannot serve as the local expensive tier: clean, bounded trials failed with
+  MLX compute/Metal out-of-memory errors on the Mac Mini.
+- Mem0 entity output therefore remains proposal-only until a selective reviewer passes the
+  checked-in quality gate. Canonical retrieval remains independent of Mem0/Kuzu/Ollama.
+
 ## Superseded or rejected
 
 - Neo4j as a required graph database: PostgreSQL adjacency tables and recursive queries keep one

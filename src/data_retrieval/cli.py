@@ -17,6 +17,7 @@ from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuit
 from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
 from data_retrieval.benchmarks.longmemeval_ablation import LongMemEvalAblationSuite
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
+from data_retrieval.benchmarks.mem0_entity_quality import Mem0EntityQualitySuite
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
 from data_retrieval.domain.models import TagCandidateState
@@ -478,6 +479,31 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/results/review-cascade-v1.json"),
     )
+    mem0_quality = commands.add_parser(
+        "evaluate-mem0-entities",
+        help="run the live labeled Mem0 entity/provenance quality gate",
+    )
+    mem0_quality.add_argument(
+        "--fixture",
+        type=Path,
+        default=Path("evals/mem0_entity_quality_v1.json"),
+    )
+    mem0_quality.add_argument(
+        "--mem0-config",
+        type=Path,
+        default=Path("evals/mem0_entity_smoke_config.json"),
+    )
+    mem0_quality.add_argument(
+        "--case-id",
+        action="append",
+        dest="case_ids",
+        help="run only one labeled case; repeat to select several cases",
+    )
+    mem0_quality.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/mem0-entity-quality-v1.json"),
+    )
     repository_features = commands.add_parser(
         "observe-repository-features",
         help="run payload-free collective triage without feature-path mutations",
@@ -544,6 +570,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _evaluate_collective_transfer(args, parser)
         elif args.command == "evaluate-review-cascade":
             output = _evaluate_review_cascade(args, parser)
+        elif args.command == "evaluate-mem0-entities":
+            output = _evaluate_mem0_entities(args, parser)
         else:
             output = _observe_repository_features(args, parser)
     except (
@@ -563,6 +591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evaluate-capabilities",
         "evaluate-collective-transfer",
         "evaluate-review-cascade",
+        "evaluate-mem0-entities",
     } and output["passed"] is False:
         return 1
     return 0
@@ -1340,6 +1369,29 @@ def _evaluate_review_cascade(
     report = ReviewCascadeSuite().run(
         args.fixture,
         artifact_location=args.report,
+    )
+    payload = report.as_dict()
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _evaluate_mem0_entities(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.fixture.is_file():
+        parser.error(f"Mem0 entity quality fixture does not exist: {args.fixture}")
+    if not args.mem0_config.is_file():
+        parser.error(f"Mem0 config does not exist: {args.mem0_config}")
+    config = _load_json_object(args.mem0_config)
+    processor = Mem0PythonProcessor(config)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    report = Mem0EntityQualitySuite().run(
+        args.fixture,
+        processor,
+        case_ids=tuple(args.case_ids) if args.case_ids else None,
     )
     payload = report.as_dict()
     args.report.write_text(

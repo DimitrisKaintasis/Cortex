@@ -41,7 +41,7 @@ python -m pip install -e ".[mem0]"
 ```
 
 Create an uncommitted `config/mem0.local.json`. This example uses embedded Kuzu rather than a
-separate graph server. The current Mac-compatible model pair is `qwen3.5:4b` and the
+separate graph server. The tested Mac-compatible model pair is `gemma4:e2b-mlx` and the
 1024-dimensional `qwen3-embedding:0.6b`:
 
 ```json
@@ -65,7 +65,7 @@ separate graph server. The current Mac-compatible model pair is `qwen3.5:4b` and
   "llm": {
     "provider": "ollama",
     "config": {
-      "model": "qwen3.5:4b",
+      "model": "gemma4:e2b-mlx",
       "temperature": 0.1,
       "ollama_base_url": "http://127.0.0.1:11435"
     }
@@ -74,6 +74,7 @@ separate graph server. The current Mac-compatible model pair is `qwen3.5:4b` and
     "provider": "ollama",
     "config": {
       "model": "qwen3-embedding:0.6b",
+      "embedding_dims": 1024,
       "ollama_base_url": "http://127.0.0.1:11435"
     }
   }
@@ -90,14 +91,35 @@ only relationship extraction for calls made by this bootstrap:
 
 1. Mem0 entity extraction receives the original unmodified text.
 2. Relationship extraction additionally sees an opaque marker before each evidence atom.
-3. Its tool schema asks for relationship evidence and endpoint-specific evidence IDs.
+3. Its tool schema asks for the exact evidence IDs supporting each relationship.
 4. Those fields are removed before Mem0 stores its ordinary triples.
 5. Cortex accepts only IDs from the exact request; missing, invented, or malformed provenance is
    quarantined rather than guessed with lexical matching, vectors, or another model call.
 
 Calls outside the adapter continue through Mem0's original graph path. The adapter checks the
 private graph methods it relies on and fails clearly if an incompatible Mem0 version is installed;
-the optional dependency is therefore pinned to Mem0 major version 1.
+the optional dependency is therefore pinned to the tested Mem0 1.0.1 release. Upgrading Mem0 is a
+deliberate compatibility task that must rerun the deterministic tests and the live quality gate.
+
+Mem0 1.0.1 also accepts Ollama tool schemas without forwarding them and discards Ollama's native
+tool calls. The boundary contains a transport-only compatibility shim that forwards Mem0's
+unchanged entity/relationship tools and normalizes the native response. Non-tool Mem0 calls are
+unchanged. `qwen3.5:4b` failed the relationship schema in the real smoke test;
+`gemma4:e2b-mlx` passed it and is the current local proposal model for this stage. It failed the
+strict labeled semantic promotion gate, so its triples are not approved for unchecked bulk weight
+influence. `gemma4:12b-mlx` exceeded the Mac's available Metal memory and is not a local fallback.
+
+Run the isolated quality gate before changing a Mem0 model, prompt, or compatibility profile:
+
+```powershell
+python -m data_retrieval evaluate-mem0-entities `
+  --fixture .\evals\mem0_entity_quality_v1.json `
+  --mem0-config .\evals\mem0_entity_smoke_config.json
+```
+
+Use repeatable `--case-id` options to retest only failures with a candidate reviewer. The command
+writes a detailed report under `data/results/`, returns a non-zero status when a gate fails, and
+does not write to the canonical Cortex repository.
 
 ## Safe rollout
 

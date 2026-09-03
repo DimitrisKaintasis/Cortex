@@ -266,7 +266,8 @@ lineage.
 1. **Implemented:** add canonical evidence role and payload modality while retaining legacy kind
    compatibility.
 2. **Implemented:** project Mem0 entities as private, tagless atoms with role `derived`.
-3. **Implemented:** define and validate endpoint-level source lineage for Mem0 relationships.
+3. **Implemented:** define and validate relationship-level source lineage for Mem0 entities and
+   relationships.
 4. **Implemented:** add role/provenance-aware evidence packing.
 5. **Implemented (contract level):** build deterministic isolated capability fixtures and
    reports. Real-model quality gates remain required before pairwise testing.

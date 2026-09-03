@@ -1,0 +1,5 @@
+Alice leads Project Helios.
+
+OpenAI provides the inference service used by Project Helios.
+
+The Mac Mini runs overnight evaluation jobs for Project Helios.

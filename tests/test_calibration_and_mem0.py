@@ -68,8 +68,6 @@ class CalibrationAndMem0Tests(unittest.TestCase):
                         "relationship": "works_at",
                         "destination": "openai",
                         "evidence_source_ids": ["atom-1"],
-                        "source_evidence_source_ids": ["atom-1"],
-                        "destination_evidence_source_ids": ["atom-1"],
                         "provenance_valid": True,
                     }
                 ]
@@ -96,8 +94,6 @@ class CalibrationAndMem0Tests(unittest.TestCase):
                         "relationship": "works_at",
                         "destination": "openai",
                         "evidence_source_ids": ["invented"],
-                        "source_evidence_source_ids": ["invented"],
-                        "destination_evidence_source_ids": ["invented"],
                         "provenance_valid": False,
                     }
                 ]
