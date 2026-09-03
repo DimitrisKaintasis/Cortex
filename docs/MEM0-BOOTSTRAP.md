@@ -1,25 +1,48 @@
-# Mem0 bootstrap runbook
+# Mem0 entity-graph bootstrap runbook
+
+## What this integration does
+
+The canonical Cortex ingestion runs first and creates source evidence atoms and tags. The
+bootstrap then gives those same atom contents to an ordinary self-hosted Mem0 `Memory.add`
+call with inference enabled. Mem0 continues to maintain its normal fact memories and entity
+graph, but Cortex imports only a provenance-bearing entity projection:
+
+```text
+source evidence atoms
+    -> normal Mem0 inference
+         -> normal Mem0 facts and graph (rebuildable working state)
+         -> entity relationships carrying exact source-atom IDs
+    -> private entity-mention atoms in Cortex
+         -> SUPPORTED_BY -> source evidence atoms
+         -> MEM0_ENTITY_RELATION -> other entity-mention atoms
+```
+
+Entity atoms receive no copied tags. Retrieval reaches source evidence through bounded graph
+paths. This prevents a private proper name such as `Alice` from becoming a globally shared tag
+that could collide with another user's unrelated Alice.
 
 ## What runs where
 
-- **Laptop:** the Data Retrieval CLI, canonical PostgreSQL data, Mem0's working Qdrant/SQLite
-  files, completion signals, and imported memories.
-- **Mac Mini:** Ollama model inference reached through the existing SSH tunnel.
-- **Retrieval runtime:** reads only native PostgreSQL objects. It does not call Mem0.
+- **Laptop:** the Data Retrieval CLI, canonical PostgreSQL data, and rebuildable Mem0
+  Qdrant/SQLite/Kuzu working files.
+- **Mac Mini:** Ollama inference, reached through the existing SSH tunnel.
+- **Retrieval runtime:** reads only native PostgreSQL objects. It does not call Mem0, Kuzu,
+  Qdrant, Ollama, or the Mac.
 
-This keeps the Mac replaceable and avoids copying the canonical dataset onto it. Mem0's local
-working files are a rebuildable processor cache, not the source of truth.
+PostgreSQL remains the source of truth. Deleting Mem0's working files loses a cache and requires
+a rebuild; it does not lose the canonical evidence atoms already in PostgreSQL.
 
 ## Configure Mem0 on the laptop
 
-Install the optional adapter:
+Install the optional adapter and Mem0 graph dependencies:
 
 ```powershell
 python -m pip install -e ".[mem0]"
 ```
 
-Create an uncommitted `config/mem0.local.json`. The current Mac-compatible pair is
-`qwen3.5:4b` plus the 1024-dimensional `qwen3-embedding:0.6b`:
+Create an uncommitted `config/mem0.local.json`. This example uses embedded Kuzu rather than a
+separate graph server. The current Mac-compatible model pair is `qwen3.5:4b` and the
+1024-dimensional `qwen3-embedding:0.6b`:
 
 ```json
 {
@@ -30,6 +53,12 @@ Create an uncommitted `config/mem0.local.json`. The current Mac-compatible pair 
       "path": "data/mem0/qdrant",
       "on_disk": true,
       "embedding_model_dims": 1024
+    }
+  },
+  "graph_store": {
+    "provider": "kuzu",
+    "config": {
+      "db": "data/mem0/kuzu"
     }
   },
   "history_db_path": "data/mem0/history.sqlite3",
@@ -51,8 +80,24 @@ Create an uncommitted `config/mem0.local.json`. The current Mac-compatible pair 
 }
 ```
 
-The port `11435` is the laptop end of the SSH tunnel. Ollama itself remains on Mac port `11434`.
-Do not put passwords, SSH keys, or provider API keys in this file.
+Port `11435` is the laptop end of the SSH tunnel; Ollama remains on Mac port `11434`. Do not
+put SSH keys, passwords, or API keys in this file.
+
+## The deliberately small Mem0 extension
+
+The installed Mem0 package is not edited. Data Retrieval wraps one `Memory` instance and changes
+only relationship extraction for calls made by this bootstrap:
+
+1. Mem0 entity extraction receives the original unmodified text.
+2. Relationship extraction additionally sees an opaque marker before each evidence atom.
+3. Its tool schema asks for relationship evidence and endpoint-specific evidence IDs.
+4. Those fields are removed before Mem0 stores its ordinary triples.
+5. Cortex accepts only IDs from the exact request; missing, invented, or malformed provenance is
+   quarantined rather than guessed with lexical matching, vectors, or another model call.
+
+Calls outside the adapter continue through Mem0's original graph path. The adapter checks the
+private graph methods it relies on and fails clearly if an incompatible Mem0 version is installed;
+the optional dependency is therefore pinned to Mem0 major version 1.
 
 ## Safe rollout
 
@@ -66,61 +111,38 @@ python -m data_retrieval bootstrap-mem0 `
   --max-documents 1
 ```
 
-Inspect `memories_returned`, `memories_unaligned`, `memories_imported`,
-`source_lineage_links_created`, `mem0_relationship_signals_created`,
-`vector_corroboration_signals_created`, and `calibration_signals_created`. A fact uses processor-declared
-`support_atom_ids` when available; otherwise a deterministic bounded lexical alignment selects
-up to three source atoms. Only those atoms receive `SUPPORTED_BY` links. The complete input batch
-is retained separately as `batch_atom_ids` audit metadata. Run the same command again: it should
-report resumed batches and zero newly processed batches. Then raise the cap or select a namespace
-prefix.
+Inspect these counters:
 
-An empty Mem0 result is reported as an `empty_batch` and remains retryable because some local
-models turn malformed extraction output into an empty result. After inspecting a genuinely
-unmemorable batch, `--accept-empty` can mark it complete explicitly.
+- `mem0_records_returned`: normal Mem0 memories produced for diagnostics, not imported by this
+  pipeline;
+- `entities_returned` and `relationships_returned`: provenance-valid graph objects;
+- `relationships_quarantined`: graph relations Cortex rejected because provenance was unsafe;
+- `entities_imported`, `entity_support_links_created`, and
+  `entity_relationship_links_created`: native projection writes;
+- `calibration_signals_created`: immutable replay guards for the new native links.
 
-A non-empty fact that cannot be aligned in a multi-atom batch is reported as
-`memories_unaligned`, is not admitted as canonical derived evidence, and is marked processed for
-that processor/alignment profile. Changing either profile creates new completion identities and
-allows a later, stronger aligner to reconsider it.
+Run the same command again. It should report resumed batches and zero newly processed batches.
+Then raise the cap or select a namespace prefix.
 
-The bridge never sends arbitrary source metadata. This is particularly important for benchmark
-data: expected answers and evidence labels stay outside the Mem0 prompt. Mem0 output documents
-are also excluded from later runs, preventing recursive generation.
+An empty graph result remains retryable by default because a local model or parser failure can
+look like a legitimate empty result. After inspection, `--accept-empty` marks empty batches
+complete explicitly. A provider failure does not write a completion marker.
 
-The adapter supplies a Data Retrieval extraction policy by default. Unlike Mem0's personal-memory
-default, it retains objective claims, entity roles, events, decisions, state changes, and exact
-temporal or numeric details from both sides of a conversation. A config file can override it with
-`custom_fact_extraction_prompt`. The Mem0 version, LLM model, and extraction/update prompts are
-fingerprinted into completion markers, so changing extraction behavior safely reprocesses source
-batches instead of silently reusing stale calibration.
+Only content and bridge-owned metadata are sent to Mem0. Arbitrary source metadata—including
+benchmark answers and evidence labels—is not forwarded. Mem0-produced entity documents are
+excluded from later bootstrap runs, preventing recursive ingestion. Documents are processed in
+occurrence-time order. Each native namespace receives an isolated Mem0 `user_id`; a custom
+`--mem0-user-id` is allowed only with one exact namespace.
 
-For Ollama, the adapter disables the model's hidden thinking channel during Mem0 calls. These calls
-need short JSON rather than a chain of thought; with reasoning models such as Qwen 3.5, leaving the
-channel enabled can consume Mem0's output-token budget and produce an empty JSON response.
-The boundary also normalizes a common small-model variation where each extracted fact is wrapped
-as `{"fact": "..."}` instead of being returned as a plain string.
+## Retrieval behavior
 
-Documents are processed by occurrence time, not by their hashed IDs. All documents in one native
-namespace share one isolated Mem0 `user_id` and omit `run_id`, allowing a later session to be
-compared with earlier memories. Different namespaces cannot share this state; a custom
-`--mem0-user-id` is therefore allowed only with one exact `--namespace`.
+An entity-name lexical hit or source-evidence hit can enter this bounded path:
 
-## Failure behavior
+```text
+evidence -> entity mention -> related entity mention -> supporting evidence
+```
 
-If Ollama, the tunnel, Mem0, or PostgreSQL fails, the current batch is not marked complete. Empty
-output is also retryable by default. A later run retries that batch. Mem0 may have accepted the remote call before a
-laptop failure, but exact/semantic deduplication plus stable native calibration IDs prevent
-duplicate native evidence from repeatedly changing weights.
-
-## Joint initial relationship calibration
-
-Every admitted Mem0-derived fact proposes atom-to-tag priors and a `co_occurs` relationship for
-each pair of its accepted canonical tags. When `--embedding-model` is configured, the importer
-also embeds the fact, its tag labels, and any missing exact-support atoms. It stores vector
-agreement as a separate calibration signal and applies a smaller corroboration increment.
-
-The Mem0 proposal is structural evidence; the vector is supporting evidence from the same source.
-Consequently, a vector never creates a typed relationship on its own and its maximum configured
-step is half the Mem0 step. A vector-provider failure reports `calibration_warnings` and continues
-with Mem0-only calibration. Repeating an unchanged Mem0/embedding profile is idempotent.
+The path score multiplies support and relationship confidence, is normalized within the current
+candidate neighborhood, and is included in retrieval diagnostics. Entity atoms are navigation
+nodes; the useful source evidence is what the path is designed to surface. Usage-based weight
+learning remains a separate later capability.

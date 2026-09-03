@@ -1,7 +1,10 @@
 # LongMemEval graph calibration and controlled-use comparison
 
 Date: 2026-09-03  
-Status: six-case development experiment complete
+Status: historical six-case experiment; tested architecture rejected by ADR-0015
+
+> This report is preserved because it explains why the earlier fact/tag all-pairs bootstrap was
+> removed. Its metrics do not describe the current provenance-preserving entity-graph pipeline.
 
 ## Question
 
@@ -82,21 +85,13 @@ evidence remains available.
    one relevant item and penalized one irrelevant item per query created 880 transitions without
    changing any retrieval metric.
 
-## Recommended next change
+## Implemented architectural response
 
-Do not scale the current all-pairs proposal rule. Preserve joint Mem0/vector calibration, but make
-its evidence mass selective and bounded:
-
-1. Filter inherited tags against each Mem0 fact using fact-to-tag vector agreement and relative
-   ranking, rather than attaching every tag inherited from its support atom.
-2. Normalize a fact's total relationship contribution across its accepted tag pairs. A fact with
-   twelve tags must not carry sixty-six times the relationship mass of a two-tag fact.
-3. Keep vector evidence as corroboration; it may prune or reduce an unsupported Mem0 pair but may
-   not invent a typed relationship.
-4. Preserve a raw-source quota or collapse lineage-equivalent derived candidates during packing,
-   preventing correct Mem0 memories from crowding out all source evidence.
-5. When usage learning is revisited, make it path- and rank-aware and normalize its update budget.
-   The current broad pairwise update changes too many relationships per outcome.
+The all-pairs proposal rule was removed rather than tuned. Mem0 now emits provenance-bearing
+entity relationships. Cortex stores private, tagless entity-mention atoms, exact source support,
+and typed entity links; bounded retrieval traverses those links back to source evidence. Mem0
+facts remain in Mem0's own working state and vectors remain an independent retrieval channel.
+Usage learning is still separate and must be tested against this new graph before promotion.
 
 ## Artifacts
 

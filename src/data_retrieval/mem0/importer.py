@@ -23,8 +23,6 @@ from data_retrieval.storage.repository import Repository
 from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.proposals import TagProposer
 
-from .calibration import Mem0RelationshipCalibrationService
-
 MEM0_BATCH_LIMIT = 500
 MEM0_NEAR_DUPLICATE_THRESHOLD = 0.92
 MEM0_LEARNING_MULTIPLIER = 2.0
@@ -63,8 +61,6 @@ class Mem0ImportResult:
     conflict_links_created: int
     source_lineage_links_created: int
     calibration_signals_created: int
-    mem0_relationship_signals_created: int
-    vector_corroboration_signals_created: int
     calibration_warnings: tuple[str, ...] = ()
 
 
@@ -85,13 +81,10 @@ class Mem0ImportService:
         self.embedder = embedder
         self.tag_proposer = tag_proposer
         self.near_duplicate_threshold = near_duplicate_threshold
-        self.relationship_calibrator = Mem0RelationshipCalibrationService(
-            repository, embedder=embedder
-        )
 
     @property
     def profile_id(self) -> str:
-        return self.relationship_calibrator.profile_id
+        return "mem0-record-import-v3"
 
     def import_records(
         self,
@@ -109,8 +102,6 @@ class Mem0ImportService:
         semantic_duplicates: list[str] = []
         record_atom_ids: dict[str, tuple[str, ...]] = {}
         calibration_count = 0
-        mem0_relationship_signal_count = 0
-        vector_corroboration_signal_count = 0
         calibration_warnings: list[str] = []
         source_lineage_count = 0
         seen_record_ids: set[str] = set()
@@ -204,18 +195,6 @@ class Mem0ImportService:
             )
             source_lineage_count += created_links
             calibration_count += created_signals
-            calibrated = self.relationship_calibrator.calibrate_record(
-                namespace=namespace,
-                record_id=record.record_id,
-                output_atom_ids=atom_ids,
-                support_atom_ids=record.support_atom_ids,
-                support_confidence=record.support_confidence,
-            )
-            calibration_count += calibrated.signal_count
-            mem0_relationship_signal_count += calibrated.mem0_signal_count
-            vector_corroboration_signal_count += calibrated.vector_signal_count
-            calibration_warnings.extend(calibrated.warnings)
-
         conflict_count, conflict_signals = self._persist_conflicts(
             namespace=namespace,
             records=records,
@@ -229,8 +208,6 @@ class Mem0ImportService:
             conflict_links_created=conflict_count,
             source_lineage_links_created=source_lineage_count,
             calibration_signals_created=calibration_count + conflict_signals,
-            mem0_relationship_signals_created=mem0_relationship_signal_count,
-            vector_corroboration_signals_created=vector_corroboration_signal_count,
             calibration_warnings=tuple(dict.fromkeys(calibration_warnings)),
         )
 

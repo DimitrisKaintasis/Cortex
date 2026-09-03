@@ -308,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     mem0_bootstrap = commands.add_parser(
         "bootstrap-mem0",
-        help="distill existing atoms through self-hosted Mem0 and calibrate native evidence",
+        help="extract a provenance-linked Mem0 entity graph from existing atoms",
     )
     _add_storage_options(mem0_bootstrap)
     mem0_scope = mem0_bootstrap.add_mutually_exclusive_group(required=True)
@@ -336,13 +336,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="global safety cap across all selected namespaces",
     )
-    mem0_bootstrap.add_argument(
-        "--tag-model",
-        default=None,
-        help="optional Ollama model for tagging Mem0 outputs without inherited tags",
-    )
-    _add_embedding_options(mem0_bootstrap, required=False)
-
     calibration = commands.add_parser(
         "backfill-calibration",
         help="replay missing teacher priors and initial relationships without re-embedding",
@@ -979,8 +972,6 @@ def _import_mem0(
     conflict_links = 0
     source_lineage_links = 0
     calibration_signals = 0
-    mem0_relationship_signals = 0
-    vector_corroboration_signals = 0
     calibration_warnings: set[str] = set()
     with _open_repository(args) as repository:
         service = Mem0ImportService(
@@ -999,10 +990,6 @@ def _import_mem0(
             conflict_links += result.conflict_links_created
             source_lineage_links += result.source_lineage_links_created
             calibration_signals += result.calibration_signals_created
-            mem0_relationship_signals += result.mem0_relationship_signals_created
-            vector_corroboration_signals += (
-                result.vector_corroboration_signals_created
-            )
             calibration_warnings.update(result.calibration_warnings)
     return {
         "record_count": len(records),
@@ -1012,8 +999,6 @@ def _import_mem0(
         "conflict_links_created": conflict_links,
         "source_lineage_links_created": source_lineage_links,
         "calibration_signals_created": calibration_signals,
-        "mem0_relationship_signals_created": mem0_relationship_signals,
-        "vector_corroboration_signals_created": vector_corroboration_signals,
         "calibration_warnings": sorted(calibration_warnings),
         "database": _database_label(args),
     }
@@ -1028,16 +1013,6 @@ def _bootstrap_mem0(
         parser.error(f"Mem0 config does not exist: {args.mem0_config}")
     config = _load_json_object(args.mem0_config) if args.mem0_config else None
     processor = Mem0PythonProcessor(config)
-    embedder = _embedder(args) if args.embedding_model else None
-    tag_proposer = (
-        OllamaTagProposer(
-            base_url=args.ollama_url,
-            model=args.tag_model,
-            timeout_seconds=args.ollama_timeout,
-        )
-        if args.tag_model
-        else None
-    )
     with _open_repository(args) as repository:
         namespaces = (
             (args.namespace,)
@@ -1054,15 +1029,9 @@ def _bootstrap_mem0(
                 file=sys.stderr,
                 flush=True,
             )
-            importer = Mem0ImportService(
-                repository,
-                embedder=embedder,
-                tag_proposer=tag_proposer,
-            )
             result = Mem0BootstrapService(
                 repository,
                 processor,
-                importer=importer,
                 atom_batch_size=args.atom_batch_size,
                 max_batch_chars=args.max_batch_chars,
                 accept_empty=args.accept_empty,
@@ -1083,30 +1052,29 @@ def _bootstrap_mem0(
             result.source_atoms_processed for result in results
         ),
         "source_atoms_resumed": sum(result.source_atoms_resumed for result in results),
-        "memories_returned": sum(result.memories_returned for result in results),
-        "memories_unaligned": sum(result.memories_unaligned for result in results),
+        "mem0_records_returned": sum(
+            result.mem0_records_returned for result in results
+        ),
+        "entities_returned": sum(result.entities_returned for result in results),
+        "relationships_returned": sum(
+            result.relationships_returned for result in results
+        ),
+        "relationships_quarantined": sum(
+            result.relationships_quarantined for result in results
+        ),
         "empty_batches": sum(result.empty_batches for result in results),
-        "memories_imported": sum(result.memories_imported for result in results),
-        "exact_duplicates": sum(result.exact_duplicates for result in results),
-        "semantic_duplicates": sum(result.semantic_duplicates for result in results),
-        "source_lineage_links_created": sum(
-            result.source_lineage_links_created for result in results
+        "entities_imported": sum(result.entities_imported for result in results),
+        "entity_support_links_created": sum(
+            result.entity_support_links_created for result in results
+        ),
+        "entity_relationship_links_created": sum(
+            result.entity_relationship_links_created for result in results
         ),
         "calibration_signals_created": sum(
             result.calibration_signals_created for result in results
         ),
-        "mem0_relationship_signals_created": sum(
-            result.mem0_relationship_signals_created for result in results
-        ),
-        "vector_corroboration_signals_created": sum(
-            result.vector_corroboration_signals_created for result in results
-        ),
-        "calibration_warnings": sorted(
-            {
-                warning
-                for result in results
-                for warning in result.calibration_warnings
-            }
+        "warnings": sorted(
+            {warning for result in results for warning in result.warnings}
         ),
         "scope_truncated": len(results) < len(namespaces)
         or any(result.truncated for result in results),

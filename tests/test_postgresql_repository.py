@@ -7,7 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from data_retrieval.domain.models import AtomLinkRelation
-from data_retrieval.mem0 import Mem0BootstrapService
+from data_retrieval.mem0 import (
+    Mem0BootstrapService,
+    Mem0Entity,
+    Mem0EntityRelationship,
+    Mem0ProcessResult,
+)
 from data_retrieval.retrieval.models import AtomEmbedding
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.large_ingestion import LargeFileIngestService
@@ -20,7 +25,22 @@ class _PostgreSQLFakeMem0Processor:
 
     def add(self, messages, *, user_id, run_id, metadata):
         self.call_count += 1
-        return ({"id": "memory-1", "memory": "PostgreSQL stores project data."},)
+        source_atom_id = metadata["source_atom_ids"][0]
+        return Mem0ProcessResult(
+            entities=(
+                Mem0Entity("postgresql", "PostgreSQL", (source_atom_id,)),
+                Mem0Entity("mac", "Mac", (source_atom_id,)),
+            ),
+            relationships=(
+                Mem0EntityRelationship(
+                    "project-stack",
+                    "postgresql",
+                    "mac",
+                    "used_with",
+                    (source_atom_id,),
+                ),
+            ),
+        )
 
 
 @unittest.skipUnless(
@@ -43,14 +63,15 @@ class PostgreSQLRepositoryIntegrationTests(unittest.TestCase):
             first = service.run(namespace=namespace)
             second = service.run(namespace=namespace)
 
-            self.assertEqual(first.memories_imported, 1)
-            self.assertEqual(first.source_lineage_links_created, 1)
+            self.assertEqual(first.entities_imported, 2)
+            self.assertEqual(first.entity_support_links_created, 2)
+            self.assertEqual(first.entity_relationship_links_created, 1)
             self.assertEqual(second.batches_resumed, 1)
             self.assertEqual(processor.call_count, 1)
             links = repository.list_atom_links(
                 namespace=namespace, relation=AtomLinkRelation.SUPPORTED_BY
             )
-            self.assertEqual(len(links), 1)
+            self.assertEqual(len(links), 2)
 
     def test_ingestion_indexed_channels_and_staged_file(self) -> None:
         namespace = f"integration-{uuid4()}"

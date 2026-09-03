@@ -45,7 +45,8 @@ own canonical truth or final retrieval policy.
 source adapters
     -> canonical raw documents and atoms
         -> Mem0 processor
-             -> derived fact atoms + entity/tag/calibration proposals
+              -> normal Mem0 memory/graph working state
+              -> private entity-mention atoms + exact provenance + entity links
         -> Temporal History processor
              -> calendar summary atoms + intervals + coverage + lineage
         -> embedding providers
@@ -112,7 +113,7 @@ Examples:
 | Atom | Role | Modality | Legacy/projection kind |
 |---|---|---|---|
 | Imported chat turn | source | text | source |
-| Mem0 fact | derived | text | source during compatibility period |
+| Mem0 entity mention | derived | text | source during compatibility period |
 | Temporal day summary | derived | text | temporal_summary |
 | Assistant response | interaction | text | interaction |
 
@@ -148,8 +149,8 @@ idempotent. A profile change produces new versioned output rather than mutating 
 | Raw capture, identity, and deduplication | Core | Source adapters provide bytes and source metadata |
 | Canonical storage | Core | PostgreSQL online; SQLite local/test |
 | Provenance and immutable event history | Core | Every processor supplies support and version data |
-| Conversational fact extraction | Mem0 | Core stores results as derived atoms |
-| Entity proposals | Mem0 initially | Tags resolves the accepted canonical catalog and edges |
+| Conversational fact extraction | Mem0 | Remains in Mem0 working state; not duplicated by the bootstrap |
+| Private entity graph proposals | Mem0 | Core stores entity mentions, exact support, and typed atom links |
 | Calendar hierarchy and summary generation | Temporal History | Core stores summaries as derived atoms |
 | Coverage, temporal materialization lineage | Temporal History | Core validates and preserves the projection |
 | State/reversal/conflict proposals | Processor-specific | Core owns accepted factual relations |
@@ -169,19 +170,22 @@ idempotent. A profile change produces new versioned output rather than mutating 
 
 ## Mem0 boundary
 
-Mem0 owns fact distillation, not canonical truth or serving retrieval. Its results are derived
-atoms. Mem0 may emit entity, tag, conflict, and calibration proposals, but a versioned core
-policy decides whether and how those proposals affect native relationships.
+Mem0 owns its tested memory extraction and entity-relationship inference, not canonical truth or
+serving retrieval. The bootstrap leaves normal `Memory.add(infer=True)` behavior intact and
+projects only provenance-valid entities into Cortex. Each entity becomes a private, batch-scoped
+derived atom. `SUPPORTED_BY` links point to exact source evidence, while typed Mem0 relationships
+become `MEM0_ENTITY_RELATION` atom links. No evidence tags are copied onto entity atoms.
 
-The Mem0 multiplier is an experimental calibration profile, not an intrinsic trust law. Mem0
-availability is never required for retrieval after its outputs have been imported.
+The adapter adds evidence IDs only to relationship extraction and strips them before Mem0 stores
+its normal triples. Missing or invented IDs are quarantined; Cortex does not guess lineage after
+the call. Mem0 availability is never required for retrieval after the projection is imported.
 
 Replacement candidates that require evidence:
 
-- Tags may replace Mem0 entity/category retrieval if it improves constrained recall,
+- Tags may replace parts of Mem0 entity/category retrieval if it improves constrained recall,
   explainability, and context efficiency.
-- Mem0 fact extraction remains until another extractor meets the same fact-quality, support,
-  cost, and replay gates.
+- Mem0 graph extraction remains until another extractor meets the same entity, relationship,
+  provenance, cost, and replay gates.
 
 ## Temporal History boundary
 
@@ -195,7 +199,7 @@ frontier packing, not for its integrity machinery.
 
 ## Tags boundary
 
-Tags owns the shared conceptual address space across raw atoms, Mem0 facts, Temporal summaries,
+Tags owns the shared conceptual address space across raw atoms, Mem0 entities, Temporal summaries,
 interactions, and future modalities. It also owns auditable learned associations created from
 explicit outcomes.
 
@@ -229,7 +233,8 @@ may propagate through factual lineage to supporting source atoms at a reduced, e
 Combined evaluation is forbidden until each dependency has passed its own gate.
 
 1. **Canonical core**: identity, dedupe, role/modality, provenance, transactionality, replay.
-2. **Mem0 extraction**: fact precision/recall, compression, exact support, changes, dedupe,
+2. **Mem0 extraction**: entity/relationship precision and recall, exact provenance, changes,
+   dedupe,
    resume, and cost.
 3. **Temporal projection**: calendar correctness, coverage, lineage, cutoff eligibility,
    out-of-order events, compaction, and summary fidelity.
@@ -260,8 +265,8 @@ lineage.
 
 1. **Implemented:** add canonical evidence role and payload modality while retaining legacy kind
    compatibility.
-2. **Implemented:** correct Mem0 outputs to role `derived` and make learning role-aware.
-3. **Implemented:** define and validate fact-level support lineage for Mem0 outputs.
+2. **Implemented:** project Mem0 entities as private, tagless atoms with role `derived`.
+3. **Implemented:** define and validate endpoint-level source lineage for Mem0 relationships.
 4. **Implemented:** add role/provenance-aware evidence packing.
 5. **Implemented (contract level):** build deterministic isolated capability fixtures and
    reports. Real-model quality gates remain required before pairwise testing.

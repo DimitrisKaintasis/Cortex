@@ -157,6 +157,8 @@ These may reference atoms but must not replace atom-to-atom associative weights.
 - MongoDB/Pinecone as additional canonical stores: they add synchronization failure modes.
 - Mem0 as a live retrieval dependency: imported native evidence must remain usable while Mem0 is
   offline or upgraded.
+- Mem0 fact/tag all-pairs bootstrap and post-hoc support matching: ADR-0015 replaces these with
+  provenance-bearing private entity atoms and typed entity links.
 - LangChain/LangGraph as architectural requirements: orchestration libraries are optional edges.
 - Automatic reinforcement of every returned result: this creates a self-confirming ranking loop.
 - Automatic deletion/pruning of source atoms: refinement is additive and the no-delete invariant

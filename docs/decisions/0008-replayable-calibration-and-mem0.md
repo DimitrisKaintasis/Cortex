@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted and implemented.
+Partially superseded by ADR-0015. Replayable teacher calibration and the legacy Mem0 export
+import remain accepted. The reverse-bootstrap fact import and Mem0/vector all-pairs tag
+calibration described below are historical and are no longer active.
 
 ## Context
 

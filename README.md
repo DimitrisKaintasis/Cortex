@@ -363,12 +363,11 @@ python -m data_retrieval import-mem0 .\mem0-export.json `
   --tag-model $env:OLLAMA_MODEL
 ```
 
-Existing native atoms can also be distilled through self-hosted Mem0. The job reads one
-bounded batch at a time, sends only conversation content plus internal lineage identifiers,
-aligns each distilled fact to a bounded subset of source atoms, creates factual `SUPPORTED_BY`
-links, and preserves the wider batch only as audit metadata. An output that cannot be aligned
-is counted as `memories_unaligned` and is not imported. A rerun resumes completed batches
-without calling Mem0 or changing weights again:
+Existing native atoms can also be processed through self-hosted Mem0. Normal Mem0 fact and graph
+behavior remains enabled, but Cortex imports only private entity-mention atoms, exact
+`SUPPORTED_BY` provenance, and typed entity-to-entity links. Evidence tags are not copied onto
+entities, and unsafe provenance is quarantined instead of guessed after extraction. A rerun
+resumes completed batches without calling Mem0 or changing weights again:
 
 ```powershell
 python -m pip install -e ".[mem0]"
@@ -377,12 +376,12 @@ python -m data_retrieval bootstrap-mem0 `
   --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `
   --namespace-prefix "longmemeval:" `
   --mem0-config .\config\mem0.local.json `
-  --max-documents 10 `
-  --embedding-model $env:OLLAMA_EMBEDDING_MODEL
+  --max-documents 10
 ```
 
-Use a small cap first. The Mem0 configuration chooses its LLM, embedder, and temporary working
-store; provider credentials belong in environment variables, not the JSON file. In the current
+Use a small cap first. The Mem0 configuration chooses its LLM, embedder, vector store, and
+required graph store; embedded Kuzu keeps the graph cache small and avoids another server.
+Provider credentials belong in environment variables, not the JSON file. In the current
 laptop/Mac arrangement, this command and both canonical stores run on the laptop while the Mem0
 LLM/embedder URLs point through the SSH tunnel to Mac Ollama. Thus the Mac performs inference but
 does not become the authoritative data store. See

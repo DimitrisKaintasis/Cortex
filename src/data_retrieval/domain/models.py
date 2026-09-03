@@ -73,6 +73,7 @@ class AtomLinkRelation(StrEnum):
     CO_USED = "co_used"
     CONFLICTS_WITH = "conflicts_with"
     ADJACENT_TO = "adjacent_to"
+    MEM0_ENTITY_RELATION = "mem0_entity_relation"
 
 
 class CalibrationTarget(StrEnum):
@@ -203,9 +204,7 @@ class TagCandidate:
             TagCandidateState.MERGED,
         }
         if needs_tag != (self.resolved_tag_id is not None):
-            raise ValueError(
-                "resolved_tag_id is required for canonicalized/merged candidates only"
-            )
+            raise ValueError("resolved_tag_id is required for canonicalized/merged candidates only")
 
 
 @dataclass(frozen=True, slots=True)

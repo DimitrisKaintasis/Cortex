@@ -14,16 +14,25 @@
       "PostgreSQL stores durable project records and preserves every audited change safely.",
       "The Mac Mini runs the inference worker overnight and returns completed results remotely."
     ],
-    "facts": [
+    "entities": [
       {
-        "id": "memory-storage",
-        "content": "PostgreSQL stores the durable project records.",
+        "id": "postgresql",
+        "name": "PostgreSQL",
         "support_index": 0
       },
       {
-        "id": "memory-worker",
-        "content": "The Mac Mini runs inference overnight.",
+        "id": "mac-mini",
+        "name": "Mac Mini",
         "support_index": 1
+      }
+    ],
+    "relationships": [
+      {
+        "id": "storage-worker",
+        "source": "postgresql",
+        "target": "mac-mini",
+        "predicate": "serves_worker",
+        "support_indices": [0, 1]
       }
     ]
   },

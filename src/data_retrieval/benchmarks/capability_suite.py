@@ -22,7 +22,12 @@ from data_retrieval.domain.models import (
     WeightEventSource,
 )
 from data_retrieval.ingestion.chunker import TextChunker
-from data_retrieval.mem0 import Mem0BootstrapService
+from data_retrieval.mem0 import (
+    Mem0BootstrapService,
+    Mem0Entity,
+    Mem0EntityRelationship,
+    Mem0ProcessResult,
+)
 from data_retrieval.retrieval.models import (
     FeedbackRequest,
     QueryPlan,
@@ -120,13 +125,13 @@ class IsolatedCapabilitySuiteReport:
 class _FixtureMem0Processor:
     profile_id = "fixture-mem0-output-v1"
 
-    def __init__(self, results: tuple[dict[str, Any], ...]) -> None:
-        self.results = results
+    def __init__(self, result: Mem0ProcessResult) -> None:
+        self.result = result
         self.call_count = 0
 
     def add(self, messages, *, user_id, run_id, metadata):
         self.call_count += 1
-        return self.results
+        return self.result
 
 
 class _FixtureTagProposer:
@@ -193,7 +198,7 @@ class IsolatedCapabilitySuite:
                 "Mem0 adapter",
                 "fixed-output processor contract",
                 self._mem0_boundary,
-                ("Does not measure real-model fact precision, recall, latency, or cost.",),
+                ("Does not measure real-model entity precision, recall, latency, or cost.",),
             ),
             (
                 "temporal_projection",
@@ -350,18 +355,34 @@ class IsolatedCapabilitySuite:
             source=str(fixture["source"]),
             text="\n\n".join(paragraphs),
         )
-        facts = tuple(dict(value) for value in fixture["facts"])
+        relationships = tuple(dict(value) for value in fixture["relationships"])
         if len(ingested.atom_ids) != len(paragraphs):
             raise ValueError("Mem0 fixture paragraphs must produce one atom each")
-        results = tuple(
-            {
-                "id": str(fact["id"]),
-                "memory": str(fact["content"]),
-                "support_atom_ids": [ingested.atom_ids[int(fact["support_index"])]],
-            }
-            for fact in facts
+        entities = tuple(
+            Mem0Entity(
+                entity_id=str(entity["id"]),
+                name=str(entity["name"]),
+                support_atom_ids=(ingested.atom_ids[int(entity["support_index"])],),
+            )
+            for entity in fixture["entities"]
         )
-        processor = _FixtureMem0Processor(results)
+        processor = _FixtureMem0Processor(
+            Mem0ProcessResult(
+                entities=entities,
+                relationships=tuple(
+                    Mem0EntityRelationship(
+                        relationship_id=str(relation["id"]),
+                        source_entity_id=str(relation["source"]),
+                        target_entity_id=str(relation["target"]),
+                        predicate=str(relation["predicate"]),
+                        support_atom_ids=tuple(
+                            ingested.atom_ids[int(index)] for index in relation["support_indices"]
+                        ),
+                    )
+                    for relation in relationships
+                ),
+            )
+        )
         service = Mem0BootstrapService(repository, processor, atom_batch_size=10)
         first = service.run(namespace=str(fixture["namespace"]))
         replay = service.run(namespace=str(fixture["namespace"]))
@@ -369,34 +390,29 @@ class IsolatedCapabilitySuite:
         support_links = repository.list_atom_links(
             namespace=str(fixture["namespace"]), relation=AtomLinkRelation.SUPPORTED_BY
         )
-        support_by_content = {
-            repository.get_atom(link.from_atom_id).content: link.to_atom_id
-            for link in support_links
-        }
-        expected_support = {
-            str(fact["content"]): ingested.atom_ids[int(fact["support_index"])] for fact in facts
-        }
-        batch_ids_are_separate = all(
-            set(atom.metadata.get("batch_atom_ids", ())) == set(ingested.atom_ids)
-            and set(atom.metadata.get("support_atom_ids", ())) == {expected_support[atom.content]}
-            for atom in derived
+        entity_names = {str(entity["name"]) for entity in fixture["entities"]}
+        relationship_links = repository.list_atom_links(
+            namespace=str(fixture["namespace"]),
+            relation=AtomLinkRelation.MEM0_ENTITY_RELATION,
         )
-        source_chars = sum(len(value) for value in paragraphs)
-        fact_chars = sum(len(str(fact["content"])) for fact in facts)
         checks = (
-            self._check("all_facts_imported", len(facts), first.memories_imported),
-            self._check("no_unaligned_facts", 0, first.memories_unaligned),
+            self._check("all_entities_imported", len(entities), first.entities_imported),
             self._check("derived_roles", {AtomRole.DERIVED}, {atom.role for atom in derived}),
-            self._check("exact_fact_support", expected_support, support_by_content),
-            self._check("batch_membership_separate", True, batch_ids_are_separate),
+            self._check("entity_names", entity_names, {atom.content for atom in derived}),
+            self._check(
+                "no_tags_copied",
+                True,
+                all(repository.atom_tags_for(atom.atom_id) == () for atom in derived),
+            ),
+            self._check("entity_relationships", len(relationships), len(relationship_links)),
             self._check("replay_resumed", 1, replay.batches_resumed),
             self._check("processor_called_once", 1, processor.call_count),
         )
         return {
             "source_atom_count": len(ingested.atom_ids),
-            "fact_count": len(derived),
+            "entity_count": len(derived),
             "support_link_count": len(support_links),
-            "compression_ratio": fact_chars / source_chars,
+            "relationship_link_count": len(relationship_links),
         }, checks
 
     def _temporal_projection(
@@ -759,8 +775,7 @@ class IsolatedCapabilitySuite:
             return [IsolatedCapabilitySuite._json_value(item) for item in value]
         if isinstance(value, dict):
             return {
-                str(key): IsolatedCapabilitySuite._json_value(item)
-                for key, item in value.items()
+                str(key): IsolatedCapabilitySuite._json_value(item) for key, item in value.items()
             }
         if hasattr(value, "value"):
             return IsolatedCapabilitySuite._json_value(value.value)
@@ -781,7 +796,7 @@ class IsolatedCapabilitySuite:
             "canonical_core": {"schema": "role-modality-v1"},
             "mem0_boundary": {
                 "processor": _FixtureMem0Processor.profile_id,
-                "support": "processor_declared",
+                "provenance": "endpoint_source_ids_v1",
             },
             "temporal_projection": {"summarizer": "temporal-history-mock"},
             "tags": {"proposer": _FixtureTagProposer.proposal_version},

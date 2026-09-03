@@ -93,9 +93,7 @@ class RetrievalService:
             else ()
         )
         semantic_hits, semantic_warning = (
-            self._bounded_semantic_hits(plan)
-            if self.channels.semantic
-            else ((), None)
+            self._bounded_semantic_hits(plan) if self.channels.semantic else ((), None)
         )
         raw_tag_scores, tag_evidence = self._hit_maps(tag_hits)
         raw_lexical_scores, lexical_evidence = self._hit_maps(lexical_hits)
@@ -157,9 +155,7 @@ class RetrievalService:
                 if atom_lookup[atom_id].kind is not AtomKind.TEMPORAL_SUMMARY
             }
         assessment_plan = (
-            plan
-            if self.channels.temporal
-            else replace(plan, temporal_mode=TemporalMode.NONE)
+            plan if self.channels.temporal else replace(plan, temporal_mode=TemporalMode.NONE)
         )
         assessment = self.temporal_lens.assess(
             plan=assessment_plan,
@@ -319,9 +315,7 @@ class RetrievalService:
             {hit.atom_id: hit.evidence for hit in hits},
         )
 
-    def _bounded_semantic_hits(
-        self, plan: QueryPlan
-    ) -> tuple[tuple[SearchHit, ...], str | None]:
+    def _bounded_semantic_hits(self, plan: QueryPlan) -> tuple[tuple[SearchHit, ...], str | None]:
         if self.embedder is None:
             return (), None
         try:
@@ -391,9 +385,7 @@ class RetrievalService:
         )
         for hit in related_hits:
             matched = [
-                value.removeprefix("tag=")
-                for value in hit.evidence
-                if value.startswith("tag=")
+                value.removeprefix("tag=") for value in hit.evidence if value.startswith("tag=")
             ]
             strength = max((related_strength.get(value, 0.0) for value in matched), default=0.0)
             if strength <= 0.0:
@@ -423,6 +415,72 @@ class RetrievalService:
             if link.to_atom_id in seed_atom_ids:
                 scores[link.from_atom_id] += strength
                 evidence[link.from_atom_id].append(f"adjacent_to={link.to_atom_id}")
+
+        # Mem0 entity atoms are private navigation nodes. Traverse
+        # evidence -> entity -> related entity -> evidence, then rank the source
+        # evidence rather than copying its tags onto the entity nodes.
+        support_links = self.repository.get_atom_links_touching(
+            atom_ids=tuple(seed_atom_ids), relation=AtomLinkRelation.SUPPORTED_BY
+        )
+        entity_strength: dict[str, float] = {}
+        for link in support_links[: self.candidate_limit * 4]:
+            strength = max(0.0, link.weight_raw * link.confidence)
+            if link.to_atom_id in seed_atom_ids:
+                entity_strength[link.from_atom_id] = max(
+                    entity_strength.get(link.from_atom_id, 0.0), strength
+                )
+            if link.from_atom_id in seed_atom_ids:
+                entity_strength[link.from_atom_id] = max(
+                    entity_strength.get(link.from_atom_id, 0.0), 1.0
+                )
+        bounded_entities = dict(
+            sorted(entity_strength.items(), key=lambda item: (-item[1], item[0]))[
+                : self.candidate_limit
+            ]
+        )
+        if bounded_entities:
+            relation_links = self.repository.get_atom_links_touching(
+                atom_ids=tuple(bounded_entities),
+                relation=AtomLinkRelation.MEM0_ENTITY_RELATION,
+            )
+            related_strength: dict[str, float] = dict(bounded_entities)
+            related_via: dict[str, str] = {}
+            for link in relation_links[: self.candidate_limit * 4]:
+                strength = max(0.0, link.weight_raw * link.confidence)
+                if link.from_atom_id in bounded_entities:
+                    path = bounded_entities[link.from_atom_id] * strength
+                    related_strength[link.to_atom_id] = max(
+                        related_strength.get(link.to_atom_id, 0.0), path
+                    )
+                    related_via[link.to_atom_id] = link.from_atom_id
+                if link.to_atom_id in bounded_entities:
+                    path = bounded_entities[link.to_atom_id] * strength
+                    related_strength[link.from_atom_id] = max(
+                        related_strength.get(link.from_atom_id, 0.0), path
+                    )
+                    related_via[link.from_atom_id] = link.to_atom_id
+            bounded_related = dict(
+                sorted(related_strength.items(), key=lambda item: (-item[1], item[0]))[
+                    : self.candidate_limit
+                ]
+            )
+            destination_support = self.repository.get_atom_links_touching(
+                atom_ids=tuple(bounded_related),
+                relation=AtomLinkRelation.SUPPORTED_BY,
+            )
+            for link in destination_support[: self.candidate_limit * 4]:
+                path_strength = bounded_related.get(link.from_atom_id)
+                if path_strength is None:
+                    continue
+                support_strength = max(0.0, link.weight_raw * link.confidence)
+                scores[link.to_atom_id] += path_strength * support_strength
+                via = related_via.get(link.from_atom_id)
+                label = (
+                    f"mem0_entity_path={via}->{link.from_atom_id}"
+                    if via
+                    else f"mem0_entity_support={link.from_atom_id}"
+                )
+                evidence[link.to_atom_id].append(label)
         return dict(scores), {
             atom_id: tuple(sorted(set(values))) for atom_id, values in evidence.items()
         }
@@ -452,16 +510,12 @@ class RetrievalService:
                 warnings.append(f"tag_proposer_unavailable:{type(error).__name__}")
         if tags and self.tag_canonicalizer is not None:
             try:
-                catalog = self.repository.list_tags(
-                    plan.namespace, limit=self.catalog_hint_limit
-                )
+                catalog = self.repository.list_tags(plan.namespace, limit=self.catalog_hint_limit)
                 exact = {tag.canonical_text for tag in catalog}
                 matches = self.tag_canonicalizer.resolve(
                     candidates=tuple(sorted(tags - exact)), catalog=catalog
                 )
-                tags = {
-                    matches[tag].tag.canonical_text if tag in matches else tag for tag in tags
-                }
+                tags = {matches[tag].tag.canonical_text if tag in matches else tag for tag in tags}
             except Exception as error:  # noqa: BLE001 - retrieval must degrade safely
                 warnings.append(f"tag_canonicalizer_unavailable:{type(error).__name__}")
         return tuple(sorted(tags)), warnings
@@ -619,9 +673,7 @@ class RetrievalService:
         return {channel: weight / total for channel, weight in raw.items()}
 
     @staticmethod
-    def _summary_lineage(
-        links, atoms_by_id: dict[str, Atom]
-    ) -> dict[str, tuple[str, ...]]:
+    def _summary_lineage(links, atoms_by_id: dict[str, Atom]) -> dict[str, tuple[str, ...]]:
         lineage: dict[str, list[str]] = defaultdict(list)
         for link in links:
             source = atoms_by_id.get(link.from_atom_id)

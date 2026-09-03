@@ -20,7 +20,7 @@ data-retrieval = "data_retrieval.cli:main"
 
 [project.optional-dependencies]
 mem0 = [
-    "mem0ai>=1,<4",
+    "mem0ai[graph]>=1,<2",
     "ollama>=0.6,<1",
 ]
 dev = [
