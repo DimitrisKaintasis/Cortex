@@ -165,6 +165,12 @@ These may reference atoms but must not replace atom-to-atom associative weights.
   The first joint test reduced wrong weight by 89.5% but failed semantic promotion because high
   similarity does not prove predicate truth. Do not restore all-pairs calibration or treat vector
   agreement as verification.
+- The six-case entity-graph experience benchmark then found a real but inefficient supervised
+  adaptation signal. Entity support paths improved cold hybrid MRR from `0.413` to `0.533` even
+  though all 80 typed proposals stayed inactive. Five rounds of distinct multi-evidence feedback
+  raised it to `0.575`, but created 1,445 transitions across 289 edges. Single-result feedback left
+  hybrid retrieval unchanged. Preserve multi-evidence attribution for further experiments, but
+  replace all-pairs tag fan-out before promotion.
 
 ## Superseded or rejected
 

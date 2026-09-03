@@ -401,6 +401,7 @@ class LongMemEvalPipelineRunner:
             answer_sessions or evidence_atoms
         )
         return {
+            "retrieval_id": result.retrieval_id,
             "question_id": case.question_id,
             "question_type": case.question_type,
             "evaluable": evaluable,
@@ -447,6 +448,19 @@ class LongMemEvalPipelineRunner:
             "low_confidence": result.low_confidence,
             "retrieved_atom_ids": [item.atom_id for item in result.items],
             "retrieved_source_atom_ids": [sorted(ids) for ids in credited_source_ids],
+            "retrieved_scores": [
+                {
+                    "atom_id": item.atom_id,
+                    "tag": item.score.tag,
+                    "lexical": item.score.lexical,
+                    "semantic": item.score.semantic,
+                    "relationship": item.score.relationship,
+                    "temporal": item.score.temporal,
+                    "final": item.score.final,
+                    "evidence": list(item.score.evidence),
+                }
+                for item in result.items
+            ],
             "retrieval_diagnostics": result.diagnostics,
         }
 

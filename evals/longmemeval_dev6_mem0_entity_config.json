@@ -1,0 +1,35 @@
+{
+  "vector_store": {
+    "provider": "qdrant",
+    "config": {
+      "collection_name": "data_retrieval_longmemeval_dev6_entity_v1",
+      "path": "artifacts/longmemeval-dev6-entity-mem0-qdrant-v1",
+      "on_disk": true,
+      "embedding_model_dims": 1024
+    }
+  },
+  "graph_store": {
+    "provider": "kuzu",
+    "config": {
+      "db": "artifacts/longmemeval-dev6-entity-mem0-kuzu-v1"
+    }
+  },
+  "history_db_path": "artifacts/longmemeval-dev6-entity-mem0-history-v1.sqlite3",
+  "llm": {
+    "provider": "openai",
+    "config": {
+      "model": "google/gemini-3.1-flash-lite",
+      "temperature": 0.1,
+      "max_tokens": 2000,
+      "openrouter_base_url": "https://openrouter.ai/api/v1"
+    }
+  },
+  "embedder": {
+    "provider": "ollama",
+    "config": {
+      "model": "qwen3-embedding:0.6b",
+      "embedding_dims": 1024,
+      "ollama_base_url": "http://127.0.0.1:11435"
+    }
+  }
+}

@@ -19,6 +19,7 @@ from data_retrieval.benchmarks.longmemeval_ablation import LongMemEvalAblationSu
 from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.benchmarks.mem0_cold_start import Mem0ColdStartSuite
 from data_retrieval.benchmarks.mem0_entity_quality import Mem0EntityQualitySuite
+from data_retrieval.benchmarks.mem0_experience import Mem0ExperienceSuite
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
 from data_retrieval.domain.models import TagCandidateState
@@ -148,9 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pipeline.add_argument("--tag-model")
     pipeline.add_argument("--temporal-model")
-    pipeline.add_argument(
-        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
-    )
+    pipeline.add_argument("--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL"))
     pipeline.add_argument(
         "--embedding-profile",
         choices=tuple(EMBEDDING_PROFILES),
@@ -200,9 +199,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="ollama",
     )
     ablation.add_argument("--tag-model")
-    ablation.add_argument(
-        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
-    )
+    ablation.add_argument("--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL"))
     ablation.add_argument(
         "--embedding-profile",
         choices=tuple(EMBEDDING_PROFILES),
@@ -242,9 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
     tags.add_argument("document_id")
     _add_storage_options(tags)
     _add_ollama_options(tags, timeout_default="120")
-    tags.add_argument(
-        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
-    )
+    tags.add_argument("--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL"))
     tags.add_argument(
         "--embedding-profile",
         choices=tuple(EMBEDDING_PROFILES),
@@ -416,8 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--tag-model",
         default=os.getenv("OLLAMA_TAG_MODEL"),
         help=(
-            "optional Ollama model for generated query tags; retrieval degrades safely "
-            "without it"
+            "optional Ollama model for generated query tags; retrieval degrades safely without it"
         ),
     )
     _add_embedding_options(retrieve, required=False)
@@ -541,6 +535,29 @@ def build_parser() -> argparse.ArgumentParser:
     cold_start.add_argument("--reject-below-similarity", type=float, default=0.60)
     cold_start.add_argument("--provisional-above-similarity", type=float, default=0.80)
     cold_start.add_argument("--provisional-weight-cap", type=float, default=0.25)
+    experience = commands.add_parser(
+        "evaluate-mem0-experience",
+        help="measure a prepared Mem0 entity graph across attributable usage rounds",
+    )
+    _add_storage_options(experience)
+    experience.add_argument(
+        "--fixture",
+        type=Path,
+        default=Path("evals/mem0_experience_v1.json"),
+    )
+    experience.add_argument(
+        "--feedback-selection",
+        choices=("first_relevant", "all_relevant"),
+        default="first_relevant",
+    )
+    experience.add_argument("--usage-rounds", type=int)
+    experience.add_argument("--top-k", type=int)
+    _add_embedding_options(experience)
+    experience.add_argument(
+        "--report",
+        type=Path,
+        default=Path("data/results/mem0-experience-v1.json"),
+    )
     repository_features = commands.add_parser(
         "observe-repository-features",
         help="run payload-free collective triage without feature-path mutations",
@@ -613,6 +630,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _evaluate_mem0_entities(args, parser)
         elif args.command == "evaluate-mem0-cold-start":
             output = _evaluate_mem0_cold_start(args, parser)
+        elif args.command == "evaluate-mem0-experience":
+            output = _evaluate_mem0_experience(args, parser)
         else:
             output = _observe_repository_features(args, parser)
     except (
@@ -628,13 +647,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     print(json.dumps(output, indent=2))
-    if args.command in {
-        "evaluate-capabilities",
-        "evaluate-collective-transfer",
-        "evaluate-review-cascade",
-        "evaluate-mem0-entities",
-        "evaluate-mem0-cold-start",
-    } and output["passed"] is False:
+    if (
+        args.command
+        in {
+            "evaluate-capabilities",
+            "evaluate-collective-transfer",
+            "evaluate-review-cascade",
+            "evaluate-mem0-entities",
+            "evaluate-mem0-cold-start",
+            "evaluate-mem0-experience",
+        }
+        and output["passed"] is False
+    ):
         return 1
     return 0
 
@@ -647,9 +671,7 @@ def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[s
         metadata["timeline_id"] = args.timeline_id
     with _open_repository(args) as repository:
         if args.postgres_dsn:
-            result = LargeFileIngestService(
-                repository, batch_size=args.batch_size
-            ).ingest_path(
+            result = LargeFileIngestService(repository, batch_size=args.batch_size).ingest_path(
                 path=args.path,
                 namespace=args.namespace,
                 source=args.source or args.path.as_posix(),
@@ -771,12 +793,8 @@ def _run_longmemeval(
                 timeout_seconds=args.ollama_timeout,
             )
         )
-    temporal_state = args.temporal_state or Path(
-        f"data/state/{args.dataset_id}-temporal.sqlite3"
-    )
-    report_path = args.report or Path(
-        f"data/results/{args.dataset_id}-pipeline-report.json"
-    )
+    temporal_state = args.temporal_state or Path(f"data/state/{args.dataset_id}-temporal.sqlite3")
+    report_path = args.report or Path(f"data/results/{args.dataset_id}-pipeline-report.json")
 
     def progress(index: int, total: int, stage: str) -> None:
         if stage == "enriching" and (index == 1 or index % 10 == 0 or index == total):
@@ -800,25 +818,19 @@ def _run_longmemeval(
             enrich_tags=not args.skip_tags and not args.evaluation_only,
             enrich_temporal=not args.skip_temporal and not args.evaluation_only,
             enrich_embeddings=not args.skip_embeddings and not args.evaluation_only,
-            resolve_benchmark_tags=(
-                args.resolve_benchmark_tags and not args.evaluation_only
-            ),
+            resolve_benchmark_tags=(args.resolve_benchmark_tags and not args.evaluation_only),
             benchmark_tag_min_confidence=args.benchmark_tag_min_confidence,
             max_workers=args.max_workers,
             progress=progress,
         )
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report.as_dict(), indent=2), encoding="utf-8", newline="\n"
-    )
+    report_path.write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8", newline="\n")
     return {
         **report.as_dict(include_cases=False),
         "inference_provider": args.inference_provider,
         "tag_model": tag_model if not args.skip_tags else None,
         "temporal_model": (
-            temporal_model
-            if not args.skip_temporal and not args.evaluation_only
-            else None
+            temporal_model if not args.skip_temporal and not args.evaluation_only else None
         ),
         "embedding_model": embedder.model if embedder else None,
         "report": str(report_path),
@@ -868,9 +880,7 @@ def _evaluate_longmemeval_ablation(
             max_workers=args.max_workers,
         )
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(
-        json.dumps(report, indent=2), encoding="utf-8", newline="\n"
-    )
+    args.report.write_text(json.dumps(report, indent=2), encoding="utf-8", newline="\n")
     return {
         "dataset_id": report["dataset_id"],
         "case_count": report["case_count"],
@@ -890,9 +900,7 @@ def _enrich_tags(args: argparse.Namespace) -> dict[str, object]:
         timeout_seconds=args.ollama_timeout,
     )
     with _open_repository(args) as repository:
-        canonicalizer = (
-            SemanticTagCanonicalizer(_embedder(args)) if args.embedding_model else None
-        )
+        canonicalizer = SemanticTagCanonicalizer(_embedder(args)) if args.embedding_model else None
         result = TagEnrichmentService(
             repository, proposer, canonicalizer=canonicalizer
         ).enrich_document(args.document_id)
@@ -1021,9 +1029,7 @@ def _enrich_embeddings(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
-def _import_mem0(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> dict[str, object]:
+def _import_mem0(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, object]:
     if not args.path.is_file():
         parser.error(f"input file does not exist: {args.path}")
     records = load_mem0_records(args.path)
@@ -1075,9 +1081,7 @@ def _import_mem0(
     }
 
 
-def _bootstrap_mem0(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> dict[str, object]:
+def _bootstrap_mem0(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, object]:
     if args.mem0_user_id and not args.namespace:
         parser.error("--mem0-user-id requires one exact --namespace")
     if args.mem0_config and not args.mem0_config.is_file():
@@ -1119,20 +1123,12 @@ def _bootstrap_mem0(
         "documents_examined": sum(result.documents_examined for result in results),
         "batches_processed": sum(result.batches_processed for result in results),
         "batches_resumed": sum(result.batches_resumed for result in results),
-        "source_atoms_processed": sum(
-            result.source_atoms_processed for result in results
-        ),
+        "source_atoms_processed": sum(result.source_atoms_processed for result in results),
         "source_atoms_resumed": sum(result.source_atoms_resumed for result in results),
-        "mem0_records_returned": sum(
-            result.mem0_records_returned for result in results
-        ),
+        "mem0_records_returned": sum(result.mem0_records_returned for result in results),
         "entities_returned": sum(result.entities_returned for result in results),
-        "relationships_returned": sum(
-            result.relationships_returned for result in results
-        ),
-        "relationships_quarantined": sum(
-            result.relationships_quarantined for result in results
-        ),
+        "relationships_returned": sum(result.relationships_returned for result in results),
+        "relationships_quarantined": sum(result.relationships_quarantined for result in results),
         "empty_batches": sum(result.empty_batches for result in results),
         "entities_imported": sum(result.entities_imported for result in results),
         "entity_support_links_created": sum(
@@ -1144,9 +1140,7 @@ def _bootstrap_mem0(
         "calibration_signals_created": sum(
             result.calibration_signals_created for result in results
         ),
-        "warnings": sorted(
-            {warning for result in results for warning in result.warnings}
-        ),
+        "warnings": sorted({warning for result in results for warning in result.warnings}),
         "scope_truncated": len(results) < len(namespaces)
         or any(result.truncated for result in results),
         "database": _database_label(args),
@@ -1199,12 +1193,9 @@ def _backfill_calibration(args: argparse.Namespace) -> dict[str, object]:
         "atom_tag_updates": sum(result.atom_tag_updates for result in results),
         "atom_link_updates": sum(result.atom_link_updates for result in results),
         "tag_relation_updates": sum(result.tag_relation_updates for result in results),
-        "truncated_namespaces": tuple(
-            result.namespace for result in results if result.truncated
-        ),
-        "scope_truncated": len(results) < len(namespaces) or any(
-            result.truncated for result in results
-        ),
+        "truncated_namespaces": tuple(result.namespace for result in results if result.truncated),
+        "scope_truncated": len(results) < len(namespaces)
+        or any(result.truncated for result in results),
         "database": _database_label(args),
     }
 
@@ -1484,6 +1475,65 @@ def _evaluate_mem0_cold_start(
         encoding="utf-8",
     )
     return payload
+
+
+def _evaluate_mem0_experience(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.fixture.is_file():
+        parser.error(f"Mem0 experience fixture does not exist: {args.fixture}")
+    fixture = _load_json_object(args.fixture)
+    try:
+        dataset_path = Path(str(fixture["dataset_path"]))
+        dataset_id = str(fixture["dataset_id"])
+        namespace_prefix = str(fixture["namespace_prefix"])
+        query_feature_path = Path(str(fixture["query_feature_path"]))
+        raw_question_ids = fixture["question_ids"]
+        if not isinstance(raw_question_ids, list):
+            raise TypeError("question_ids must be an array")
+        question_ids = tuple(str(value) for value in raw_question_ids)
+        suite_id = str(fixture["suite_id"])
+        usage_rounds = (
+            args.usage_rounds
+            if args.usage_rounds is not None
+            else int(fixture.get("usage_rounds", 5))
+        )
+        top_k = args.top_k if args.top_k is not None else int(fixture.get("top_k", 10))
+    except (KeyError, TypeError, ValueError) as error:
+        parser.error(f"invalid Mem0 experience fixture: {error}")
+    if not dataset_path.is_file():
+        parser.error(f"LongMemEval dataset does not exist: {dataset_path}")
+    if not query_feature_path.is_file():
+        parser.error(f"query feature cache does not exist: {query_feature_path}")
+    with _open_repository(args) as repository:
+        report = Mem0ExperienceSuite(repository, embedder=_embedder(args)).run(
+            suite_id=suite_id,
+            dataset_path=dataset_path,
+            dataset_id=dataset_id,
+            query_feature_path=query_feature_path,
+            namespace_prefix=namespace_prefix,
+            question_ids=question_ids,
+            feedback_selection=args.feedback_selection,
+            usage_round_count=usage_rounds,
+            top_k=top_k,
+        )
+    payload = report.as_dict()
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "suite_id": report.suite_id,
+        "feedback_selection": report.feedback_selection,
+        "usage_round_count": report.usage_round_count,
+        "mechanical_passed": report.mechanical_passed,
+        "learning_signal_passed": report.learning_signal_passed,
+        "metric_deltas": report.metric_deltas,
+        "report": str(args.report),
+        "database": _database_label(args),
+        "passed": report.mechanical_passed,
+    }
 
 
 def _observe_repository_features(

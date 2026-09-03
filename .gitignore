@@ -32,6 +32,8 @@ mac-remote-llmserver-ed25519.pub
 /artifacts/mem0-entity-smoke-qdrant/
 /artifacts/mem0-entity-quality-strong-kuzu
 /artifacts/mem0-entity-quality-strong-qdrant/
+/artifacts/longmemeval-dev6-entity-mem0-kuzu-v1
+/artifacts/longmemeval-dev6-entity-mem0-qdrant-v1/
 
 # Editors and operating systems
 .idea/

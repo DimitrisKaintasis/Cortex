@@ -81,6 +81,23 @@ class CliParserTests(unittest.TestCase):
         )
         self.assertEqual(args.embedding_model, "embedder-v1")
 
+    def test_mem0_experience_exposes_feedback_selection(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "evaluate-mem0-experience",
+                "--embedding-model",
+                "embedder-v1",
+                "--feedback-selection",
+                "all_relevant",
+                "--usage-rounds",
+                "3",
+            ]
+        )
+
+        self.assertEqual(args.fixture.as_posix(), "evals/mem0_experience_v1.json")
+        self.assertEqual(args.feedback_selection, "all_relevant")
+        self.assertEqual(args.usage_rounds, 3)
+
     def test_repository_feature_observer_accepts_cached_embedding_identity(self) -> None:
         args = build_parser().parse_args(
             [

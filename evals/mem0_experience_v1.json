@@ -1,0 +1,17 @@
+{
+  "suite_id": "longmemeval-dev6-mem0-entity-experience-v1",
+  "dataset_path": "data/benchmarks/longmemeval/longmemeval_oracle.json",
+  "dataset_id": "longmemeval-dev20-v1",
+  "namespace_prefix": "longmemeval-dev20-v1",
+  "query_feature_path": "data/results/longmemeval-dev6-experience-query-features-v1.json",
+  "question_ids": [
+    "gpt4_2655b836",
+    "6d550036",
+    "6aeb4375",
+    "75832dbd",
+    "c4f10528",
+    "e47becba"
+  ],
+  "usage_rounds": 5,
+  "top_k": 10
+}

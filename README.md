@@ -394,6 +394,25 @@ exact evidence and caps provisional weight at `0.25`. The first quality experime
 but failed promotion, so keep it limited to snapshots until a semantic validator passes. See
 [the cold-start experiment](docs/MEM0-VECTOR-COLD-START.md).
 
+For a prepared snapshot, the repeatable experience benchmark compares cold retrieval with five
+rounds of attributable positive outcomes:
+
+```powershell
+Copy-Item `
+  .\artifacts\longmemeval-dev6-entity-cold-v1.sqlite3 `
+  .\artifacts\longmemeval-dev6-entity-experiment-copy.sqlite3
+
+python -m data_retrieval evaluate-mem0-experience `
+  --db .\artifacts\longmemeval-dev6-entity-experiment-copy.sqlite3 `
+  --feedback-selection all_relevant `
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1
+```
+
+Run it only on a copy because feedback intentionally mutates learned weights. The first real run
+found useful adaptation but excessive update fan-out; see
+[the experience benchmark](docs/MEM0-EXPERIENCE-BENCHMARK.md).
+
 Use a small cap first. The Mem0 configuration chooses its LLM, embedder, vector store, and
 required graph store; embedded Kuzu keeps the graph cache small and avoids another server.
 Provider credentials belong in environment variables, not the JSON file. In the current

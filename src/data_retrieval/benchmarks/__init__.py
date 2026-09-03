@@ -39,6 +39,12 @@ from data_retrieval.benchmarks.mem0_entity_quality import (
     load_mem0_entity_quality_fixture,
     score_mem0_entity_quality,
 )
+from data_retrieval.benchmarks.mem0_experience import (
+    EXPERIENCE_PROFILES,
+    ExperienceReport,
+    ExperienceRound,
+    Mem0ExperienceSuite,
+)
 from data_retrieval.benchmarks.review_cascade import (
     CascadeScenarioResult,
     ReviewCascadeReport,
@@ -76,6 +82,10 @@ __all__ = [
     "Mem0EntityQualityThresholds",
     "Mem0ColdStartReport",
     "Mem0ColdStartSuite",
+    "EXPERIENCE_PROFILES",
+    "ExperienceReport",
+    "ExperienceRound",
+    "Mem0ExperienceSuite",
     "QualityAtom",
     "PolicyVariantResult",
     "ReviewCascadeReport",
