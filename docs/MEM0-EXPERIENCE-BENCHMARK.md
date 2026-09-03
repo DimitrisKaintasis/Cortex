@@ -108,6 +108,37 @@ actually used by selected evidence, cap per-outcome influence, and compare held-
 collateral false positives. In parallel, test a semantic reviewer for held Mem0 proposals rather
 than lowering vector thresholds on this fixture.
 
+## Policy iteration 1 — remove all-pairs tag learning
+
+The first controlled optimization kept atom-tag reinforcement and `CO_USED` atom links but
+disabled feedback-driven all-pairs tag relations. Both branches started from the same cold graph,
+used `all_relevant` feedback, and reused the same frozen queries and vectors.
+
+| After five rounds | All-pairs control | Atom + `CO_USED` | Change |
+|---|---:|---:|---:|
+| Hybrid turn recall | 0.875 | 0.875 | 0.000 |
+| Hybrid turn MRR | 0.575 | 0.575 | 0.000 |
+| Graph-only turn recall | 0.708 | 0.708 | 0.000 |
+| Graph-only turn MRR | 0.422 | 0.422 | 0.000 |
+| Graph-only useful context | 0.320 | 0.320 | 0.000 |
+| Feedback transitions | 1,445 | 170 | -88.2% |
+| Distinct feedback edges | 289 | 34 | -88.2% |
+| Tag-relation transitions | 1,275 | 0 | -100% |
+| Final tag-relation weight | 318.466 | 99.466 | unchanged from cold |
+
+Every measured ranking, recall, and useful-context metric, including every round's graph and
+hybrid MRR, was identical. The mean raw relationship score was slightly lower, as expected when
+one scoring channel stopped accumulating weight, but this changed no returned quality metric or
+ranking. The candidate retained all 60 atom-tag and 110 atom-link transitions, the 22 learned
+`CO_USED` edges, and the final `CO_USED` weight of 21.0. All ledger audits passed.
+
+This candidate therefore Pareto-dominates the all-pairs control on this development fixture: it
+has the same observed retrieval result with 88.2% fewer state transitions and no broad tag-graph
+growth. It is the preferred policy for the next experiment, not yet a production default. The
+questions are repeated development questions, so the next iteration must isolate whether the
+gain comes from atom-tag reinforcement, `CO_USED` links, or both, and then validate the winner on
+held-out query variations and negative/collateral cases.
+
 ## Reproduction artifacts
 
 - Fixture: `evals/mem0_experience_v1.json`
@@ -115,8 +146,12 @@ than lowering vector thresholds on this fixture.
 - Native report: `data/results/longmemeval-dev6-native-baseline-v1.json`
 - First-relevant report: `data/results/longmemeval-dev6-mem0-experience-first-v1.json`
 - All-relevant report: `data/results/longmemeval-dev6-mem0-experience-all-v1.json`
+- Atom + `CO_USED` report:
+  `data/results/longmemeval-dev6-mem0-experience-atom-co-used-v1.json`
 - Cold snapshot: `artifacts/longmemeval-dev6-entity-cold-v1.sqlite3`
 - Used snapshots: `artifacts/longmemeval-dev6-entity-first-used-v1.sqlite3` and
   `artifacts/longmemeval-dev6-entity-all-used-v1.sqlite3`
+- Atom + `CO_USED` snapshot:
+  `artifacts/longmemeval-dev6-entity-atom-co-used-v1.sqlite3`
 
 Runtime reports, databases, and Mem0 working stores are deliberately ignored by Git.

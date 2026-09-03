@@ -16,6 +16,7 @@ from data_retrieval.mem0 import (
     Mem0EntityRelationship,
     Mem0VectorCalibrationService,
 )
+from data_retrieval.services.learning import ATOM_CO_USED_LEARNING_POLICY
 from data_retrieval.storage.memory import InMemoryRepository
 
 
@@ -118,13 +119,19 @@ class Mem0ExperienceSuiteTests(unittest.TestCase):
                 namespace_prefix="experience",
                 question_ids=(case.question_id,),
                 feedback_selection="all_relevant",
+                learning_policy=ATOM_CO_USED_LEARNING_POLICY,
                 usage_round_count=1,
                 top_k=3,
             )
 
         self.assertEqual(len(report.snapshots), 2)
+        self.assertEqual(
+            report.learning_policy["policy_id"],
+            ATOM_CO_USED_LEARNING_POLICY.policy_id,
+        )
         self.assertEqual(report.usage_rounds[0].selected_items, 2)
         self.assertEqual(report.usage_rounds[0].atom_link_updates, 1)
+        self.assertEqual(report.usage_rounds[0].tag_relation_updates, 0)
         self.assertEqual(
             report.snapshots[-1]["graph"]["atom_link_counts"][AtomLinkRelation.CO_USED.value],
             1,

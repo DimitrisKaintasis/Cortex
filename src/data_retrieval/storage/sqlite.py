@@ -1139,7 +1139,9 @@ class SQLiteRepository:
                 namespace=str(feedback_event["namespace"]),
                 source_type=WeightEventSource.FEEDBACK,
                 source_id=str(feedback_event["feedback_id"]),
-                policy_version="bounded-feedback-v1",
+                policy_version=str(
+                    feedback_event.get("policy_version", "bounded-feedback-v1")
+                ),
                 metadata={
                     "retrieval_id": str(feedback_event["retrieval_id"]),
                     "outcome": str(feedback_event["outcome"]),

@@ -4,16 +4,73 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from data_retrieval.domain.models import AtomLinkRelation
+from data_retrieval.domain.models import AtomLinkRelation, CalibrationTarget
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan
 from data_retrieval.services.ingestion import IngestService
-from data_retrieval.services.learning import LearningService
+from data_retrieval.services.learning import (
+    ATOM_CO_USED_LEARNING_POLICY,
+    LearningService,
+)
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.storage.memory import InMemoryRepository
 from data_retrieval.storage.sqlite import SQLiteRepository
 
 
 class LearningServiceTests(unittest.TestCase):
+    def test_atom_co_used_policy_avoids_broad_tag_relation_updates(self) -> None:
+        repository = InMemoryRepository()
+        ingestion = IngestService(repository)
+        first = ingestion.ingest_text(
+            namespace="project-a",
+            source="first",
+            text="The Mac runs the Docker worker.",
+            explicit_tags=("docker", "mac mini"),
+        )
+        second = ingestion.ingest_text(
+            namespace="project-a",
+            source="second",
+            text="The Mac keeps the Docker worker online.",
+            explicit_tags=("docker", "mac mini"),
+        )
+        tag_relations_before = repository.list_tag_relations(namespace="project-a")
+        retrieval = RetrievalService(repository).retrieve(
+            QueryPlan(query="docker", namespace="project-a", query_tags=("docker",))
+        )
+
+        result = LearningService(
+            repository,
+            policy=ATOM_CO_USED_LEARNING_POLICY,
+        ).apply_feedback(
+            FeedbackRequest(
+                feedback_id="focused-feedback-1",
+                retrieval_id=retrieval.retrieval_id,
+                selected_atom_ids=(first.atom_ids[0], second.atom_ids[0]),
+                outcome="positive",
+            )
+        )
+
+        self.assertEqual(result.atom_tag_updates, 2)
+        self.assertEqual(result.atom_link_updates, 1)
+        self.assertEqual(result.tag_relation_updates, 0)
+        self.assertEqual(
+            repository.list_tag_relations(namespace="project-a"),
+            tag_relations_before,
+        )
+        learned_events = tuple(
+            event
+            for event in repository.list_weight_events(namespace="project-a")
+            if event.source_id == "focused-feedback-1"
+        )
+        self.assertEqual(len(learned_events), 3)
+        self.assertNotIn(
+            CalibrationTarget.TAG_RELATION,
+            {event.target_type for event in learned_events},
+        )
+        self.assertEqual(
+            {event.policy_version for event in learned_events},
+            {ATOM_CO_USED_LEARNING_POLICY.policy_id},
+        )
+
     def test_positive_feedback_updates_only_learned_relationships(self) -> None:
         repository = InMemoryRepository()
         ingestion = IngestService(repository)

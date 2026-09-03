@@ -25,6 +25,31 @@ class FeedbackResult:
     learning_multiplier: float
 
 
+@dataclass(frozen=True, slots=True)
+class LearningPolicy:
+    """Versioned switches for the independently testable feedback channels."""
+
+    policy_id: str
+    learn_atom_tags: bool = True
+    learn_co_used: bool = True
+    learn_tag_relations: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.policy_id.strip():
+            raise ValueError("policy_id cannot be empty")
+
+
+ALL_PAIRS_LEARNING_POLICY = LearningPolicy(policy_id="bounded-feedback-v1")
+ATOM_CO_USED_LEARNING_POLICY = LearningPolicy(
+    policy_id="bounded-atom-co-used-v1",
+    learn_tag_relations=False,
+)
+LEARNING_POLICY_PROFILES = {
+    "all_pairs": ALL_PAIRS_LEARNING_POLICY,
+    "atom_co_used": ATOM_CO_USED_LEARNING_POLICY,
+}
+
+
 class LearningService:
     """Turn explicit retrieval outcomes into small, auditable weight updates."""
 
@@ -37,6 +62,7 @@ class LearningService:
         summary_credit: float = 0.25,
         maximum_weight: float = 10.0,
         maximum_relationship_nodes: int = 12,
+        policy: LearningPolicy = ALL_PAIRS_LEARNING_POLICY,
     ) -> None:
         if maximum_relationship_nodes < 2:
             raise ValueError("maximum_relationship_nodes must be at least two")
@@ -46,6 +72,7 @@ class LearningService:
         self.summary_credit = summary_credit
         self.maximum_weight = maximum_weight
         self.maximum_relationship_nodes = maximum_relationship_nodes
+        self.policy = policy
 
     def apply_feedback(self, request: FeedbackRequest) -> FeedbackResult:
         event = self.repository.get_retrieval_event(request.retrieval_id)
@@ -81,7 +108,7 @@ class LearningService:
                 if tag is None:
                     continue
                 credited_tag_ids.add(edge.tag_id)
-                if tag.canonical_text not in query_tags:
+                if not self.policy.learn_atom_tags or tag.canonical_text not in query_tags:
                     continue
                 atom_tag_updates.append(
                     replace(
@@ -97,30 +124,36 @@ class LearningService:
                     )
                 )
 
-        atom_link_updates = self._co_used_updates(
-            namespace=namespace,
-            atom_ids=tuple(sorted(credit))[: self.maximum_relationship_nodes],
-            sign=sign,
-            feedback_id=request.feedback_id,
-            multiplier=learning_multiplier,
-        )
-        query_tag_ids = {
-            tag.tag_id
-            for tag in self.repository.get_tags_by_canonical(
-                namespace=namespace, canonical_texts=tuple(sorted(query_tags))
+        atom_link_updates = (
+            self._co_used_updates(
+                namespace=namespace,
+                atom_ids=tuple(sorted(credit))[: self.maximum_relationship_nodes],
+                sign=sign,
+                feedback_id=request.feedback_id,
+                multiplier=learning_multiplier,
             )
-        }
-        relationship_tag_ids = [*sorted(query_tag_ids)]
-        relationship_tag_ids.extend(
-            tag_id for tag_id in sorted(credited_tag_ids) if tag_id not in query_tag_ids
+            if self.policy.learn_co_used
+            else ()
         )
-        tag_relation_updates = self._tag_relation_updates(
-            namespace=namespace,
-            tag_ids=tuple(relationship_tag_ids[: self.maximum_relationship_nodes]),
-            sign=sign,
-            feedback_id=request.feedback_id,
-            multiplier=learning_multiplier,
-        )
+        tag_relation_updates: tuple[TagRelation, ...] = ()
+        if self.policy.learn_tag_relations:
+            query_tag_ids = {
+                tag.tag_id
+                for tag in self.repository.get_tags_by_canonical(
+                    namespace=namespace, canonical_texts=tuple(sorted(query_tags))
+                )
+            }
+            relationship_tag_ids = [*sorted(query_tag_ids)]
+            relationship_tag_ids.extend(
+                tag_id for tag_id in sorted(credited_tag_ids) if tag_id not in query_tag_ids
+            )
+            tag_relation_updates = self._tag_relation_updates(
+                namespace=namespace,
+                tag_ids=tuple(relationship_tag_ids[: self.maximum_relationship_nodes]),
+                sign=sign,
+                feedback_id=request.feedback_id,
+                multiplier=learning_multiplier,
+            )
         now = utc_now()
         feedback_event: dict[str, object] = {
             "feedback_id": request.feedback_id,
@@ -132,6 +165,12 @@ class LearningService:
             "credited_atom_ids": sorted(credit),
             "used_mem0": request.used_mem0,
             "learning_multiplier": learning_multiplier,
+            "policy_version": self.policy.policy_id,
+            "learning_channels": {
+                "atom_tags": self.policy.learn_atom_tags,
+                "co_used": self.policy.learn_co_used,
+                "tag_relations": self.policy.learn_tag_relations,
+            },
             "created_at": now.isoformat(),
         }
         self.repository.apply_learning_updates(

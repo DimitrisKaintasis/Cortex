@@ -22,7 +22,11 @@ from data_retrieval.domain.models import (
 )
 from data_retrieval.retrieval.embedding import Embedder
 from data_retrieval.retrieval.models import FeedbackRequest, RetrievalChannels
-from data_retrieval.services.learning import LearningService
+from data_retrieval.services.learning import (
+    ALL_PAIRS_LEARNING_POLICY,
+    LearningPolicy,
+    LearningService,
+)
 from data_retrieval.services.weight_ledger import WeightLedgerService
 from data_retrieval.storage.repository import Repository
 
@@ -99,6 +103,7 @@ class ExperienceReport:
     dataset_hash: str
     question_ids: tuple[str, ...]
     feedback_selection: str
+    learning_policy: dict[str, Any]
     usage_round_count: int
     top_k: int
     embedding_provider: str
@@ -137,6 +142,7 @@ class Mem0ExperienceSuite:
         namespace_prefix: str,
         question_ids: tuple[str, ...],
         feedback_selection: str,
+        learning_policy: LearningPolicy = ALL_PAIRS_LEARNING_POLICY,
         usage_round_count: int = 5,
         top_k: int = 10,
     ) -> ExperienceReport:
@@ -199,6 +205,7 @@ class Mem0ExperienceSuite:
                 cases=imported.cases,
                 hybrid=current["retrieval"]["hybrid_graph"],
                 feedback_selection=feedback_selection,
+                learning_policy=learning_policy,
             )
             rounds.append(round_result)
             current = self._snapshot(
@@ -230,12 +237,13 @@ class Mem0ExperienceSuite:
             and hybrid_delta["useful_context_fraction"] >= 0.0
         )
         return ExperienceReport(
-            schema_version=1,
+            schema_version=2,
             suite_id=suite_id,
             dataset_id=imported.dataset_id,
             dataset_hash=imported.dataset_hash,
             question_ids=tuple(case.question_id for case in imported.cases),
             feedback_selection=feedback_selection,
+            learning_policy=asdict(learning_policy),
             usage_round_count=usage_round_count,
             top_k=top_k,
             embedding_provider=self.embedder.provider,
@@ -303,6 +311,7 @@ class Mem0ExperienceSuite:
         cases: tuple[ImportedLongMemEvalCase, ...],
         hybrid: dict[str, Any],
         feedback_selection: str,
+        learning_policy: LearningPolicy,
     ) -> ExperienceRound:
         case_specs = {case.question_id: case for case in cases}
         counters: Counter[str] = Counter()
@@ -327,12 +336,16 @@ class Mem0ExperienceSuite:
                 )
                 for index in selected_indexes
             )
-            learned = LearningService(self.repository).apply_feedback(
+            learned = LearningService(
+                self.repository,
+                policy=learning_policy,
+            ).apply_feedback(
                 FeedbackRequest(
                     feedback_id=stable_id(
                         "mem0-experience-feedback",
                         suite_id,
                         feedback_selection,
+                        learning_policy.policy_id,
                         str(round_number),
                         case.question_id,
                     ),

@@ -40,7 +40,7 @@ from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentServ
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.interactions import InteractionService
 from data_retrieval.services.large_ingestion import LargeFileIngestService
-from data_retrieval.services.learning import LearningService
+from data_retrieval.services.learning import LEARNING_POLICY_PROFILES, LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.services.tag_lifecycle import TagLifecycleService
@@ -549,6 +549,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--feedback-selection",
         choices=("first_relevant", "all_relevant"),
         default="first_relevant",
+    )
+    experience.add_argument(
+        "--learning-policy",
+        choices=tuple(LEARNING_POLICY_PROFILES),
+        default="all_pairs",
+        help="versioned feedback channels to evaluate",
     )
     experience.add_argument("--usage-rounds", type=int)
     experience.add_argument("--top-k", type=int)
@@ -1514,6 +1520,7 @@ def _evaluate_mem0_experience(
             namespace_prefix=namespace_prefix,
             question_ids=question_ids,
             feedback_selection=args.feedback_selection,
+            learning_policy=LEARNING_POLICY_PROFILES[args.learning_policy],
             usage_round_count=usage_rounds,
             top_k=top_k,
         )
@@ -1526,6 +1533,7 @@ def _evaluate_mem0_experience(
     return {
         "suite_id": report.suite_id,
         "feedback_selection": report.feedback_selection,
+        "learning_policy": report.learning_policy,
         "usage_round_count": report.usage_round_count,
         "mechanical_passed": report.mechanical_passed,
         "learning_signal_passed": report.learning_signal_passed,
