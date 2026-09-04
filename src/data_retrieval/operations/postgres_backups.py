@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
+from psycopg import sql
+
 _SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _VERIFY_DATABASE_PREFIX = "data_retrieval_verify_"
 
@@ -207,34 +209,46 @@ class DockerPostgresBackupManager:
                 ),
                 backup_path,
             )
-            raw_summary = self.runner.capture(
-                (
-                    "docker",
-                    "exec",
-                    container_id,
-                    "psql",
-                    "--tuples-only",
-                    "--no-align",
-                    f"--username={self.database_user}",
-                    f"--dbname={verification_database}",
-                    "--command",
-                    _verification_query(),
-                )
+            psql_command = (
+                "docker",
+                "exec",
+                container_id,
+                "psql",
+                "--tuples-only",
+                "--no-align",
+                "--set=ON_ERROR_STOP=1",
+                f"--username={self.database_user}",
+                f"--dbname={verification_database}",
+                "--command",
             )
-            summary = json.loads(raw_summary)
+            catalog = json.loads(self.runner.capture((*psql_command, _catalog_query())))
+            if not isinstance(catalog, dict) or catalog.get("vector_extension") is not True:
+                raise BackupCommandError("restored database is missing the vector extension")
+            tables = catalog.get("tables")
+            required = {"documents", "atoms", "tags", "atom_tags"}
+            if (
+                not isinstance(tables, list)
+                or not all(isinstance(table, str) for table in tables)
+                or not required.issubset(tables)
+            ):
+                raise BackupCommandError("restored database is missing canonical tables")
+            row_counts = json.loads(self.runner.capture((*psql_command, _row_counts_query(tables))))
+            if (
+                not isinstance(row_counts, dict)
+                or set(row_counts) != set(tables)
+                or any(type(value) is not int or value < 0 for value in row_counts.values())
+            ):
+                raise BackupCommandError("restore verification returned invalid row counts")
         finally:
             if created:
                 self._drop_verification_database(container_id, verification_database)
 
-        row_counts = summary.get("row_counts")
-        if not isinstance(row_counts, dict):
-            raise BackupCommandError("restore verification returned invalid row counts")
         return RestoreVerification(
             backup_path=str(backup_path),
             verified_at=datetime.now(UTC).isoformat(),
             sha256=digest,
             manifest_verified=manifest_verified,
-            vector_extension=bool(summary.get("vector_extension")),
+            vector_extension=True,
             row_counts={str(key): int(value) for key, value in row_counts.items()},
         )
 
@@ -320,18 +334,30 @@ def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _verification_query() -> str:
+def _catalog_query() -> str:
     return """
         SELECT json_build_object(
             'vector_extension', EXISTS(
                 SELECT 1 FROM pg_extension WHERE extname = 'vector'
             ),
-            'row_counts', json_build_object(
-                'documents', (SELECT count(*) FROM data_retrieval.documents),
-                'atoms', (SELECT count(*) FROM data_retrieval.atoms),
-                'tags', (SELECT count(*) FROM data_retrieval.tags),
-                'atom_tags', (SELECT count(*) FROM data_retrieval.atom_tags),
-                'weight_events', (SELECT count(*) FROM data_retrieval.weight_events)
+            'tables', (
+                SELECT json_agg(table_name ORDER BY table_name)
+                FROM information_schema.tables
+                WHERE table_schema = 'data_retrieval' AND table_type = 'BASE TABLE'
             )
         )::text;
     """.strip()
+
+
+def _row_counts_query(tables: list[str]) -> str:
+    # Inspect the archived schema without migrating it: older recovery points may
+    # legitimately predate weight_events and tag_candidates.
+    pairs = [
+        sql.SQL("{}, (SELECT count(*) FROM {})").format(
+            sql.Literal(table), sql.Identifier("data_retrieval", table)
+        )
+        for table in tables
+    ]
+    return (
+        sql.SQL("SELECT json_build_object({})::text").format(sql.SQL(", ").join(pairs)).as_string()
+    )

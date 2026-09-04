@@ -12,27 +12,24 @@ from data_retrieval.operations.postgres_backups import (
 
 
 class _FakeRunner:
-    def __init__(self, *, fail_restore: bool = False) -> None:
+    def __init__(
+        self, *, fail_restore: bool = False, legacy: bool = False, vector: bool = True
+    ) -> None:
         self.commands: list[tuple[str, ...]] = []
         self.fail_restore = fail_restore
+        self.vector = vector
+        self.counts = {"documents": 2, "atoms": 7, "tags": 3, "atom_tags": 8}
+        if not legacy:
+            self.counts["weight_events"] = 4
 
     def capture(self, command: tuple[str, ...]) -> str:
         self.commands.append(command)
         if "ps" in command and "--quiet" in command:
             return "container-123"
         if "psql" in command:
-            return json.dumps(
-                {
-                    "vector_extension": True,
-                    "row_counts": {
-                        "documents": 2,
-                        "atoms": 7,
-                        "tags": 3,
-                        "atom_tags": 8,
-                        "weight_events": 4,
-                    },
-                }
-            )
+            if "information_schema.tables" in command[-1]:
+                return json.dumps({"vector_extension": self.vector, "tables": list(self.counts)})
+            return json.dumps(self.counts)
         return ""
 
     def to_file(self, command: tuple[str, ...], path: Path) -> None:
@@ -128,6 +125,34 @@ class DockerPostgresBackupManagerTests(unittest.TestCase):
 
             with self.assertRaises(FileExistsError):
                 manager.backup(backup_path)
+
+    def test_legacy_backup_verifies_without_migrating_its_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = _FakeRunner(legacy=True)
+            manager = self._manager(root, runner)
+            backup_path = root / "snapshot.dump"
+            manager.backup(backup_path)
+
+            result = manager.verify(backup_path)
+
+            self.assertNotIn("weight_events", result.row_counts)
+            query = [command[-1] for command in runner.commands if "psql" in command][-1]
+            self.assertNotIn("weight_events", query)
+            self.assertFalse(any("ALTER TABLE" in str(command) for command in runner.commands))
+
+    def test_missing_extension_fails_and_cleans_up_restore_database(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = _FakeRunner(vector=False)
+            manager = self._manager(root, runner)
+            backup_path = root / "snapshot.dump"
+            manager.backup(backup_path)
+
+            with self.assertRaisesRegex(BackupCommandError, "vector extension"):
+                manager.verify(backup_path)
+
+            self.assertTrue(any("dropdb" in command for command in runner.commands))
 
 
 if __name__ == "__main__":

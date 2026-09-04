@@ -2,9 +2,9 @@
 
 Status: active
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
-Current delivery step: D3a — validate recoverable laptop PostgreSQL
+Current delivery step: D3a passed — rehearse the legacy corpus upgrade before current-runtime use
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -54,7 +54,7 @@ change the privacy boundary.
 |---|---|---|
 | D1. Checkpointed document pipeline | passed | One command runs canonical ingestion, configured processors, and a ledger audit with restart evidence |
 | D2. Local application boundary | passed | Retrieval, explanations, candidate review, and attributable feedback are usable without raw CLI choreography |
-| D3a. Recoverable laptop PostgreSQL | in progress | Large ingestion has checksummed backups and a proven local restore path |
+| D3a. Recoverable laptop PostgreSQL | passed | Both legacy corpus and current-schema backups restored successfully; live adapter and API checks passed |
 | D3b. Always-reachable canonical storage | deferred | A later trusted/hosted database is reachable without the laptop |
 | D4. Autonomous Mac worker | deferred | Leased jobs continue after the laptop disconnects |
 
@@ -62,6 +62,12 @@ D1 is documented in `LOCAL-MVP-RUNBOOK.md`; D2 and its loopback-only boundary ar
 `LOCAL-API.md`. SQLite is explicitly the small/medium local mode, while PostgreSQL remains the
 bounded large-ingestion mode. ADR-0018 selects laptop-only operation for now. D3a must pass before
 large canonical ingestion; D3b and its security boundary must pass before D4 resumes.
+
+D3a evidence and backup identities are in `LAPTOP-POSTGRES.md`. The existing PostgreSQL corpus
+still uses its historical schema. Next, rehearse the application's automatic tag-candidate and
+weight-ledger migration on a restored copy, compare retrieval and provenance, and only then
+upgrade the canonical corpus. Opening it with the current repository/API performs migrations;
+the backup verifier deliberately does not.
 
 ## Step 0 — Preserve the accepted baseline
 
@@ -326,3 +332,4 @@ Append one short entry after every work session.
 | 2026-09-04 | D1 | Added one checkpointed document workflow over canonical ingestion, Tags, Temporal, Mem0, embeddings, and weight audit | 161 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; `src` and `tests` passed Ruff; SQLite/PostgreSQL ingestion modes are explicit | Build the narrow local retrieval/feedback application boundary |
 | 2026-09-04 | D2 | Added an optional loopback FastAPI transport over canonical ingestion, explainable retrieval, candidate review, and attributable feedback | 165 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; API flow and fixed loopback bind are covered; a real Uvicorn health/OpenAPI smoke passed; `src` and `tests` passed Ruff | Choose hosted PostgreSQL and define backup/restore acceptance gates |
 | 2026-09-04 | D3a | Selected laptop-only storage; changed Ollama defaults to laptop loopback; added atomic PostgreSQL backups, checksum manifests, and isolated restore verification | 172 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; lint and diff checks passed; a real local tag/embedding/retrieval/API smoke passed; live Docker restore is blocked by a stale optional Model Runner socket before PostgreSQL startup | Repair Docker Desktop locally, run live PostgreSQL tests, then create and verify the first real backup |
+| 2026-09-05 | D3a | Completed live storage acceptance after Docker restart; made restore verification inspect legacy schemas and require pgvector/core tables | 176 tests passed with PostgreSQL enabled; original 193 MiB archive restored with all ten table counts matching, including 272,209 atoms; current-schema fixture restored with weight events; real PostgreSQL API health passed; temporary databases cleaned up | Rehearse corpus migration and compare retrieval on a restored copy before upgrading canonical data |
