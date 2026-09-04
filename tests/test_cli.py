@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +12,31 @@ from data_retrieval.cli import build_parser, main
 
 
 class CliParserTests(unittest.TestCase):
+    @patch("uvicorn.run")
+    def test_serve_api_is_fixed_to_laptop_loopback(self, run_server) -> None:
+        output = StringIO()
+        errors = StringIO()
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ",
+            {"OLLAMA_EMBEDDING_MODEL": "", "OLLAMA_TAG_MODEL": ""},
+            clear=False,
+        ), redirect_stdout(output), redirect_stderr(errors):
+            exit_code = main(
+                [
+                    "serve-api",
+                    "--db",
+                    str(Path(directory) / "data.sqlite3"),
+                    "--port",
+                    "9876",
+                ]
+            )
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["host"], "127.0.0.1")
+        self.assertIn("http://127.0.0.1:9876/docs", errors.getvalue())
+        self.assertEqual(run_server.call_args.kwargs["host"], "127.0.0.1")
+
     def test_process_file_writes_a_completed_restart_safe_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

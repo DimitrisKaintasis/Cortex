@@ -14,6 +14,8 @@ The current build order, pass/fail gates, and session progress log live in
 truth for what happens next.
 The runnable laptop MVP, checkpoint/retry behavior, and exact laptop/Mac responsibility split
 are documented in [`docs/LOCAL-MVP-RUNBOOK.md`](docs/LOCAL-MVP-RUNBOOK.md).
+The loopback-only application API and operating instructions are documented in
+[`docs/LOCAL-API.md`](docs/LOCAL-API.md).
 
 Data Retrieval is a clean successor to the original `Tags-Project`. It is a
 tag-centric retrieval engine that keeps source order, tag provenance, and
@@ -240,6 +242,21 @@ audit in `data/runs/<stable-run-id>.json`. Repeating the command reuses each pro
 markers. SQLite reports `atomic-in-memory`; PostgreSQL reports `bounded-staged`. See the
 [local MVP runbook](docs/LOCAL-MVP-RUNBOOK.md) for full Temporal and Mem0 examples and the exact
 operational limits.
+
+For local applications, scripts, or a future UI, start the optional API transport:
+
+```powershell
+python -m pip install -e ".[api]"
+
+python -m data_retrieval serve-api `
+  --db .\data.sqlite3 `
+  --port 8765
+```
+
+Open `http://127.0.0.1:8765/docs`. It exposes canonical text ingestion, explainable retrieval,
+attributable feedback, and tag-candidate review. The server is intentionally fixed to laptop
+loopback and has no public authentication boundary; do not expose it through port forwarding or
+a public reverse proxy. See the [local API runbook](docs/LOCAL-API.md).
 
 First ingest a UTF-8 text file. `occurred-at` is required only when the source should
 participate in Temporal summaries:

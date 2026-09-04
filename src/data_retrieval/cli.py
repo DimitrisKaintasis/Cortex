@@ -162,6 +162,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="checkpoint report path; defaults to data/runs/<stable-run-id>.json",
     )
 
+    serve_api = commands.add_parser(
+        "serve-api",
+        help="serve the local-only ingestion, retrieval, review, and feedback API",
+    )
+    _add_storage_options(serve_api)
+    serve_api.add_argument("--port", type=int, default=8765)
+    serve_api.add_argument(
+        "--tag-model",
+        default=os.getenv("OLLAMA_TAG_MODEL"),
+        help="optional Ollama model for query tag generation",
+    )
+    serve_api.add_argument(
+        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
+    )
+    serve_api.add_argument(
+        "--embedding-profile",
+        choices=tuple(EMBEDDING_PROFILES),
+        default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
+    )
+    serve_api.add_argument(
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+    )
+    serve_api.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")),
+    )
+    serve_api.add_argument(
+        "--log-level",
+        choices=("critical", "error", "warning", "info", "debug", "trace"),
+        default="info",
+    )
+
     longmemeval = commands.add_parser(
         "ingest-longmemeval",
         help="stream an official LongMemEval JSON dataset into isolated question namespaces",
@@ -679,6 +712,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _ingest(args, parser)
         elif args.command == "process-file":
             output = _process_file(args, parser)
+        elif args.command == "serve-api":
+            output = _serve_api(args)
         elif args.command == "ingest-longmemeval":
             output = _ingest_longmemeval(args, parser)
         elif args.command == "run-longmemeval":
@@ -924,6 +959,49 @@ def _process_file(
     return {
         **report.as_dict(),
         "report": str(report_path),
+        "database": _database_label(args),
+    }
+
+
+def _serve_api(args: argparse.Namespace) -> dict[str, object]:
+    if not 1 <= args.port <= 65_535:
+        raise ValueError("port must be between 1 and 65535")
+    try:
+        import uvicorn
+
+        from data_retrieval.api import LocalApiConfig, create_app
+    except ImportError as error:
+        raise ValueError(
+            "API dependencies are not installed; install them with "
+            "'python -m pip install -e .[api]'"
+        ) from error
+
+    host = "127.0.0.1"
+    print(
+        f"Data Retrieval local API: http://{host}:{args.port}/docs",
+        file=sys.stderr,
+        flush=True,
+    )
+    uvicorn.run(
+        create_app(
+            LocalApiConfig(
+                database_path=args.db,
+                postgres_dsn=args.postgres_dsn,
+                ollama_url=args.ollama_url,
+                ollama_timeout_seconds=args.ollama_timeout,
+                tag_model=args.tag_model,
+                embedding_model=args.embedding_model,
+                embedding_profile=args.embedding_profile,
+            )
+        ),
+        host=host,
+        port=args.port,
+        log_level=args.log_level,
+    )
+    return {
+        "status": "stopped",
+        "host": host,
+        "port": args.port,
         "database": _database_label(args),
     }
 

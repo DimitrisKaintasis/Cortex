@@ -132,7 +132,6 @@ the real idempotency; the JSON checkpoint is an operator record, not an alternat
 
 ## Next deployment boundary
 
-The next useful product slice is retrieval plus feedback through a small local API or UI while
-the same laptop-owned database remains canonical. Autonomous Mac execution comes later, after a
-TLS-protected hosted PostgreSQL database exists; then a leased database job queue can let a Mac
-worker continue after the laptop disconnects.
+The local retrieval and feedback API is now implemented in `LOCAL-API.md`. The next boundary is a
+TLS-protected hosted PostgreSQL database with tested backup and restoration. A leased job queue
+can then let a Mac worker continue after the laptop disconnects.

@@ -1,0 +1,101 @@
+# Local API Runbook
+
+Status: local MVP
+
+Architecture decision: [ADR-0017](decisions/0017-loopback-local-api.md)
+
+## Purpose and boundary
+
+The API makes the existing application usable by a local UI, script, or Codex integration
+without duplicating domain logic. It exposes:
+
+| Method and path | Capability |
+|---|---|
+| `GET /health` | Database readiness and non-secret model configuration status |
+| `GET /v1/namespaces` | Available canonical namespaces |
+| `POST /v1/documents` | Atomic canonical text ingestion with optional explicit tags/time |
+| `POST /v1/retrievals` | Explainable hybrid and temporal retrieval |
+| `POST /v1/feedback` | Attributable positive or negative learning for returned atoms |
+| `GET /v1/tag-candidates` | Quarantined candidate review with source evidence |
+| `POST /v1/tag-candidates/{id}/resolution` | Promote, merge, or reject a candidate |
+
+This is not a public API. It has no accounts, authentication, authorization, rate limiting, or
+cross-origin browser access. The CLI fixes the listener to laptop loopback, `127.0.0.1`, and does
+not offer a public bind flag. Do not place it behind a public reverse proxy.
+
+## Install and start
+
+Install the optional API transport:
+
+```powershell
+python -m pip install -e ".[api]"
+```
+
+Start against laptop SQLite:
+
+```powershell
+python -m data_retrieval serve-api `
+  --db .\data.sqlite3 `
+  --port 8765
+```
+
+Or use PostgreSQL without putting the DSN in command history:
+
+```powershell
+$env:DATA_RETRIEVAL_POSTGRES_DSN = "<protected PostgreSQL DSN>"
+python -m data_retrieval serve-api --port 8765
+```
+
+Open `http://127.0.0.1:8765/docs` for the generated interactive OpenAPI interface. The server
+runs in the foreground and stops with `Ctrl+C`; it does not yet survive laptop shutdown or login.
+
+## Optional Mac inference
+
+The API performs lexical, tag-graph, relationship, and temporal retrieval without a live model.
+Configure the Mac tunnel models to add generated query tags and semantic search:
+
+```powershell
+python -m data_retrieval serve-api `
+  --db .\data.sqlite3 `
+  --tag-model gemma4:e2b-mlx `
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1
+```
+
+The Ollama endpoint defaults to `http://127.0.0.1:11435`, the laptop side of the SSH tunnel. If
+the tunnel or Mac is unavailable, generated query tags can fail while semantic retrieval degrades
+safely and reports a diagnostic warning. Canonical ingestion itself remains laptop-local.
+
+## Operational model
+
+- The API process runs on the laptop.
+- SQLite or PostgreSQL remains canonical; one repository connection is opened and closed per
+  request so transaction ownership is explicit.
+- The PostgreSQL DSN and model endpoint are startup configuration. Neither is returned by the
+  API.
+- Uvicorn writes access and application errors to the terminal.
+- Restart the foreground process to deploy code or configuration changes.
+- Back up the database, not API process state. Retrieval and feedback events live in the
+  canonical repository.
+
+`POST /v1/documents` intentionally accepts text rather than arbitrary laptop file paths and caps
+one request at 2,000,000 characters. Large files and full Tags/Temporal/Mem0 enrichment should
+continue through the checkpointed `process-file` command, using PostgreSQL for bounded ingestion.
+
+## Minimal use sequence
+
+1. Submit text to `POST /v1/documents`.
+2. Query it through `POST /v1/retrievals`.
+3. Inspect each result's channel score, evidence strings, temporal label, and lineage IDs.
+4. Send only actually used returned atom IDs to `POST /v1/feedback`.
+5. Review AI-proposed tags through the candidate endpoints before they enter retrieval.
+
+Feedback cannot credit an arbitrary atom: the learning service verifies that every selection was
+returned by the referenced retrieval. Candidate promotion and rejection use the same atomic
+lifecycle service as the CLI.
+
+## Next boundary
+
+The local API completes D2 but does not make the system always online. D3 is hosted PostgreSQL
+with TLS, restricted networking, backup, and tested restoration. Only after D3 should D4 add a
+leased job queue and autonomous Mac worker.

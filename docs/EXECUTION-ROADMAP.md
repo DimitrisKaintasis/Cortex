@@ -4,7 +4,7 @@ Status: active
 
 Last updated: 2026-09-04
 
-Current delivery step: D2 — expose retrieval and feedback as a usable local application boundary
+Current delivery step: D3 — choose and validate hosted canonical storage
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -53,13 +53,13 @@ change the privacy boundary.
 | Step | Status | Outcome |
 |---|---|---|
 | D1. Checkpointed document pipeline | passed | One command runs canonical ingestion, configured processors, and a ledger audit with restart evidence |
-| D2. Local application boundary | not started | Retrieval, explanations, candidate review, and attributable feedback are usable without raw CLI choreography |
+| D2. Local application boundary | passed | Retrieval, explanations, candidate review, and attributable feedback are usable without raw CLI choreography |
 | D3. Hosted canonical storage | not started | TLS-protected PostgreSQL, backups, and restore tests make data safely reachable without the laptop |
 | D4. Autonomous Mac worker | not started | Leased jobs continue after the laptop disconnects |
 
-D1 is documented in `LOCAL-MVP-RUNBOOK.md`. SQLite is explicitly the small/medium local mode;
-PostgreSQL remains the bounded large-ingestion mode. D2 should begin as a narrow local API with no
-accounts or public exposure. D3 must be chosen and restore-tested before D4.
+D1 is documented in `LOCAL-MVP-RUNBOOK.md`; D2 and its loopback-only boundary are documented in
+`LOCAL-API.md`. SQLite is explicitly the small/medium local mode, while PostgreSQL remains the
+bounded large-ingestion mode. D3 must be chosen and restore-tested before D4.
 
 ## Step 0 — Preserve the accepted baseline
 
@@ -322,3 +322,4 @@ Append one short entry after every work session.
 | 2026-09-03 | Pre-8 | Compared the all-pairs learner with an atom-tag + `CO_USED` policy | Every per-round ranking, recall, and context-quality metric was identical while transitions fell 88.2%, from 1,445 across 289 edges to 170 across 34; all audits passed | Isolate atom-tag versus `CO_USED` contribution, then validate the winner on held-out and negative cases |
 | 2026-09-04 | Pre-8 | Isolated feedback channels and added six never-rewarded paraphrases plus negative/collateral checks | Query↔selected-evidence learning matched all-pairs final training and held-out quality with 48.8% fewer transitions; atom tags improved rank, CO_USED improved graph recall but caused a hybrid recall loss; negative reversal and ledger audit passed | Budget query-evidence influence and eliminate transient held-out regressions on a larger query set |
 | 2026-09-04 | D1 | Added one checkpointed document workflow over canonical ingestion, Tags, Temporal, Mem0, embeddings, and weight audit | 161 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; `src` and `tests` passed Ruff; SQLite/PostgreSQL ingestion modes are explicit | Build the narrow local retrieval/feedback application boundary |
+| 2026-09-04 | D2 | Added an optional loopback FastAPI transport over canonical ingestion, explainable retrieval, candidate review, and attributable feedback | 165 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; API flow and fixed loopback bind are covered; a real Uvicorn health/OpenAPI smoke passed; `src` and `tests` passed Ruff | Choose hosted PostgreSQL and define backup/restore acceptance gates |
