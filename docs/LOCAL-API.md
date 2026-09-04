@@ -49,22 +49,23 @@ python -m data_retrieval serve-api --port 8765
 Open `http://127.0.0.1:8765/docs` for the generated interactive OpenAPI interface. The server
 runs in the foreground and stops with `Ctrl+C`; it does not yet survive laptop shutdown or login.
 
-## Optional Mac inference
+## Optional laptop-local inference
 
 The API performs lexical, tag-graph, relationship, and temporal retrieval without a live model.
-Configure the Mac tunnel models to add generated query tags and semantic search:
+Configure laptop-local Ollama to add generated query tags and semantic search:
 
 ```powershell
 python -m data_retrieval serve-api `
   --db .\data.sqlite3 `
+  --ollama-url http://127.0.0.1:11434 `
   --tag-model gemma4:e2b-mlx `
   --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
   --embedding-profile harrier-retrieval-v1
 ```
 
-The Ollama endpoint defaults to `http://127.0.0.1:11435`, the laptop side of the SSH tunnel. If
-the tunnel or Mac is unavailable, generated query tags can fail while semantic retrieval degrades
-safely and reports a diagnostic warning. Canonical ingestion itself remains laptop-local.
+Ollama now defaults to laptop-local `127.0.0.1:11434`. If no local model is available, omit model
+options; lexical, explicit-tag, relationship, and temporal retrieval remain available. An API
+provider is a separate privacy decision because source/query content leaves the laptop.
 
 ## Operational model
 
@@ -96,6 +97,6 @@ lifecycle service as the CLI.
 
 ## Next boundary
 
-The local API completes D2 but does not make the system always online. D3 is hosted PostgreSQL
-with TLS, restricted networking, backup, and tested restoration. Only after D3 should D4 add a
-leased job queue and autonomous Mac worker.
+The local API completes D2 but does not make the system always online. D3a is recoverable laptop
+PostgreSQL, described in `LAPTOP-POSTGRES.md`. D3b always-reachable storage and D4 autonomous Mac
+work are deferred until their storage and active-host trust boundaries are accepted.

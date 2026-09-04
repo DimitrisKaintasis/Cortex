@@ -34,6 +34,10 @@ from data_retrieval.mem0 import (
     Mem0VectorCalibrationService,
     load_mem0_records,
 )
+from data_retrieval.operations.postgres_backups import (
+    DockerPostgresBackupManager,
+    default_backup_path,
+)
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
 from data_retrieval.services.calibration_backfill import CalibrationBackfillService
@@ -123,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
     )
     process_file.add_argument(
-        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     )
     process_file.add_argument(
         "--ollama-timeout",
@@ -182,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
     )
     serve_api.add_argument(
-        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     )
     serve_api.add_argument(
         "--ollama-timeout",
@@ -274,7 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
     )
     pipeline.add_argument(
-        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     )
     pipeline.add_argument(
         "--ollama-timeout",
@@ -324,7 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
     )
     ablation.add_argument(
-        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     )
     ablation.add_argument(
         "--ollama-timeout",
@@ -696,6 +700,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/results/repository-features-v1.json"),
     )
+
+    postgres_backup = commands.add_parser(
+        "postgres-backup",
+        help="create a checksummed logical backup of laptop PostgreSQL",
+    )
+    postgres_backup.add_argument("--output", type=Path)
+    postgres_backup.add_argument(
+        "--compose-file", type=Path, default=Path("compose.postgres.yml")
+    )
+    postgres_backup.add_argument("--overwrite", action="store_true")
+
+    postgres_verify = commands.add_parser(
+        "postgres-verify-backup",
+        help="restore a PostgreSQL backup into an isolated temporary database",
+    )
+    postgres_verify.add_argument("path", type=Path)
+    postgres_verify.add_argument(
+        "--compose-file", type=Path, default=Path("compose.postgres.yml")
+    )
     return parser
 
 
@@ -760,6 +783,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _evaluate_mem0_cold_start(args, parser)
         elif args.command == "evaluate-mem0-experience":
             output = _evaluate_mem0_experience(args, parser)
+        elif args.command == "postgres-backup":
+            output = _postgres_backup(args)
+        elif args.command == "postgres-verify-backup":
+            output = _postgres_verify_backup(args)
         else:
             output = _observe_repository_features(args, parser)
     except (
@@ -790,6 +817,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         return 1
     return 0
+
+
+def _postgres_backup(args: argparse.Namespace) -> dict[str, object]:
+    manager = DockerPostgresBackupManager(compose_file=args.compose_file)
+    output_path = args.output or default_backup_path()
+    return manager.backup(output_path, overwrite=args.overwrite).as_dict()
+
+
+def _postgres_verify_backup(args: argparse.Namespace) -> dict[str, object]:
+    manager = DockerPostgresBackupManager(compose_file=args.compose_file)
+    return manager.verify(args.path).as_dict()
 
 
 def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, object]:
@@ -1887,7 +1925,7 @@ def _observe_repository_features(
 def _add_ollama_options(parser: argparse.ArgumentParser, *, timeout_default: str) -> None:
     parser.add_argument(
         "--ollama-url",
-        default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435"),
+        default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
     )
     parser.add_argument("--ollama-model", default=os.getenv("OLLAMA_MODEL"))
     parser.add_argument(
@@ -1924,7 +1962,7 @@ def _database_label(args: argparse.Namespace) -> str:
 def _add_embedding_options(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
     parser.add_argument(
         "--ollama-url",
-        default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435"),
+        default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
     )
     parser.add_argument(
         "--embedding-model",

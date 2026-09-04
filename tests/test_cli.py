@@ -12,6 +12,14 @@ from data_retrieval.cli import build_parser, main
 
 
 class CliParserTests(unittest.TestCase):
+    def test_ollama_defaults_to_laptop_loopback(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            args = build_parser().parse_args(
+                ["process-file", "notes.txt", "--namespace", "project-a"]
+            )
+
+        self.assertEqual(args.ollama_url, "http://127.0.0.1:11434")
+
     @patch("uvicorn.run")
     def test_serve_api_is_fixed_to_laptop_loopback(self, run_server) -> None:
         output = StringIO()
@@ -262,6 +270,19 @@ class CliParserTests(unittest.TestCase):
         )
 
         self.assertTrue(args.repair_aggregates)
+
+    def test_postgres_recovery_commands_have_safe_local_defaults(self) -> None:
+        backup = build_parser().parse_args(["postgres-backup"])
+        verify = build_parser().parse_args(
+            ["postgres-verify-backup", "data/backups/postgres/snapshot.dump"]
+        )
+
+        self.assertIsNone(backup.output)
+        self.assertFalse(backup.overwrite)
+        self.assertEqual(backup.compose_file.as_posix(), "compose.postgres.yml")
+        self.assertEqual(
+            verify.path.as_posix(), "data/backups/postgres/snapshot.dump"
+        )
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ class LocalApiConfig:
 
     database_path: Path = Path("data.sqlite3")
     postgres_dsn: str | None = field(default=None, repr=False)
-    ollama_url: str = "http://127.0.0.1:11435"
+    ollama_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = 120.0
     tag_model: str | None = None
     embedding_model: str | None = None

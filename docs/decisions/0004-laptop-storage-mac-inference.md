@@ -1,6 +1,6 @@
 # ADR-0004: Laptop canonical storage with on-demand Mac inference
 
-- Status: Accepted as a temporary deployment; sequencing amended by ADR-0005
+- Status: Superseded for current operation by ADR-0018
 - Date: 2026-08-19
 
 ## Context

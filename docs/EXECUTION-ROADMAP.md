@@ -4,7 +4,7 @@ Status: active
 
 Last updated: 2026-09-04
 
-Current delivery step: D3 — choose and validate hosted canonical storage
+Current delivery step: D3a — validate recoverable laptop PostgreSQL
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -54,12 +54,14 @@ change the privacy boundary.
 |---|---|---|
 | D1. Checkpointed document pipeline | passed | One command runs canonical ingestion, configured processors, and a ledger audit with restart evidence |
 | D2. Local application boundary | passed | Retrieval, explanations, candidate review, and attributable feedback are usable without raw CLI choreography |
-| D3. Hosted canonical storage | not started | TLS-protected PostgreSQL, backups, and restore tests make data safely reachable without the laptop |
-| D4. Autonomous Mac worker | not started | Leased jobs continue after the laptop disconnects |
+| D3a. Recoverable laptop PostgreSQL | in progress | Large ingestion has checksummed backups and a proven local restore path |
+| D3b. Always-reachable canonical storage | deferred | A later trusted/hosted database is reachable without the laptop |
+| D4. Autonomous Mac worker | deferred | Leased jobs continue after the laptop disconnects |
 
 D1 is documented in `LOCAL-MVP-RUNBOOK.md`; D2 and its loopback-only boundary are documented in
 `LOCAL-API.md`. SQLite is explicitly the small/medium local mode, while PostgreSQL remains the
-bounded large-ingestion mode. D3 must be chosen and restore-tested before D4.
+bounded large-ingestion mode. ADR-0018 selects laptop-only operation for now. D3a must pass before
+large canonical ingestion; D3b and its security boundary must pass before D4 resumes.
 
 ## Step 0 — Preserve the accepted baseline
 
@@ -323,3 +325,4 @@ Append one short entry after every work session.
 | 2026-09-04 | Pre-8 | Isolated feedback channels and added six never-rewarded paraphrases plus negative/collateral checks | Query↔selected-evidence learning matched all-pairs final training and held-out quality with 48.8% fewer transitions; atom tags improved rank, CO_USED improved graph recall but caused a hybrid recall loss; negative reversal and ledger audit passed | Budget query-evidence influence and eliminate transient held-out regressions on a larger query set |
 | 2026-09-04 | D1 | Added one checkpointed document workflow over canonical ingestion, Tags, Temporal, Mem0, embeddings, and weight audit | 161 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; `src` and `tests` passed Ruff; SQLite/PostgreSQL ingestion modes are explicit | Build the narrow local retrieval/feedback application boundary |
 | 2026-09-04 | D2 | Added an optional loopback FastAPI transport over canonical ingestion, explainable retrieval, candidate review, and attributable feedback | 165 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; API flow and fixed loopback bind are covered; a real Uvicorn health/OpenAPI smoke passed; `src` and `tests` passed Ruff | Choose hosted PostgreSQL and define backup/restore acceptance gates |
+| 2026-09-04 | D3a | Selected laptop-only storage; changed Ollama defaults to laptop loopback; added atomic PostgreSQL backups, checksum manifests, and isolated restore verification | 172 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; lint and diff checks passed; a real local tag/embedding/retrieval/API smoke passed; live Docker restore is blocked by a stale optional Model Runner socket before PostgreSQL startup | Repair Docker Desktop locally, run live PostgreSQL tests, then create and verify the first real backup |

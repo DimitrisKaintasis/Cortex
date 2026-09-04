@@ -178,48 +178,56 @@ python -m data_retrieval ingest-longmemeval `
 See the [LongMemEval ingestion report](docs/LONGMEMEVAL.md) for the representation, label
 leakage controls, exact dataset hashes, capacity measurements, and current quality boundary.
 
-The Docker definition is a development deployment, not the final always-online database.
-Before production use, choose hosted storage, require TLS, restrict network access, store
-the DSN in a secret manager, schedule `pg_dump`/provider backups, and test restoration. The
-Mac should connect to that protected database as a worker; do not expose port 5432 directly
-to the public internet.
+The current accepted deployment is laptop-only; see
+[ADR-0018](docs/decisions/0018-laptop-only-recoverable-storage.md). Create a portable logical
+backup and prove that it restores before large ingestion or upgrades:
 
-### Laptop storage with Mac inference
+```powershell
+python -m data_retrieval postgres-backup
+python -m data_retrieval postgres-verify-backup `
+  .\data\backups\postgres\<backup-name>.dump
+```
 
-The current runtime deliberately has no background ingestion worker. PostgreSQL itself is a
-Docker service so stored data remains available while Docker Desktop is running:
+The backup command writes an atomic custom-format `pg_dump` plus a SHA-256 manifest. The verifier
+restores into a randomly named temporary database, validates pgvector and canonical row counts,
+then removes only that temporary database. Full setup, update, recovery, and backup-copy guidance
+is in the [laptop PostgreSQL runbook](docs/LAPTOP-POSTGRES.md).
+
+### Laptop-only operation
+
+The current runtime deliberately has no background worker. PostgreSQL is a Docker service, while
+ingestion, retrieval, feedback, and any configured models run from the laptop:
 
 ```text
 Laptop file -> raw ingestion -> laptop SQLite or PostgreSQL volume
                                   |
-                                  +-> tag enrichment ------> Ollama on Mac
+                                  +-> tag enrichment ------> laptop-local Ollama
                                   |
-                                  +-> Temporal enrichment -> Ollama on Mac
+                                  +-> Temporal enrichment -> laptop-local Ollama
                                   |
-                                  +-> embedding inference -> Ollama on Mac
+                                  +-> embedding inference -> laptop-local Ollama
 ```
 
-- The laptop reads source files, creates canonical atoms, and owns SQLite or the PostgreSQL
-  Docker volume.
-- The Mac runs Ollama for optional tag proposals and Temporal summaries.
-- The SSH tunnel protects the network connection; it does not make the friend's Mac a
-  private machine. Do not send data there unless it is acceptable for that machine's
-  administrator to process it.
-- When the laptop or tunnel is off, no ingestion runs and the Mac remains idle.
-- If Ollama fails or returns invalid data, raw ingestion remains safely persisted. The
-  failed enrichment can be retried later.
+- The laptop owns source files, canonical atoms, SQLite/PostgreSQL data, processor state, and
+  backups.
+- The local API and processing commands run in the foreground. Laptop shutdown stops work.
+- For a laptop Ollama installation, pass `--ollama-url http://127.0.0.1:11434`; the historical
+  `OLLAMA_BASE_URL` or `--ollama-url` can override this later.
+- Omitting model options keeps canonical ingestion and non-model retrieval fully local.
+- Using OpenRouter or another API sends the supplied content to that provider and is not strict
+  laptop-only processing.
+- Remote Mac execution, hosted storage, and worker-held credentials remain deferred.
 
-Open the tunnel in one PowerShell window. Replace the placeholders with the local key,
-SSH account, and host supplied by the Mac administrator:
+Example laptop-local model invocation:
 
 ```powershell
-ssh -i <private-key-path> `
-  -o IdentitiesOnly=yes `
-  -o KexAlgorithms=curve25519-sha256 `
-  -o StrictHostKeyChecking=yes `
-  -o ExitOnForwardFailure=yes `
-  -N -L 127.0.0.1:11435:127.0.0.1:11434 `
-  <ssh-user>@<ssh-host>
+python -m data_retrieval process-file .\notes.txt `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --source notes `
+  --ollama-url http://127.0.0.1:11434 `
+  --tag-model <local-model> `
+  --embedding-model <local-embedding-model>
 ```
 
 Keep that window open when using AI enrichment. Raw ingestion itself does not need the
@@ -456,9 +464,8 @@ blocks promotion; see
 Use a small cap first. The Mem0 configuration chooses its LLM, embedder, vector store, and
 required graph store; embedded Kuzu keeps the graph cache small and avoids another server.
 Provider credentials belong in environment variables, not the JSON file. In the current
-laptop/Mac arrangement, this command and both canonical stores run on the laptop while the Mem0
-LLM/embedder URLs point through the SSH tunnel to Mac Ollama. Thus the Mac performs inference but
-does not become the authoritative data store. See
+laptop-only arrangement, this command and both canonical stores run on the laptop. Mem0 provider
+URLs must point to laptop-local Ollama or another provider explicitly accepted for the data. See
 [the Mem0 bootstrap runbook](docs/MEM0-BOOTSTRAP.md).
 
 Backfill data ingested before calibration was enabled. This does not regenerate embeddings:
@@ -505,9 +512,8 @@ or document provider. Temporal History currently recognizes fields including
 `payload_reference`. Source adapters should populate these when the original system
 provides them; ordinary text files can omit them.
 
-The Ollama endpoint defaults to `http://127.0.0.1:11435`; `--ollama-url` can override it.
-CLI errors are written to the laptop terminal. Ollama application/service logs remain on
-the Mac.
+The Ollama endpoint defaults to laptop-local `http://127.0.0.1:11434`; `--ollama-url` can
+override it. CLI and local Ollama errors are inspected on the laptop.
 
 ## Architecture
 
