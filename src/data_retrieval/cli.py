@@ -22,6 +22,7 @@ from data_retrieval.benchmarks.mem0_entity_quality import Mem0EntityQualitySuite
 from data_retrieval.benchmarks.mem0_experience import Mem0ExperienceSuite
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
+from data_retrieval.core.identifiers import stable_id
 from data_retrieval.domain.models import TagCandidateState
 from data_retrieval.evaluation import EvaluationRunner
 from data_retrieval.inference.openrouter import OpenRouterError
@@ -36,6 +37,11 @@ from data_retrieval.mem0 import (
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
 from data_retrieval.services.calibration_backfill import CalibrationBackfillService
+from data_retrieval.services.document_pipeline import (
+    DocumentPipelineReport,
+    DocumentPipelineService,
+    TemporalPipelineRequest,
+)
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.interactions import InteractionService
@@ -75,6 +81,85 @@ def build_parser() -> argparse.ArgumentParser:
         type=_json_object,
         default={},
         help="additional source metadata as one JSON object",
+    )
+
+    process_file = commands.add_parser(
+        "process-file",
+        help="run canonical ingestion and configured enrichment stages as one checkpointed job",
+    )
+    process_file.add_argument("path", type=Path)
+    _add_storage_options(process_file)
+    process_file.add_argument("--namespace", required=True)
+    process_file.add_argument("--source", help="stable source label; defaults to the input path")
+    process_file.add_argument("--tag", action="append", default=[], dest="tags")
+    process_file.add_argument("--occurred-at", type=_aware_datetime)
+    process_file.add_argument("--timeline-id")
+    process_file.add_argument("--range-start", type=_aware_datetime)
+    process_file.add_argument("--range-end", type=_aware_datetime)
+    process_file.add_argument("--timezone", default="UTC", dest="timezone_name")
+    process_file.add_argument("--temporal-state", type=Path)
+    process_file.add_argument("--max-workers", type=int, default=1)
+    process_file.add_argument("--batch-size", type=int, default=1_000)
+    process_file.add_argument(
+        "--metadata-json",
+        type=_json_object,
+        default={},
+        help="additional source metadata as one JSON object",
+    )
+    process_file.add_argument(
+        "--inference-provider",
+        choices=("ollama", "openrouter"),
+        default="ollama",
+        help="provider for optional tag and Temporal model stages",
+    )
+    process_file.add_argument("--tag-model")
+    process_file.add_argument("--temporal-model")
+    process_file.add_argument(
+        "--embedding-model", default=os.getenv("OLLAMA_EMBEDDING_MODEL")
+    )
+    process_file.add_argument(
+        "--embedding-profile",
+        choices=tuple(EMBEDDING_PROFILES),
+        default=os.getenv("OLLAMA_EMBEDDING_PROFILE", "symmetric"),
+    )
+    process_file.add_argument(
+        "--ollama-url", default=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11435")
+    )
+    process_file.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "240")),
+    )
+    process_file.add_argument(
+        "--openrouter-url",
+        default=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+    )
+    process_file.add_argument(
+        "--openrouter-timeout",
+        type=float,
+        default=float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "180")),
+    )
+    process_file.add_argument(
+        "--enable-mem0",
+        action="store_true",
+        help="run Mem0 bootstrap; its dependencies and provider config must be installed",
+    )
+    process_file.add_argument(
+        "--mem0-config",
+        type=Path,
+        help="Mem0 OSS JSON config; supplying it also enables the Mem0 stage",
+    )
+    process_file.add_argument("--mem0-user-id")
+    process_file.add_argument("--mem0-atom-batch-size", type=int, default=32)
+    process_file.add_argument("--mem0-max-batch-chars", type=int, default=24_000)
+    process_file.add_argument("--mem0-accept-empty", action="store_true")
+    process_file.add_argument("--reject-below-similarity", type=float, default=0.60)
+    process_file.add_argument("--provisional-above-similarity", type=float, default=0.80)
+    process_file.add_argument("--provisional-weight-cap", type=float, default=0.25)
+    process_file.add_argument(
+        "--report",
+        type=Path,
+        help="checkpoint report path; defaults to data/runs/<stable-run-id>.json",
     )
 
     longmemeval = commands.add_parser(
@@ -592,6 +677,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "ingest":
             output = _ingest(args, parser)
+        elif args.command == "process-file":
+            output = _process_file(args, parser)
         elif args.command == "ingest-longmemeval":
             output = _ingest_longmemeval(args, parser)
         elif args.command == "run-longmemeval":
@@ -645,6 +732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         UnicodeError,
         OllamaError,
         OpenRouterError,
+        RuntimeError,
         ValueError,
         sqlite3.Error,
         psycopg.Error,
@@ -706,6 +794,136 @@ def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[s
         "tag_ids": result.tag_ids,
         "idempotent": result.idempotent,
         "calibration_signals": getattr(result, "calibration_signals", None),
+        "database": _database_label(args),
+    }
+
+
+def _process_file(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> dict[str, object]:
+    if not args.path.is_file():
+        parser.error(f"input file does not exist: {args.path}")
+    if args.mem0_config and not args.mem0_config.is_file():
+        parser.error(f"Mem0 config does not exist: {args.mem0_config}")
+    temporal_values = (args.timeline_id, args.range_start, args.range_end)
+    if any(value is not None for value in temporal_values) and not all(
+        value is not None for value in temporal_values
+    ):
+        parser.error(
+            "--timeline-id, --range-start, and --range-end must be supplied together"
+        )
+    if args.temporal_model and not all(value is not None for value in temporal_values):
+        parser.error("--temporal-model requires a timeline and temporal range")
+    if all(value is not None for value in temporal_values) and not args.temporal_model:
+        parser.error("a temporal range requires --temporal-model")
+    if args.range_start and args.range_end and args.range_start >= args.range_end:
+        parser.error("--range-start must be earlier than --range-end")
+
+    needs_inference = bool(args.tag_model or args.temporal_model)
+    api_key = (
+        _openrouter_api_key(parser)
+        if args.inference_provider == "openrouter" and needs_inference
+        else None
+    )
+    if args.tag_model and args.inference_provider == "openrouter":
+        assert api_key is not None
+        tag_proposer = OpenRouterTagProposer(
+            api_key=api_key,
+            model=args.tag_model,
+            base_url=args.openrouter_url,
+            timeout_seconds=args.openrouter_timeout,
+        )
+    elif args.tag_model:
+        tag_proposer = OllamaTagProposer(
+            base_url=args.ollama_url,
+            model=args.tag_model,
+            timeout_seconds=args.ollama_timeout,
+        )
+    else:
+        tag_proposer = None
+
+    if args.temporal_model and args.inference_provider == "openrouter":
+        assert api_key is not None
+        temporal_bridge = TemporalBridge(
+            OpenRouterTemporalSummarizer(
+                api_key=api_key,
+                model=args.temporal_model,
+                base_url=args.openrouter_url,
+                timeout_seconds=args.openrouter_timeout,
+            )
+        )
+    elif args.temporal_model:
+        temporal_bridge = TemporalBridge(
+            OllamaTemporalSummarizer(
+                base_url=args.ollama_url,
+                model=args.temporal_model,
+                timeout_seconds=args.ollama_timeout,
+            )
+        )
+    else:
+        temporal_bridge = None
+
+    embedder = _embedder(args) if args.embedding_model else None
+    mem0_enabled = args.enable_mem0 or args.mem0_config is not None
+    mem0_config = _load_json_object(args.mem0_config) if args.mem0_config else None
+    mem0_processor = Mem0PythonProcessor(mem0_config) if mem0_enabled else None
+    temporal_request = None
+    if args.temporal_model:
+        assert args.timeline_id and args.range_start and args.range_end
+        temporal_request = TemporalPipelineRequest(
+            timeline_id=args.timeline_id,
+            timezone_name=args.timezone_name,
+            range_start=args.range_start,
+            range_end=args.range_end,
+            state_path=(
+                args.temporal_state
+                or Path("data/state")
+                / f"{stable_id('temporal-state', args.namespace)}.sqlite3"
+            ),
+            max_workers=args.max_workers,
+        )
+
+    metadata = {"source_type": "text_file", **args.metadata_json}
+    if args.timeline_id:
+        metadata["timeline_id"] = args.timeline_id
+    report_path: Path | None = args.report
+
+    def checkpoint(report: DocumentPipelineReport) -> None:
+        nonlocal report_path
+        report_path = report_path or Path("data/runs") / f"{report.run_id}.json"
+        _write_json_atomic(report_path, report.as_dict())
+
+    with _open_repository(args) as repository:
+        report = DocumentPipelineService(
+            repository,
+            tag_proposer=tag_proposer,
+            embedder=embedder,
+            temporal_bridge=temporal_bridge,
+            mem0_processor=mem0_processor,
+            mem0_admission_policy=Mem0VectorAdmissionPolicy(
+                reject_below_similarity=args.reject_below_similarity,
+                provisional_above_similarity=args.provisional_above_similarity,
+                provisional_weight_cap=args.provisional_weight_cap,
+            ),
+            ingest_batch_size=args.batch_size,
+            mem0_atom_batch_size=args.mem0_atom_batch_size,
+            mem0_max_batch_chars=args.mem0_max_batch_chars,
+            mem0_accept_empty=args.mem0_accept_empty,
+        ).run(
+            path=args.path,
+            namespace=args.namespace,
+            source=args.source or args.path.as_posix(),
+            explicit_tags=tuple(args.tags),
+            occurred_at=args.occurred_at,
+            metadata=metadata,
+            temporal=temporal_request,
+            mem0_user_id=args.mem0_user_id,
+            checkpoint=checkpoint,
+        )
+    assert report_path is not None
+    return {
+        **report.as_dict(),
+        "report": str(report_path),
         "database": _database_label(args),
     }
 
@@ -1703,6 +1921,17 @@ def _load_json_object(path: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("Mem0 config must contain one JSON object")
     return payload
+
+
+def _write_json_atomic(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    temporary.replace(path)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,51 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
 
-from data_retrieval.cli import build_parser
+from data_retrieval.cli import build_parser, main
 
 
 class CliParserTests(unittest.TestCase):
+    def test_process_file_writes_a_completed_restart_safe_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "notes.txt"
+            database = root / "data.sqlite3"
+            report = root / "run.json"
+            source.write_text("A small local pipeline check.", encoding="utf-8")
+            output = StringIO()
+            with patch.dict(
+                "os.environ",
+                {"OLLAMA_EMBEDDING_MODEL": "", "OLLAMA_MODEL": ""},
+                clear=False,
+            ), redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "process-file",
+                        str(source),
+                        "--namespace",
+                        "project-a",
+                        "--db",
+                        str(database),
+                        "--report",
+                        str(report),
+                    ]
+                )
+
+            payload = json.loads(output.getvalue())
+            checkpoint = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["status"], "completed")
+            self.assertEqual(checkpoint["status"], "completed")
+            self.assertEqual(payload["ingestion_mode"], "atomic-in-memory")
+            self.assertEqual(checkpoint["stages"][0]["name"], "canonical_ingestion")
+
     def test_retrieve_accepts_optional_query_tag_model(self) -> None:
         args = build_parser().parse_args(
             [

@@ -12,6 +12,8 @@ scope, current gaps, anti-goals, and the dependency-ordered repair plan are reco
 The current build order, pass/fail gates, and session progress log live in
 [`docs/EXECUTION-ROADMAP.md`](docs/EXECUTION-ROADMAP.md); use it as the operational source of
 truth for what happens next.
+The runnable laptop MVP, checkpoint/retry behavior, and exact laptop/Mac responsibility split
+are documented in [`docs/LOCAL-MVP-RUNBOOK.md`](docs/LOCAL-MVP-RUNBOOK.md).
 
 Data Retrieval is a clean successor to the original `Tags-Project`. It is a
 tag-centric retrieval engine that keeps source order, tag provenance, and
@@ -220,6 +222,24 @@ ssh -i <private-key-path> `
 
 Keep that window open when using AI enrichment. Raw ingestion itself does not need the
 Mac or tunnel.
+
+Run canonical ingestion and every explicitly configured enrichment as one checkpointed job:
+
+```powershell
+python -m data_retrieval process-file .\notes.txt `
+  --db .\data.sqlite3 `
+  --namespace personal `
+  --source notes `
+  --tag-model gemma4:e2b-mlx `
+  --embedding-model hf.co/mradermacher/harrier-oss-v1-0.6b-GGUF:F16 `
+  --embedding-profile harrier-retrieval-v1
+```
+
+It records canonical ingestion, optional Tags/Temporal/Mem0/embedding stages, and a final weight
+audit in `data/runs/<stable-run-id>.json`. Repeating the command reuses each processor's durable
+markers. SQLite reports `atomic-in-memory`; PostgreSQL reports `bounded-staged`. See the
+[local MVP runbook](docs/LOCAL-MVP-RUNBOOK.md) for full Temporal and Mem0 examples and the exact
+operational limits.
 
 First ingest a UTF-8 text file. `occurred-at` is required only when the source should
 participate in Temporal summaries:

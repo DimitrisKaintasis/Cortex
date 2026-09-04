@@ -1,8 +1,12 @@
 # Execution Roadmap
 
-Status: active  
-Last updated: 2026-09-02  
-Current step: 4 — expand the policy comparison fixture matrix
+Status: active
+
+Last updated: 2026-09-04
+
+Current delivery step: D2 — expose retrieval and feedback as a usable local application boundary
+
+Collective research step: 4 — deferred until a larger, more representative dataset exists
 
 This is the operational source of truth for what we build next. The architecture documents
 describe what the system may become; this file records the order in which we will prove and
@@ -10,10 +14,16 @@ implement it. Update the status, evidence, and decision log whenever a step chan
 
 ## Working rule
 
-We will validate the riskiest claim with the smallest faithful implementation before building
-production infrastructure around it. The next implementation is therefore an isolated,
-deterministic `collective-transfer-v1` experiment. It must not mutate normal retrieval behavior,
-existing databases, or global serving state.
+We validate the riskiest claim with the smallest faithful implementation before building
+production infrastructure around it. The isolated deterministic `collective-transfer-v1`
+experiment follows that rule: it does not mutate normal retrieval behavior, existing databases,
+or global serving state.
+
+That experiment has now proved the deterministic mechanism, but the next correlation-policy
+comparison needs more representative data than the current fixture. The collective research
+track is therefore deliberately deferred, not rejected. A separate local-product track can make
+the already proven ingestion and retrieval foundations usable without committing to the global
+graph architecture.
 
 Status values are `not started`, `in progress`, `blocked`, `passed`, `failed`, and `deferred`.
 A step is `passed` only when its evidence is checked into the repository or linked below.
@@ -26,14 +36,30 @@ A step is `passed` only when its evidence is checked into the repository or link
 | 1. Reproduce current baseline | passed | Existing tests and capability gates have recorded results | Trustworthy before/after comparison |
 | 2. Build shadow collective core | passed | Policy math runs without production mutation | Cross-user experiments |
 | 3. Prove positive and negative transfer | passed | A changes B through shared concepts only | Central thesis evaluation |
-| 4. Compare weight policies | in progress | A measured policy wins over controls | Candidate learning policy |
-| 5. Test privacy, poisoning, and lifecycle | in progress | Leakage and manipulation stay within declared gates | Safe schema design |
+| 4. Compare weight policies | deferred | A measured policy wins over controls | Candidate learning policy |
+| 5. Test privacy, poisoning, and lifecycle | deferred | Leakage and manipulation stay within declared gates | Safe schema design |
 | 6. Make the architecture decision | not started | Proceed, revise, or reject is recorded from evidence | Production implementation |
 | 7. Repair canonical contracts | not started | Scope, visibility, payload, and contribution are explicit | Real multi-scope runtime |
 | 8. Validate with real models and data | not started | Gains survive realistic noise and model differences | Product evidence |
 | 9. Add production collective storage | not started | Events, projections, snapshots, and rollback are durable | Hosted collective service |
 | 10. Make the Mac autonomous | not started | Remote jobs continue while the laptop is offline | Continuous enrichment/evaluation |
 | 11. Add procedures | deferred | Validated ordered guidance improves small models | Small-model enhancement layer |
+
+## Local product track
+
+This track packages only existing contracts. It must not promote experimental collective math or
+change the privacy boundary.
+
+| Step | Status | Outcome |
+|---|---|---|
+| D1. Checkpointed document pipeline | passed | One command runs canonical ingestion, configured processors, and a ledger audit with restart evidence |
+| D2. Local application boundary | not started | Retrieval, explanations, candidate review, and attributable feedback are usable without raw CLI choreography |
+| D3. Hosted canonical storage | not started | TLS-protected PostgreSQL, backups, and restore tests make data safely reachable without the laptop |
+| D4. Autonomous Mac worker | not started | Leased jobs continue after the laptop disconnects |
+
+D1 is documented in `LOCAL-MVP-RUNBOOK.md`. SQLite is explicitly the small/medium local mode;
+PostgreSQL remains the bounded large-ingestion mode. D2 should begin as a narrow local API with no
+accounts or public exposure. D3 must be chosen and restore-tested before D4.
 
 ## Step 0 — Preserve the accepted baseline
 
@@ -295,3 +321,4 @@ Append one short entry after every work session.
 | 2026-09-03 | Pre-8 | Ran the new entity graph through five attributable-use rounds | Cold entity support raised hybrid MRR 0.413→0.533; multi-evidence feedback raised it to 0.575 and graph recall 0.583→0.708, but 30 uses caused 1,445 transitions across 289 edges | Test path-attributed bounded learning and held-out queries; separately validate held Mem0 edges semantically |
 | 2026-09-03 | Pre-8 | Compared the all-pairs learner with an atom-tag + `CO_USED` policy | Every per-round ranking, recall, and context-quality metric was identical while transitions fell 88.2%, from 1,445 across 289 edges to 170 across 34; all audits passed | Isolate atom-tag versus `CO_USED` contribution, then validate the winner on held-out and negative cases |
 | 2026-09-04 | Pre-8 | Isolated feedback channels and added six never-rewarded paraphrases plus negative/collateral checks | Query↔selected-evidence learning matched all-pairs final training and held-out quality with 48.8% fewer transitions; atom tags improved rank, CO_USED improved graph recall but caused a hybrid recall loss; negative reversal and ledger audit passed | Budget query-evidence influence and eliminate transient held-out regressions on a larger query set |
+| 2026-09-04 | D1 | Added one checkpointed document workflow over canonical ingestion, Tags, Temporal, Mem0, embeddings, and weight audit | 161 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; `src` and `tests` passed Ruff; SQLite/PostgreSQL ingestion modes are explicit | Build the narrow local retrieval/feedback application boundary |
