@@ -1,0 +1,31 @@
+{
+  "suite_id": "learning-contribution-v1",
+  "description": "Frozen before first scoring: fresh wording and same-history collateral probes; no policy tuning on results.",
+  "source_fixture": "evals/mem0_experience_v1.json",
+  "cold_snapshot": "artifacts/longmemeval-dev6-entity-cold-v1.sqlite3",
+  "embedding_model": "qwen/qwen3-embedding-8b",
+  "tag_model": "google/gemini-3.1-flash-lite",
+  "usage_rounds": 5,
+  "top_k": 10,
+  "policy": "query_evidence",
+  "queries": [
+    {"id": "car-a", "question_id": "gpt4_2655b836", "group": "transfer", "query": "What went wrong earliest with my recently purchased vehicle once its initial maintenance appointment was over?"},
+    {"id": "car-b", "question_id": "gpt4_2655b836", "group": "transfer", "query": "Remind me of the first malfunction I reported after getting my new automobile serviced for the first time."},
+    {"id": "projects-a", "question_id": "6d550036", "group": "transfer", "query": "Across my past and present work, how many projects have had me in charge?"},
+    {"id": "projects-b", "question_id": "6d550036", "group": "transfer", "query": "Count the projects I have headed, including anything I am still heading."},
+    {"id": "korean-a", "question_id": "6aeb4375", "group": "transfer", "query": "Based on what I told you, what is my count of Korean dining places sampled locally?"},
+    {"id": "korean-b", "question_id": "6aeb4375", "group": "transfer", "query": "How many different establishments serving Korean food have I eaten at in town?"},
+    {"id": "research-a", "question_id": "75832dbd", "group": "transfer", "query": "Using my research interests from our conversations, suggest relevant new papers or academic events for me."},
+    {"id": "research-b", "question_id": "75832dbd", "group": "transfer", "query": "What recent scholarly reading and conferences would suit the subjects I have been exploring?"},
+    {"id": "bandung-a", "question_id": "c4f10528", "group": "transfer", "query": "I want to return to the spot in Bandung's Cihampelas Walk with the excellent fried rice. What was it called?"},
+    {"id": "bandung-b", "question_id": "c4f10528", "group": "transfer", "query": "Which restaurant was the Nasi Goreng recommendation I liked around Cihampelas Walk on my Bandung trip?"},
+    {"id": "degree-a", "question_id": "e47becba", "group": "transfer", "query": "What subject is my completed university qualification in?"},
+    {"id": "degree-b", "question_id": "e47becba", "group": "transfer", "query": "Remind me what I studied for the degree I earned."},
+    {"id": "car-control", "question_id": "gpt4_2655b836", "group": "collateral", "query": "Which petrol station brand have I been using near work to collect loyalty points?", "target_atom_ids": ["atom_1f718acda2571bed770d94a18571b725"]},
+    {"id": "projects-control", "question_id": "6d550036", "group": "collateral", "query": "Which psychological theory did I ask about to explain influencers connecting with their audiences?", "target_atom_ids": ["atom_08b99fd9319b7d92724c62d8ac4e29d8"]},
+    {"id": "korean-control", "question_id": "6aeb4375", "group": "collateral", "query": "What kind of rice did I say I already owned when considering a substitute for Indian basmati?", "target_atom_ids": ["atom_3664afe764030d460663df0daadd8cc3"]},
+    {"id": "research-control", "question_id": "75832dbd", "group": "collateral", "query": "For which specific medical image task did I request suitable training datasets?", "target_atom_ids": ["atom_5ba2ad7ef87f40993a52c02439273d9a"]},
+    {"id": "bandung-control", "question_id": "c4f10528", "group": "collateral", "query": "What kind of venue did I ask to visit when considering the tea plantations?", "target_atom_ids": ["atom_0f3c7f2848d0838004e8c47ab8d3aad0"]},
+    {"id": "degree-control", "question_id": "e47becba", "group": "collateral", "query": "What paper-based organization tool did I want to replace with a digital task manager?", "target_atom_ids": ["atom_2bd851f1488b4b9a1ee66cab953d4c94"]}
+  ]
+}

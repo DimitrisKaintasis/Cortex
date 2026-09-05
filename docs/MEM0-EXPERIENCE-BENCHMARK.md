@@ -193,3 +193,17 @@ tags, negative distractors, and unrelated control queries.
 - Held-out policy snapshots: `artifacts/longmemeval-dev6-entity-*-heldout-v1.sqlite3`
 
 Runtime reports, databases, and Mem0 working stores are deliberately ignored by Git.
+
+## Follow-up — isolate our learning contribution, 2026-09-05
+
+[Learning contribution test v1](LEARNING-CONTRIBUTION-TEST.md) freezes identical Mem0 evidence
+and API-generated embeddings across learned/frozen branches, with independently generated query
+tags, twelve new paraphrases, and six same-history collateral probes. MRR increased from
+0.606481 to 0.620370 after 30 supervised feedback events; recall stayed 0.791667. The entire
+headline gain came from one query's relevant evidence moving rank 6 to rank 3. No collateral
+anchor lost rank. Two offline runs reproduced the results exactly.
+
+This is a small outcome-learning signal, not a broad generalization or production-promotion
+result. The new embedding/query-tag profile makes absolute scores incomparable with the earlier
+tables. The linked report includes the vector baseline's better lineage-aware MRR but lower
+evidence coverage, rather than implying that the hybrid dominates every metric.

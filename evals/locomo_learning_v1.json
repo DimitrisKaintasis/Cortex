@@ -1,0 +1,15 @@
+{
+  "suite_id": "locomo-learning-v1",
+  "revision": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+  "development": ["conv-26"],
+  "evaluation": ["conv-30", "conv-41", "conv-42"],
+  "seed": "locomo-learning-20260905-v1",
+  "eligible_categories": [1, 2, 4],
+  "training_questions_per_history": 10,
+  "evaluation_per_evidence_group": 15,
+  "rounds": 3,
+  "top_k": 10,
+  "embedding_model": "qwen/qwen3-embedding-8b",
+  "tag_model": "google/gemini-3.1-flash-lite",
+  "policies": ["frozen", "atom_tags_only", "query_evidence"]
+}
