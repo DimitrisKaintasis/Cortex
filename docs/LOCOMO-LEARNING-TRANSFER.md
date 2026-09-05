@@ -59,3 +59,35 @@ The full preparation therefore contains 2,080 source turns across 99 sessions.
 Invalid/missing evidence, duplicate question text, excluded categories, and image-dependent
 evidence were excluded before scores were available. Detailed counts are in the fixed manifest.
 Timestamps use an explicit UTC assumption because the dialogue dates provide no timezone.
+
+### Preparation checkpoint and execution repairs
+
+All 2,080 source-turn markers are complete. Mem0 imported 506 entity atoms and 490 relationship
+proposals. The prepared store contains 2,586 atom embeddings and 133 frozen query feature files
+(40 training, 26 development evaluation, 67 evaluation). Query tags and vectors are generated
+before scoring; evaluation answers are not inputs to either generator.
+
+| History | Provisional relationships | Held | Rejected |
+|---|---:|---:|---:|
+| conv-26 (development) | 8 | 86 | 28 |
+| conv-30 | 1 | 40 | 33 |
+| conv-41 | 0 | 62 | 81 |
+| conv-42 | 8 | 97 | 46 |
+
+These are the unchanged vector-admission policy's dispositions, not human-verified relationship
+correctness. Every branch starts with the same dispositions and weights.
+
+One 32-turn development batch returned no Mem0 outputs. The initial batch-marker check therefore
+reported 2,048/2,080 although all source text had been sent through Mem0. The resumability wrapper
+was corrected and the empty batch explicitly accepted; raw source atoms remain present. This
+does not mean every turn generated a Mem0 entity. Self-referential proposals were also quarantined
+in conv-30 and conv-42. No fake relationships were substituted.
+
+Query preparation encountered malformed JSON from the API. Bounded retries were added. An
+indentation error in that repair then allowed a premature completion marker with only 33/133
+query caches. This was found before scoring; the loop was repaired and all missing query features
+completed. A regression test now exercises two histories and verifies complete feature generation
+and cache reuse. These repairs changed no selected question, scoring threshold, or learning policy.
+
+Preparation cost is not comprehensively metered: the latest feature-stage usage report excludes
+earlier attempts and the Mem0 SDK/tag-proposal calls. Do not present it as total benchmark cost.

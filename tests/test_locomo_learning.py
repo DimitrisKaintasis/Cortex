@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from data_retrieval.storage.sqlite import SQLiteRepository
+from scripts import run_locomo_learning as pilot
 from scripts.run_locomo_learning import ingest, select_feedback, split_sample
 
 
@@ -87,6 +90,54 @@ class LoCoMoLearningTests(unittest.TestCase):
     def test_feedback_never_credits_non_gold_or_derived_items(self):
         row = {"retrieved_atom_ids": ["derived", "gold", "other"]}
         self.assertEqual(select_feedback(row, ("gold", "unreturned")), ("gold",))
+
+    def test_feature_preparation_visits_every_history_and_resumes_cached_queries(self):
+        class FakeApi:
+            def __init__(self):
+                self.usage = []
+                self.calls = []
+
+            def embeddings(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+            def tags(self, queries, catalog, model):
+                self.calls.extend(q["id"] for q in queries)
+                return {q["id"]: [] for q in queries}
+
+        config = {"embedding_model": "fixture", "tag_model": "fixture"}
+        manifest = {
+            "histories": [
+                {
+                    "sample_id": sid,
+                    "training": [{"id": sid + "-train", "query": "Training?"}],
+                    "evaluation": [{"id": sid + "-eval", "query": "Evaluation?"}],
+                }
+                for sid in ("first", "second")
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            repository = SQLiteRepository(root / "prepared.sqlite3")
+            try:
+                for history in manifest["histories"]:
+                    sample = fixture()
+                    sample["sample_id"] = history["sample_id"]
+                    ingest(repository, sample)
+                    (root / (history["sample_id"] + "-mem0.json")).write_text("{}")
+            finally:
+                repository.close()
+            api = FakeApi()
+            with patch.object(pilot, "ROOT", root), patch.object(pilot, "Api", return_value=api):
+                pilot.features(config, manifest)
+                self.assertEqual(
+                    set(api.calls), {"first-train", "first-eval", "second-train", "second-eval"}
+                )
+                self.assertEqual(len(list((root / "query-cache").glob("*.json"))), 4)
+                self.assertTrue((root / "features-complete.json").is_file())
+                api.calls.clear()
+                pilot.features(config, manifest)
+                self.assertEqual(api.calls, [])
 
 
 if __name__ == "__main__":

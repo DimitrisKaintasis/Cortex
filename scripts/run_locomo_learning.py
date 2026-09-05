@@ -352,7 +352,7 @@ def mem0(config, manifest):
             if result_path.exists():
                 continue
             print("Mem0 starting " + sid, flush=True)
-            result = Mem0BootstrapService(repository, processor).run(
+            result = Mem0BootstrapService(repository, processor, accept_empty=True).run(
                 namespace="locomo-learning-v1:" + sid
             )
             write_json(result_path, asdict(result))
@@ -400,9 +400,21 @@ def features(config, manifest):
                 path = ROOT / "query-cache" / (q["id"] + ".json")
                 if path.exists():
                     return
-                tags = api.tags(
-                    [{"id": q["id"], "query": q["query"]}], catalog, config["tag_model"]
-                )[q["id"]]
+                last_error = None
+                for attempt in range(3):
+                    try:
+                        tags = api.tags(
+                            [{"id": q["id"], "query": q["query"]}],
+                            catalog,
+                            config["tag_model"],
+                        )[q["id"]]
+                        break
+                    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                        last_error = error
+                        if attempt < 2:
+                            time.sleep(2**attempt)
+                else:
+                    raise ValueError(f"query tag preparation failed for {q['id']}") from last_error
                 write_json(
                     path,
                     {
