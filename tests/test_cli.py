@@ -93,6 +93,54 @@ class CliParserTests(unittest.TestCase):
 
         self.assertEqual(args.tag_model, "query-tagger")
 
+    def test_retrieve_returns_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ",
+            {"OLLAMA_EMBEDDING_MODEL": "", "OLLAMA_TAG_MODEL": ""},
+            clear=False,
+        ):
+            root = Path(directory)
+            source = root / "notes.txt"
+            database = root / "data.sqlite3"
+            source.write_text("Cortex preserves source evidence.", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                ingest_exit_code = main(
+                    [
+                        "ingest",
+                        str(source),
+                        "--db",
+                        str(database),
+                        "--namespace",
+                        "portfolio",
+                        "--tag",
+                        "evidence",
+                        "--metadata-json",
+                        '{"origin":"readme-test"}',
+                    ]
+                )
+
+            output = StringIO()
+            with redirect_stdout(output):
+                retrieve_exit_code = main(
+                    [
+                        "retrieve",
+                        "Where is the source evidence?",
+                        "--db",
+                        str(database),
+                        "--namespace",
+                        "portfolio",
+                        "--tag",
+                        "evidence",
+                    ]
+                )
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(ingest_exit_code, 0)
+        self.assertEqual(retrieve_exit_code, 0)
+        self.assertEqual(payload["items"][0]["metadata"]["origin"], "readme-test")
+        self.assertEqual(payload["items"][0]["metadata"]["source_type"], "text_file")
+
     def test_evaluate_accepts_optional_query_tag_model(self) -> None:
         args = build_parser().parse_args(
             ["evaluate", "--tag-model", "query-tagger"]

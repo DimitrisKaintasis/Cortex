@@ -1647,6 +1647,7 @@ def _retrieve(args: argparse.Namespace) -> dict[str, object]:
                 "role": item.role,
                 "atom_role": item.atom_role.value,
                 "temporal_label": item.temporal_label.value,
+                "metadata": item.metadata,
                 "lineage_atom_ids": item.lineage_atom_ids,
                 "score": {
                     "tag": item.score.tag,

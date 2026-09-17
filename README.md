@@ -2,10 +2,12 @@
 
 **Explainable, adaptive retrieval for long-lived AI memory.**
 
-Cortex ingests heterogeneous user data, preserves the original evidence, and retrieves it
-through lexical, semantic, tag, relationship, and temporal signals. Every result includes its
-provenance and score breakdown, while explicit outcome feedback improves future routing without
-rewriting source material.
+Cortex ingests text evidence and structured text records, preserves the original evidence, and
+retrieves it through lexical, semantic, tag, relationship, and temporal signals. Every result
+includes its provenance and score breakdown, while explicit outcome feedback improves future
+routing without rewriting source material.
+
+Cortex is the product name; `data-retrieval` is the Python package and command-line interface.
 
 > **Current status:** a working local MVP with selectable SQLite or PostgreSQL/pgvector storage,
 > explainable retrieval, feedback learning, a loopback-only API, recovery tooling, and
@@ -46,8 +48,8 @@ recorded in an immutable event ledger.
   calendar summaries through Temporal History.
 - **Explainable learning** — attributable positive or negative feedback changes only bounded
   behavioral weights; it never rewrites source atoms or factual provenance links.
-- **Replaceable processors** — Ollama/OpenRouter tag and embedding providers, Temporal History,
-  and Mem0 sit behind adapters rather than owning canonical truth.
+- **Replaceable processors** — Ollama or OpenRouter can provide tag and temporal enrichment,
+  Ollama provides embeddings, and Mem0 sits behind an adapter rather than owning canonical truth.
 - **Selectable storage adapter** — use SQLite for a zero-service local workflow or
   PostgreSQL/pgvector for indexed, bounded-candidate retrieval and resumable large-file
   ingestion. A deployment uses one, not both.
