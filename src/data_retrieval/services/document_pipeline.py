@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import utc_now
@@ -21,12 +21,13 @@ from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentServ
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.large_ingestion import LargeFileIngestService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
-from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
 from data_retrieval.services.weight_ledger import WeightLedgerService
 from data_retrieval.storage.repository import Repository, StagedIngestionRepository
 from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.proposals import TagProposer
-from data_retrieval.temporal import TemporalBridge
+
+if TYPE_CHECKING:
+    from data_retrieval.temporal import TemporalBridge
 
 PIPELINE_SCHEMA_VERSION = 1
 CheckpointCallback = Callable[["DocumentPipelineReport"], None]
@@ -328,6 +329,8 @@ class DocumentPipelineService:
         request: TemporalPipelineRequest | None,
         tag_service: TagEnrichmentService | None,
     ) -> dict[str, Any]:
+        from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
+
         assert request is not None and self.temporal_bridge is not None
         result = TemporalEnrichmentService(
             self.repository,

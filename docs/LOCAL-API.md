@@ -42,6 +42,7 @@ python -m data_retrieval serve-api `
 Or use PostgreSQL without putting the DSN in command history:
 
 ```powershell
+python -m pip install -e ".[api,postgres]"
 $env:DATA_RETRIEVAL_POSTGRES_DSN = "<protected PostgreSQL DSN>"
 python -m data_retrieval serve-api --port 8765
 ```

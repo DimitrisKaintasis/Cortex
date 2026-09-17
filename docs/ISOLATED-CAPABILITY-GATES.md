@@ -7,6 +7,7 @@ can hide a fault behind a single aggregate score.
 Run it with:
 
 ```powershell
+python -m pip install -e ".[temporal]"
 python -m data_retrieval evaluate-capabilities
 ```
 

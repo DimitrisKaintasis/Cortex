@@ -2,6 +2,8 @@
 
 **Explainable, adaptive retrieval for long-lived AI memory.**
 
+[![CI](https://github.com/DimitrisKaintasis/Data-Retrieval/actions/workflows/ci.yml/badge.svg)](https://github.com/DimitrisKaintasis/Data-Retrieval/actions/workflows/ci.yml)
+
 Cortex ingests text evidence and structured text records, preserves the original evidence, and
 retrieves it through lexical, semantic, tag, relationship, and temporal signals. Every result
 includes its provenance and score breakdown, while explicit outcome feedback improves future
@@ -94,6 +96,23 @@ python -m pip install -e .
 ```
 
 On macOS or Linux, activate the environment with `source .venv/bin/activate` instead.
+
+The default install is the complete SQLite path; it does not install PostgreSQL, FastAPI, Mem0,
+or Temporal History. Add only the capabilities you intend to run:
+
+| Capability | Install command |
+|---|---|
+| Local API | `python -m pip install -e ".[api]"` |
+| PostgreSQL/pgvector | `python -m pip install -e ".[postgres]"` |
+| Temporal History | `python -m pip install -e ".[temporal]"` |
+| LongMemEval benchmarks | `python -m pip install -e ".[benchmarks]"` |
+| Mem0 integration | `python -m pip install -e ".[mem0]"` |
+| Every optional runtime capability | `python -m pip install -e ".[all]"` |
+| Tests and linting | `python -m pip install -e ".[dev]"` |
+
+Extras can be combined, such as `python -m pip install -e ".[api,postgres]"` for the local API
+with PostgreSQL. Optional commands remain visible in CLI help; if an extra is missing, the command
+exits with the exact installation instruction instead of failing during normal SQLite startup.
 
 ### 2. Ingest a document
 
@@ -262,8 +281,12 @@ Developer tooling is optional:
 ```powershell
 python -m pip install -e ".[dev]"
 python -m pytest
-python -m ruff check .
+python -m ruff check src tests scripts/smoke_minimal_install.py
 ```
+
+GitHub Actions runs three independent checks on every push and pull request: a dependency-free
+SQLite smoke test, the lint and Python test suite, and the PostgreSQL adapter tests against a real
+pgvector service container. This keeps the simple setup and scale adapter verifiable separately.
 
 ## PostgreSQL scale mode
 
@@ -273,6 +296,8 @@ installation when `--postgres-dsn` or `DATA_RETRIEVAL_POSTGRES_DSN` is supplied;
 as a synchronized second store.
 
 ```powershell
+python -m pip install -e ".[postgres]"
+
 $env:DATA_RETRIEVAL_POSTGRES_PASSWORD = "replace-with-a-long-random-password"
 docker compose -f .\compose.postgres.yml up -d
 

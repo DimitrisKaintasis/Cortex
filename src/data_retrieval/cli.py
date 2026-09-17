@@ -8,18 +8,12 @@ import sys
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Never
 from uuid import uuid4
 
-import psycopg
-
-from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
 from data_retrieval.benchmarks.collective_transfer import CollectiveTransferSuite
-from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
-from data_retrieval.benchmarks.longmemeval_ablation import LongMemEvalAblationSuite
-from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
 from data_retrieval.benchmarks.mem0_cold_start import Mem0ColdStartSuite
 from data_retrieval.benchmarks.mem0_entity_quality import Mem0EntityQualitySuite
-from data_retrieval.benchmarks.mem0_experience import Mem0ExperienceSuite
 from data_retrieval.benchmarks.review_cascade import ReviewCascadeSuite
 from data_retrieval.collective import ShadowRepositoryEvidenceAdapter
 from data_retrieval.core.identifiers import stable_id
@@ -34,18 +28,9 @@ from data_retrieval.mem0 import (
     Mem0VectorCalibrationService,
     load_mem0_records,
 )
-from data_retrieval.operations.postgres_backups import (
-    DockerPostgresBackupManager,
-    default_backup_path,
-)
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import EMBEDDING_PROFILES, OllamaEmbedder
 from data_retrieval.services.calibration_backfill import CalibrationBackfillService
-from data_retrieval.services.document_pipeline import (
-    DocumentPipelineReport,
-    DocumentPipelineService,
-    TemporalPipelineRequest,
-)
 from data_retrieval.services.embedding_enrichment import EmbeddingEnrichmentService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.interactions import InteractionService
@@ -54,17 +39,12 @@ from data_retrieval.services.learning import LEARNING_POLICY_PROFILES, LearningS
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.services.tag_lifecycle import TagLifecycleService
-from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
 from data_retrieval.services.weight_ledger import WeightLedgerService
-from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.repository import Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
 from data_retrieval.tagging.canonicalization import SemanticTagCanonicalizer
 from data_retrieval.tagging.ollama import OllamaError, OllamaTagProposer
 from data_retrieval.tagging.openrouter import OpenRouterTagProposer
-from data_retrieval.temporal import TemporalBridge
-from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
-from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -789,16 +769,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _postgres_verify_backup(args)
         else:
             output = _observe_repository_features(args, parser)
-    except (
-        OSError,
-        UnicodeError,
-        OllamaError,
-        OpenRouterError,
-        RuntimeError,
-        ValueError,
-        sqlite3.Error,
-        psycopg.Error,
-    ) as error:
+    except _handled_command_errors() as error:
         print(f"{args.command} failed: {error}", file=sys.stderr)
         return 1
 
@@ -820,12 +791,33 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _postgres_backup(args: argparse.Namespace) -> dict[str, object]:
+    try:
+        from data_retrieval.operations.postgres_backups import (
+            DockerPostgresBackupManager,
+            default_backup_path,
+        )
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="PostgreSQL backup",
+            extra="postgres",
+            packages={"psycopg"},
+        )
     manager = DockerPostgresBackupManager(compose_file=args.compose_file)
     output_path = args.output or default_backup_path()
     return manager.backup(output_path, overwrite=args.overwrite).as_dict()
 
 
 def _postgres_verify_backup(args: argparse.Namespace) -> dict[str, object]:
+    try:
+        from data_retrieval.operations.postgres_backups import DockerPostgresBackupManager
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="PostgreSQL backup verification",
+            extra="postgres",
+            packages={"psycopg"},
+        )
     manager = DockerPostgresBackupManager(compose_file=args.compose_file)
     return manager.verify(args.path).as_dict()
 
@@ -874,6 +866,12 @@ def _ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[s
 def _process_file(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, object]:
+    from data_retrieval.services.document_pipeline import (
+        DocumentPipelineReport,
+        DocumentPipelineService,
+        TemporalPipelineRequest,
+    )
+
     if not args.path.is_file():
         parser.error(f"input file does not exist: {args.path}")
     if args.mem0_config and not args.mem0_config.is_file():
@@ -914,6 +912,19 @@ def _process_file(
         )
     else:
         tag_proposer = None
+
+    if args.temporal_model:
+        try:
+            from data_retrieval.temporal import TemporalBridge
+            from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
+            from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
+        except ModuleNotFoundError as error:
+            _raise_missing_extra(
+                error,
+                capability="Temporal History enrichment",
+                extra="temporal",
+                packages={"temporal_history"},
+            )
 
     if args.temporal_model and args.inference_provider == "openrouter":
         assert api_key is not None
@@ -1011,7 +1022,7 @@ def _serve_api(args: argparse.Namespace) -> dict[str, object]:
     except ImportError as error:
         raise ValueError(
             "API dependencies are not installed; install them with "
-            "'python -m pip install -e .[api]'"
+            "'python -m pip install -e \".[api]\"'"
         ) from error
 
     host = "127.0.0.1"
@@ -1047,6 +1058,15 @@ def _serve_api(args: argparse.Namespace) -> dict[str, object]:
 def _ingest_longmemeval(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, object]:
+    try:
+        from data_retrieval.benchmarks.longmemeval import LongMemEvalIngestService
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="LongMemEval ingestion",
+            extra="benchmarks",
+            packages={"ijson"},
+        )
     if not args.path.is_file():
         parser.error(f"input file does not exist: {args.path}")
     with _open_repository(args) as repository:
@@ -1074,6 +1094,18 @@ def _ingest_longmemeval(
 def _run_longmemeval(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, object]:
+    try:
+        from data_retrieval.benchmarks.longmemeval_pipeline import LongMemEvalPipelineRunner
+        from data_retrieval.temporal import TemporalBridge
+        from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
+        from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="LongMemEval pipeline",
+            extra="benchmarks",
+            packages={"ijson", "temporal_history"},
+        )
     if not args.path.is_file():
         parser.error(f"input file does not exist: {args.path}")
     tag_model = _inference_model(args.inference_provider, args.tag_model)
@@ -1181,6 +1213,15 @@ def _run_longmemeval(
 def _evaluate_longmemeval_ablation(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, object]:
+    try:
+        from data_retrieval.benchmarks.longmemeval_ablation import LongMemEvalAblationSuite
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="LongMemEval ablation",
+            extra="benchmarks",
+            packages={"ijson", "temporal_history"},
+        )
     if not args.path.is_file():
         parser.error(f"input file does not exist: {args.path}")
     tag_model = _inference_model(args.inference_provider, args.tag_model)
@@ -1322,6 +1363,17 @@ def _resolve_tag_candidate(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _enrich_temporal(args: argparse.Namespace) -> dict[str, object]:
+    try:
+        from data_retrieval.services.temporal_enrichment import TemporalEnrichmentService
+        from data_retrieval.temporal import TemporalBridge
+        from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="Temporal History enrichment",
+            extra="temporal",
+            packages={"temporal_history"},
+        )
     state_path = args.state or (
         Path("temporal-state.sqlite3")
         if args.postgres_dsn
@@ -1717,6 +1769,15 @@ def _evaluate(args: argparse.Namespace) -> dict[str, object]:
 def _evaluate_capabilities(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, object]:
+    try:
+        from data_retrieval.benchmarks.capability_suite import IsolatedCapabilitySuite
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="capability evaluation",
+            extra="temporal",
+            packages={"temporal_history"},
+        )
     if not args.fixture.is_file():
         parser.error(f"capability fixture does not exist: {args.fixture}")
     args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -1821,6 +1882,15 @@ def _evaluate_mem0_cold_start(
 def _evaluate_mem0_experience(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> dict[str, object]:
+    try:
+        from data_retrieval.benchmarks.mem0_experience import Mem0ExperienceSuite
+    except ModuleNotFoundError as error:
+        _raise_missing_extra(
+            error,
+            capability="Mem0 experience evaluation",
+            extra="benchmarks",
+            packages={"ijson", "temporal_history"},
+        )
     if not args.fixture.is_file():
         parser.error(f"Mem0 experience fixture does not exist: {args.fixture}")
     fixture = _load_json_object(args.fixture)
@@ -1952,8 +2022,50 @@ def _add_storage_options(
 
 def _open_repository(args: argparse.Namespace) -> Repository:
     if args.postgres_dsn:
+        try:
+            from data_retrieval.storage.postgresql import PostgreSQLRepository
+        except ModuleNotFoundError as error:
+            _raise_missing_extra(
+                error,
+                capability="PostgreSQL storage",
+                extra="postgres",
+                packages={"pgvector", "psycopg"},
+            )
         return PostgreSQLRepository(args.postgres_dsn)
     return SQLiteRepository(args.db)
+
+
+def _handled_command_errors() -> tuple[type[BaseException], ...]:
+    errors: tuple[type[BaseException], ...] = (
+        OSError,
+        UnicodeError,
+        OllamaError,
+        OpenRouterError,
+        RuntimeError,
+        ValueError,
+        sqlite3.Error,
+    )
+    try:
+        from psycopg import Error as PsycopgError
+    except ModuleNotFoundError:
+        return errors
+    return (*errors, PsycopgError)
+
+
+def _raise_missing_extra(
+    error: ModuleNotFoundError,
+    *,
+    capability: str,
+    extra: str,
+    packages: set[str],
+) -> Never:
+    missing_root = (error.name or "").split(".", maxsplit=1)[0]
+    if missing_root not in packages:
+        raise error
+    raise ValueError(
+        f"{capability} dependencies are not installed; install them with "
+        f"'python -m pip install -e \".[{extra}]\"'"
+    ) from error
 
 
 def _database_label(args: argparse.Namespace) -> str:

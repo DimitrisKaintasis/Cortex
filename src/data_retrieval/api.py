@@ -19,7 +19,6 @@ from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_lifecycle import TagLifecycleService
-from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.repository import Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
 from data_retrieval.tagging.ollama import OllamaTagProposer
@@ -46,11 +45,22 @@ class LocalApiConfig:
 
     @contextmanager
     def open_repository(self) -> Iterator[Repository]:
-        repository: Repository = (
-            PostgreSQLRepository(self.postgres_dsn)
-            if self.postgres_dsn
-            else SQLiteRepository(self.database_path)
-        )
+        if self.postgres_dsn:
+            try:
+                from data_retrieval.storage.postgresql import PostgreSQLRepository
+            except ModuleNotFoundError as error:
+                if (error.name or "").split(".", maxsplit=1)[0] not in {
+                    "pgvector",
+                    "psycopg",
+                }:
+                    raise
+                raise RuntimeError(
+                    "PostgreSQL dependencies are not installed; install them with "
+                    "'python -m pip install -e \".[postgres]\"'"
+                ) from error
+            repository: Repository = PostgreSQLRepository(self.postgres_dsn)
+        else:
+            repository = SQLiteRepository(self.database_path)
         try:
             yield repository
         finally:

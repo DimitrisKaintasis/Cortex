@@ -24,6 +24,7 @@ Keep the real password outside Git. Compose reads the ignored `.env` file, while
 commands need the DSN in their process environment:
 
 ```powershell
+python -m pip install -e ".[postgres]"
 docker compose -f .\compose.postgres.yml up -d
 docker compose -f .\compose.postgres.yml ps
 

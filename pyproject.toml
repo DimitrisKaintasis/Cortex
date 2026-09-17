@@ -5,15 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "data-retrieval"
 version = "0.1.0"
-description = "A tag-centric, explainable data retrieval engine."
+description = "Explainable, adaptive retrieval for long-lived AI memory."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "ijson>=3.4,<4",
-    "pgvector>=0.4,<1",
-    "psycopg[binary]>=3.2,<4",
-    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
-]
+dependencies = []
 
 [project.scripts]
 data-retrieval = "data_retrieval.cli:main"
@@ -23,7 +18,30 @@ api = [
     "fastapi>=0.128,<1",
     "uvicorn>=0.38,<1",
 ]
+postgres = [
+    "pgvector>=0.4,<1",
+    "psycopg[binary]>=3.2,<4",
+]
+temporal = [
+    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
+]
+benchmarks = [
+    "ijson>=3.4,<4",
+    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
+]
 mem0 = [
+    "mem0ai==1.0.1",
+    "kuzu>=0.11,<1",
+    "ollama>=0.6,<1",
+    "rank-bm25>=0.2,<1",
+]
+all = [
+    "fastapi>=0.128,<1",
+    "uvicorn>=0.38,<1",
+    "ijson>=3.4,<4",
+    "pgvector>=0.4,<1",
+    "psycopg[binary]>=3.2,<4",
+    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
     "mem0ai==1.0.1",
     "kuzu>=0.11,<1",
     "ollama>=0.6,<1",
@@ -32,8 +50,13 @@ mem0 = [
 dev = [
     "fastapi>=0.128,<1",
     "httpx>=0.28,<1",
+    "ijson>=3.4,<4",
+    "pgvector>=0.4,<1",
+    "psycopg[binary]>=3.2,<4",
     "pytest>=8,<10",
     "ruff>=0.9,<1",
+    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
+    "uvicorn>=0.38,<1",
 ]
 
 [tool.setuptools.packages.find]

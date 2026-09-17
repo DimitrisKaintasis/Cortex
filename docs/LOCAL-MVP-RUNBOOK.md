@@ -68,6 +68,8 @@ Add Temporal processing only for timestamped evidence. The half-open range must 
 source timestamp:
 
 ```powershell
+python -m pip install -e ".[temporal]"
+
 python -m data_retrieval process-file .\notes.txt `
   --db .\data.sqlite3 `
   --namespace personal `
@@ -87,7 +89,7 @@ For Mem0, install the optional dependency and explicitly enable it. Supplying a 
 enables the stage:
 
 ```powershell
-python -m pip install -e ".[mem0]"
+python -m pip install -e ".[mem0,postgres]"
 
 python -m data_retrieval process-file .\notes.txt `
   --postgres-dsn $env:DATA_RETRIEVAL_POSTGRES_DSN `

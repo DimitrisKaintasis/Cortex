@@ -38,6 +38,8 @@ contains the generated development DSN, but the application intentionally does n
 secret files automatically. In PowerShell:
 
 ```powershell
+python -m pip install -e ".[benchmarks,postgres]"
+
 $dsnLine = Get-Content .env |
   Where-Object { $_ -like 'DATA_RETRIEVAL_POSTGRES_DSN=*' } |
   Select-Object -First 1

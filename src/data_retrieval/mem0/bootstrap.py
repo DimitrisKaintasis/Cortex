@@ -46,7 +46,7 @@ class Mem0PythonProcessor:
         except ImportError as error:
             raise ValueError(
                 "Mem0 is not installed; install the optional dependency with "
-                "'pip install -e .[mem0]'"
+                "'python -m pip install -e \".[mem0]\"'"
             ) from error
         effective_config = dict(config or {})
         self.profile_id = self._profile_id(effective_config)
