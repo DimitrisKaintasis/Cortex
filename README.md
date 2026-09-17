@@ -23,7 +23,7 @@ Cortex does not dual-write or automatically synchronize the two.
 [Quick start](#quick-start) · [Database choice](#which-database-should-i-use) ·
 [How it works](#how-it-works) ·
 [Evaluation](#evaluation) · [Project status](#project-status) ·
-[Documentation](#documentation)
+[Documentation](#documentation) · [License](#license-and-hosted-direction)
 
 ## Why Cortex exists
 
@@ -410,6 +410,16 @@ scripts/             # diagnostic and benchmark utilities
 
 The dependency-ordered plan and progress log live in the
 [execution roadmap](docs/EXECUTION-ROADMAP.md).
+
+## License and hosted direction
+
+The Cortex community core in this repository is open source under the
+[Apache License 2.0](LICENSE). You may use, modify, distribute, and self-host it under that
+license's terms.
+
+A future managed Cortex service may offer additional proprietary capabilities, operational
+tooling, and hosted infrastructure that are not part of this repository. The open-source core is
+intended to remain a substantial, independently useful system rather than a nonfunctional demo.
 
 ## Documentation
 
