@@ -50,7 +50,10 @@ log such deviations. Stop rather than silently substitute a fake Mem0 output or 
 
 ## Results
 
-Pending execution. Configuration: `evals/locomo_learning_v1.json`.
+Completed. Configuration: `evals/locomo_learning_v1.json`. The primary transfer gate did not pass.
+Measured results, development-only 1x/3x/10x follow-up, interpretation limits, and next steps are
+preserved in [the mathematical audit](LEARNING-RETRIEVAL-MATH-AUDIT.md#4-saved-experimental-evidence).
+No tested multiplier was promoted to production.
 
 The fixed audit selected 67 evaluation questions: 45 with training-label-disjoint evidence and
 22 sharing evidence. The three evaluation histories contain 1,661 source turns. Development

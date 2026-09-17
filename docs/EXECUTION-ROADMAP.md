@@ -2,7 +2,24 @@
 
 Status: active
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
+
+Active research next step: development-only query-sensitive routing/fusion experiment (step C in
+[the learning/retrieval math audit](LEARNING-RETRIEVAL-MATH-AUDIT.md)). The local LoCoMo pilot
+and development strength sweep are complete; no new learning parameters were promoted.
+This track does not supersede the separate delivery step or un-defer collective production work.
+Step B tracing is complete: the two saved cases reproduce exactly; the dance answer ranks 29
+before packing despite receiving graph support. See audit section 7 before choosing a repair.
+The first development-only fusion candidate is complete and not promoted: see
+[FUSION-DIAGNOSTIC.md](FUSION-DIAGNOSTIC.md). Agreement gating traded ranking gains for losses
+without improving average recall. Next isolate broad/specific and context-route activation;
+do not continue an unconstrained fusion parameter sweep.
+Semantic tag-prior initialization is now implemented as an opt-in calibration service; the
+fixed development run created 625 bounded priors without improving retrieval. See
+[TAG-SIMILARITY-PRIORS.md](TAG-SIMILARITY-PRIORS.md). It is not enabled on the live corpus.
+The authorized 1x/3x/10x similarity-prior strength follow-up is also complete: no recall gain,
+one rank regression at 10x. End strength-only sweeps; next isolate route selectivity and the
+score transformation with controlled examples. The report includes manually reviewed traces.
 
 Current delivery step: D3a passed — rehearse the legacy corpus upgrade before current-runtime use
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import replace
 from uuid import uuid4
 
@@ -46,6 +47,7 @@ class RetrievalService:
         tag_canonicalizer: SemanticTagCanonicalizer | None = None,
         evidence_packer: EvidencePacker | None = None,
         channels: RetrievalChannels | None = None,
+        diagnostic_sink: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
@@ -64,6 +66,8 @@ class RetrievalService:
         )
         self.evidence_packer = evidence_packer or EvidencePacker()
         self.channels = channels or RetrievalChannels()
+        # Explicit local opt-in: detailed traces can contain private graph identifiers.
+        self.diagnostic_sink = diagnostic_sink
 
     def retrieve(self, requested_plan: QueryPlan) -> RetrievalResult:
         auto_temporal = requested_plan.temporal_mode is TemporalMode.AUTO
@@ -232,6 +236,38 @@ class RetrievalService:
         ranked.sort(key=self._sort_key, reverse=True)
         packed = self.evidence_packer.pack(ranked, top_k=plan.top_k)
         selected = list(packed.items)
+        if self.diagnostic_sink is not None:
+            positions = {item.atom_id: i for i, item in enumerate(selected, 1)}
+            self.diagnostic_sink(
+                {
+                    "channel_weights": channel_weights,
+                    "relationship_coefficient": 0.12,
+                    "packing": packed.diagnostics,
+                    "candidates": [
+                        {
+                            "atom_id": item.atom_id,
+                            "prepack_rank": i,
+                            "selected_rank": positions.get(item.atom_id),
+                            "base_seed": item.atom_id in base_candidate_ids,
+                            "raw": {
+                                "tag": raw_tag_scores.get(item.atom_id, 0.0),
+                                "lexical": raw_lexical_scores.get(item.atom_id, 0.0),
+                                "semantic": raw_semantic_scores.get(item.atom_id, 0.0),
+                                "relationship": raw_relationship_scores.get(item.atom_id, 0.0),
+                            },
+                            "normalized": {
+                                "tag": item.score.tag,
+                                "lexical": item.score.lexical,
+                                "semantic": item.score.semantic,
+                                "relationship": item.score.relationship,
+                            },
+                            "final": item.score.final,
+                            "routes": relationship_evidence.get(item.atom_id, ()),
+                        }
+                        for i, item in enumerate(ranked, 1)
+                    ],
+                }
+            )
         top_score = selected[0].score.final if selected else 0.0
         retrieval_id = str(uuid4())
         result = RetrievalResult(
@@ -348,6 +384,18 @@ class RetrievalService:
     ) -> tuple[dict[str, float], dict[str, tuple[str, ...]]]:
         scores: dict[str, float] = defaultdict(float)
         evidence: dict[str, list[str]] = defaultdict(list)
+
+        def add_route(atom_id: str, strength: float, route: str) -> None:
+            scores[atom_id] += strength
+            if self.diagnostic_sink is not None:
+                self.diagnostic_sink(
+                    {
+                        "route_destination": atom_id,
+                        "route": route,
+                        "raw_contribution": strength,
+                    }
+                )
+
         query_tag_records = self.repository.get_tags_by_canonical(
             namespace=namespace, canonical_texts=query_tags
         )
@@ -357,7 +405,7 @@ class RetrievalService:
         related_evidence_by_id: dict[str, str] = {}
         for relation in relations:
             strength = relation.weight_raw * relation.confidence
-            if relation.relation_type == "co_occurs":
+            if relation.relation_type in {"co_occurs", "semantic_similarity"}:
                 if relation.source_tag_id in query_tag_ids:
                     related_strength_by_id[relation.target_tag_id] += strength
                     related_evidence_by_id[relation.target_tag_id] = "related_tag"
@@ -390,7 +438,7 @@ class RetrievalService:
             strength = max((related_strength.get(value, 0.0) for value in matched), default=0.0)
             if strength <= 0.0:
                 continue
-            scores[hit.atom_id] += hit.score * strength
+            add_route(hit.atom_id, hit.score * strength, "related_tags:" + ",".join(matched))
             evidence[hit.atom_id].extend(
                 f"{related_evidence.get(value, 'related_tag')}={value}" for value in matched
             )
@@ -400,20 +448,20 @@ class RetrievalService:
         ):
             strength = link.weight_raw * link.confidence
             if link.from_atom_id in seed_atom_ids:
-                scores[link.to_atom_id] += strength
+                add_route(link.to_atom_id, strength, f"co_used_with={link.from_atom_id}")
                 evidence[link.to_atom_id].append(f"co_used_with={link.from_atom_id}")
             if link.to_atom_id in seed_atom_ids:
-                scores[link.from_atom_id] += strength
+                add_route(link.from_atom_id, strength, f"co_used_with={link.to_atom_id}")
                 evidence[link.from_atom_id].append(f"co_used_with={link.to_atom_id}")
         for link in self.repository.get_atom_links_touching(
             atom_ids=tuple(seed_atom_ids), relation=AtomLinkRelation.ADJACENT_TO
         ):
             strength = 0.35 * link.weight_raw * link.confidence
             if link.from_atom_id in seed_atom_ids:
-                scores[link.to_atom_id] += strength
+                add_route(link.to_atom_id, strength, f"adjacent_to={link.from_atom_id}")
                 evidence[link.to_atom_id].append(f"adjacent_to={link.from_atom_id}")
             if link.to_atom_id in seed_atom_ids:
-                scores[link.from_atom_id] += strength
+                add_route(link.from_atom_id, strength, f"adjacent_to={link.to_atom_id}")
                 evidence[link.from_atom_id].append(f"adjacent_to={link.to_atom_id}")
 
         # Mem0 entity atoms are private navigation nodes. Traverse
@@ -475,13 +523,13 @@ class RetrievalService:
                 if path_strength is None:
                     continue
                 support_strength = max(0.0, link.weight_raw * link.confidence)
-                scores[link.to_atom_id] += path_strength * support_strength
                 via = related_via.get(link.from_atom_id)
                 label = (
                     f"mem0_entity_path={via}->{link.from_atom_id}"
                     if via
                     else f"mem0_entity_support={link.from_atom_id}"
                 )
+                add_route(link.to_atom_id, path_strength * support_strength, label)
                 evidence[link.to_atom_id].append(label)
         return dict(scores), {
             atom_id: tuple(sorted(set(values))) for atom_id, values in evidence.items()

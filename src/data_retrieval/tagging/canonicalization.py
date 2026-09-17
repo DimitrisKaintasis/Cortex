@@ -22,9 +22,9 @@ class SemanticTagCanonicalizer:
             raise ValueError("threshold must be between 0 and 1")
         self.embedder = embedder
         self.threshold = threshold
-        self._catalog_cache: dict[
-            tuple[tuple[str, str], ...], tuple[tuple[float, ...], ...]
-        ] = {}
+        self._catalog_cache: dict[tuple[tuple[str, str], ...], tuple[tuple[float, ...], ...]] = {}
+        self._similarity_cache_key: tuple[tuple[str, str], ...] | None = None
+        self._similarity_cache: tuple[tuple[Tag, Tag, float], ...] = ()
 
     @property
     def evidence_source(self) -> str:
@@ -63,3 +63,25 @@ class SemanticTagCanonicalizer:
             if best_tag is not None and best_similarity >= self.threshold:
                 matches[candidate] = CanonicalTagMatch(candidate, best_tag, best_similarity)
         return matches
+
+    def catalog_similarities(self, catalog: tuple[Tag, ...]) -> tuple[tuple[Tag, Tag, float], ...]:
+        """Reuse canonicalization catalog embeddings; do not merge existing identities."""
+        key = tuple((tag.tag_id, tag.canonical_text) for tag in catalog)
+        if self._similarity_cache_key == key:
+            return self._similarity_cache
+        vectors = self._catalog_cache.get(key)
+        if vectors is None:
+            vectors = self.embedder.embed_documents(tuple(tag.canonical_text for tag in catalog))
+            if len(vectors) != len(catalog):
+                raise ValueError("embedder returned the wrong number of catalog vectors")
+            self._catalog_cache[key] = vectors
+        result = tuple(
+            (left, right, cosine_similarity(vectors[i], vectors[j]))
+            for i, left in enumerate(catalog)
+            for j, right in enumerate(catalog)
+            if i < j
+        )
+        # Retain one pair matrix so repeated documents do not repeat O(n^2*d) math.
+        self._similarity_cache_key = key
+        self._similarity_cache = result
+        return result

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from data_retrieval.calibration.tag_similarity import TagSimilarityCalibrationService
 from data_retrieval.calibration.teachers import TeacherCalibrationService
 from data_retrieval.core.identifiers import stable_id
 from data_retrieval.domain.models import (
@@ -42,13 +43,20 @@ class TagEnrichmentService:
         *,
         catalog_hint_limit: int = 500,
         canonicalizer: SemanticTagCanonicalizer | None = None,
+        similarity_calibration: TagSimilarityCalibrationService | None = None,
     ) -> None:
         if catalog_hint_limit <= 0:
             raise ValueError("catalog_hint_limit must be positive")
+        if (
+            similarity_calibration is not None
+            and similarity_calibration.repository is not repository
+        ):
+            raise ValueError("similarity calibration must use the enrichment repository")
         self.repository = repository
         self.proposer = proposer
         self.catalog_hint_limit = catalog_hint_limit
         self.canonicalizer = canonicalizer
+        self.similarity_calibration = similarity_calibration
 
     def enrich_document(self, document_id: str) -> TagEnrichmentResult:
         document = self.repository.get_document(document_id)
@@ -60,6 +68,8 @@ class TagEnrichmentService:
         tag_markers = dict(markers.get("tag_proposals", {}))
         if marker_key in tag_markers:
             TeacherCalibrationService(self.repository).calibrate_document(document_id)
+            if self.similarity_calibration is not None:
+                self.similarity_calibration.calibrate(document.namespace)
             return TagEnrichmentResult(
                 document_id=document_id,
                 tag_ids=tuple(tag_markers[marker_key].get("tag_ids", ())),
@@ -74,9 +84,7 @@ class TagEnrichmentService:
 
         catalog = {
             tag.canonical_text: tag
-            for tag in self.repository.list_tags(
-                document.namespace, limit=self.catalog_hint_limit
-            )
+            for tag in self.repository.list_tags(document.namespace, limit=self.catalog_hint_limit)
         }
         tags_by_canonical: dict[str, Tag] = {}
         candidates_by_id: dict[str, TagCandidate] = {}
@@ -122,9 +130,7 @@ class TagEnrichmentService:
             for proposal in proposals:
                 canonical = normalize_tag(proposal.text)
                 current = best.get(canonical)
-                if canonical and (
-                    current is None or proposal.confidence > current.confidence
-                ):
+                if canonical and (current is None or proposal.confidence > current.confidence):
                     best[canonical] = proposal
 
             missing = tuple(
@@ -155,9 +161,7 @@ class TagEnrichmentService:
                     confidence = min(confidence, semantic_match.similarity)
                     tag = semantic_match.tag
                     candidate_state = TagCandidateState.MERGED
-                    resolution_reason = (
-                        f"semantic catalog match:{semantic_match.similarity:.6f}"
-                    )
+                    resolution_reason = f"semantic catalog match:{semantic_match.similarity:.6f}"
                 tag = tags_by_canonical.get(canonical) or tag
                 if tag is not None and semantic_alias and semantic_alias not in tag.aliases:
                     tag = replace(tag, aliases=tuple(sorted((*tag.aliases, semantic_alias))))
@@ -199,11 +203,7 @@ class TagEnrichmentService:
                     tag_id=tag.tag_id,
                     weight_raw=existing.weight_raw if existing else 1.0,
                     confidence=max(confidence, existing.confidence if existing else 0.0),
-                    origin=(
-                        existing.origin
-                        if existing
-                        else TagOrigin.CATALOG_MATCH
-                    ),
+                    origin=(existing.origin if existing else TagOrigin.CATALOG_MATCH),
                     evidence_sources=tuple(sorted(evidence)),
                     created_at=existing.created_at if existing else utc_now(),
                 )
@@ -241,6 +241,8 @@ class TagEnrichmentService:
             )
         )
         TeacherCalibrationService(self.repository).calibrate_document(document_id)
+        if self.similarity_calibration is not None:
+            self.similarity_calibration.calibrate(document.namespace)
         return TagEnrichmentResult(
             document_id=document_id,
             tag_ids=tag_ids,
