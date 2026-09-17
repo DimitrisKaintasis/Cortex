@@ -53,6 +53,7 @@ dev = [
     "ijson>=3.4,<4",
     "pgvector>=0.4,<1",
     "psycopg[binary]>=3.2,<4",
+    "pyright>=1.1.414,<2",
     "pytest>=8,<10",
     "ruff>=0.9,<1",
     "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
@@ -72,3 +73,19 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.pyright]
+include = [
+    "src/data_retrieval/core",
+    "src/data_retrieval/domain",
+    "src/data_retrieval/ingestion",
+    "src/data_retrieval/storage/repository.py",
+    "src/data_retrieval/retrieval/models.py",
+    "src/data_retrieval/retrieval/embedding.py",
+    "src/data_retrieval/retrieval/packing.py",
+    "src/data_retrieval/services/ingestion.py",
+    "src/data_retrieval/services/retrieval.py",
+]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = "none"

@@ -264,6 +264,8 @@ That prevents a strong combined score from hiding a broken subsystem.
 | Isolated architecture contracts | 7/7 gates passed on September 17, 2026: canonical core, Mem0 boundary, Temporal projection, tags, outcome learning, retrieval channels, and evidence packing. Fixed model outputs and deterministic embeddings are used. | `python -m data_retrieval evaluate-capabilities` |
 | Retrieval corpus without embeddings | 5/9 hit@1, 0 temporal forbidden-result violations. The expected semantic and multilingual cases fail without an embedding provider. | `python -m data_retrieval evaluate --db :memory:` |
 | Retrieval corpus with local embeddings | Both Harrier F16 and `qwen3-embedding:0.6b` scored 9/9 hit@1 with 0 temporal forbidden-result violations in the August 20, 2026 small warmed run. | See the [embedding benchmark](docs/EMBEDDING-BENCHMARK.md) |
+| LongMemEval Oracle evidence retrieval | Across 470 answer-bearing cases, exact raw atoms reached 94.04% turn hit@10, 82.04% turn recall@10, and 0.796 MRR. Crediting source lineage covered by retrieved temporal summaries raised those metrics to 100%, 98.34%, and 1.000; both views are reported to avoid overstating direct retrieval. | See the [LongMemEval report](docs/LONGMEMEVAL.md#full-oracle-pipeline) |
+| LoCoMo learning-transfer pilot | The fixed 67-question evaluation did not clear its promotion gate, so no tested learning multiplier was promoted. | See the [LoCoMo report](docs/LOCOMO-LEARNING-TRANSFER.md#results) |
 | Integrated project-history flow | Ingestion, tag enrichment, Temporal History, hybrid retrieval, and explicit feedback passed all eight scenarios in the recorded acceptance run. | See the [acceptance report](docs/PROJECT-HISTORY-ACCEPTANCE.md) |
 
 These are integration and regression baselines, not production-quality claims. Real-model
@@ -282,11 +284,14 @@ Developer tooling is optional:
 python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check src tests scripts/smoke_minimal_install.py
+python -m pyright
 ```
 
 GitHub Actions runs three independent checks on every push and pull request: a dependency-free
-SQLite smoke test, the lint and Python test suite, and the PostgreSQL adapter tests against a real
-pgvector service container. This keeps the simple setup and scale adapter verifiable separately.
+SQLite smoke test, the lint, typed-core and Python test suite, and the PostgreSQL adapter tests
+against a real pgvector service container. This keeps the simple setup and scale adapter
+verifiable separately. Pyright currently gates the domain, repository contracts, ingestion, and
+core retrieval path; dynamic provider and persistence implementations will be added incrementally.
 
 ## PostgreSQL scale mode
 
@@ -375,7 +380,8 @@ src/data_retrieval/
 ├── collective/      # isolated collective-learning research
 ├── benchmarks/      # evaluation runners
 ├── api.py            # loopback-only FastAPI transport
-└── cli.py            # command-line interface
+├── cli_parser.py     # command and argument schema
+└── cli.py            # command dispatch and handlers
 
 evals/               # versioned evaluation fixtures
 tests/               # unit, contract, integration, and adapter tests
@@ -390,8 +396,12 @@ scripts/             # diagnostic and benchmark utilities
 - SQLite is intended for local use and deterministic testing; PostgreSQL is the scale path.
 - Model-backed tag, embedding, summary, and entity quality depends on the selected model and must
   be evaluated independently of the deterministic processor contract.
-- The current nine-case retrieval corpus is intentionally small. LongMemEval and LoCoMo work is
-  expanding realistic, larger-corpus coverage.
+- The nine-case regression corpus is intentionally small. LongMemEval adds broader external
+  evidence-retrieval coverage, while the LoCoMo pilot remains a three-history learning experiment
+  rather than a generalizable quality claim.
+- Schema compatibility is currently handled inside the adapters. A versioned migration policy is
+  accepted in [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md), but extracting the
+  existing compatibility steps into ordered migrations remains implementation work.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.
