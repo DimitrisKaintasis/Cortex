@@ -7,12 +7,17 @@ through lexical, semantic, tag, relationship, and temporal signals. Every result
 provenance and score breakdown, while explicit outcome feedback improves future routing without
 rewriting source material.
 
-> **Current status:** a working local MVP with SQLite and PostgreSQL/pgvector storage,
+> **Current status:** a working local MVP with selectable SQLite or PostgreSQL/pgvector storage,
 > explainable retrieval, feedback learning, a loopback-only API, recovery tooling, and
 > deterministic evaluation gates. Privacy-preserving collective learning is an isolated research
 > track and does not affect normal retrieval.
 
-[Quick start](#quick-start) · [How it works](#how-it-works) ·
+**Storage choice:** start with SQLite. PostgreSQL is an optional scale backend, not a second
+database that must run alongside it. Each Cortex installation uses one authoritative backend;
+Cortex does not dual-write or automatically synchronize the two.
+
+[Quick start](#quick-start) · [Database choice](#which-database-should-i-use) ·
+[How it works](#how-it-works) ·
 [Evaluation](#evaluation) · [Project status](#project-status) ·
 [Documentation](#documentation)
 
@@ -43,8 +48,9 @@ recorded in an immutable event ledger.
   behavioral weights; it never rewrites source atoms or factual provenance links.
 - **Replaceable processors** — Ollama/OpenRouter tag and embedding providers, Temporal History,
   and Mem0 sit behind adapters rather than owning canonical truth.
-- **Two storage modes** — SQLite for a zero-service local workflow and PostgreSQL/pgvector for
-  indexed, bounded-candidate retrieval and resumable large-file ingestion.
+- **Selectable storage adapter** — use SQLite for a zero-service local workflow or
+  PostgreSQL/pgvector for indexed, bounded-candidate retrieval and resumable large-file
+  ingestion. A deployment uses one, not both.
 - **Local application API** — FastAPI endpoints for ingestion, retrieval, feedback, namespace
   inspection, and tag-candidate review, bound to laptop loopback only.
 - **Operational safety** — checkpointed processing, idempotent retries, weight audits, and
@@ -54,6 +60,22 @@ recorded in an immutable event ledger.
 
 The smallest useful path needs only Python and SQLite. Ollama, PostgreSQL, Mem0, and Temporal
 History are optional.
+
+### Which database should I use?
+
+For most readers, the answer is SQLite. Both adapters implement the same canonical repository
+contract, but they serve different operating needs:
+
+| Choose SQLite when… | Choose PostgreSQL when… |
+|---|---|
+| You are trying Cortex, developing locally, or running tests and evaluations. | You are operating a larger or longer-running corpus. |
+| You want a single local database file with no service or Docker setup. | You need pgvector, indexed bounded-candidate retrieval, or stronger concurrent access. |
+| Your priority is the shortest path from clone to working retrieval. | You need resumable, bounded-memory ingestion for large files and verified backup/restore tooling. |
+
+This is a deployment choice, not a two-database pipeline. Source evidence, derived artifacts, and
+learned weights live in the selected backend. Cortex does not replicate between SQLite and
+PostgreSQL, and switching an existing installation would require an explicit migration rather
+than changing a connection flag.
 
 ### 1. Install
 
@@ -164,6 +186,9 @@ flowchart LR
 The central design rule is that processors can propose interpretations, but they cannot overwrite
 canonical evidence or control final retrieval.
 
+`SQLite or PostgreSQL` in the diagram is an exclusive choice for a deployment. It represents one
+canonical data model behind two repository adapters, not two sources of truth.
+
 ### Retrieval flow
 
 1. A query becomes a plan containing its namespace, optional tags, time constraints, and result
@@ -240,8 +265,10 @@ python -m ruff check .
 
 ## PostgreSQL scale mode
 
-SQLite is the default. PostgreSQL is selected only when `--postgres-dsn` or
-`DATA_RETRIEVAL_POSTGRES_DSN` is supplied.
+This section is optional. If the SQLite workflow meets your needs, you do not need to configure
+PostgreSQL or Docker. PostgreSQL replaces SQLite as the authoritative backend for that Cortex
+installation when `--postgres-dsn` or `DATA_RETRIEVAL_POSTGRES_DSN` is supplied; it does not run
+as a synchronized second store.
 
 ```powershell
 $env:DATA_RETRIEVAL_POSTGRES_PASSWORD = "replace-with-a-long-random-password"

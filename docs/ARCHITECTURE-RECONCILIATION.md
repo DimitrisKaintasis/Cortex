@@ -255,7 +255,8 @@ half-lives, penalties, maturity rules, and robust-reference choices require abla
 
 ## Source authorities
 
-- `Data_Retrieval_Architecture_Agent_Handoff.docx`
+- [`archive/ARCHITECTURE-INTENT-HANDOFF.md`](archive/ARCHITECTURE-INTENT-HANDOFF.md) — historical
+  architecture context packet; current decisions are governed by `ARCHITECTURE.md` and the ADRs
 - `docs/CONTEXT_LEDGER.md`
 - `docs/CAPABILITY-PRESERVATION-PLAN.md`
 - Original Tags `chunker.py`, `retrieve.py`, `db_operations.py`, and design extracts
