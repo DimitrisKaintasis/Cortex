@@ -1,0 +1,237 @@
+{
+  "fixture_id": "connector-contract-slack-v1",
+  "registration": {
+    "source": {
+      "source_system": "slack",
+      "source_instance": "workspace:T001"
+    },
+    "connector_id": "slack-reference",
+    "connector_version": "0.1.0",
+    "owner_scope": {
+      "organization_id": "org:acme",
+      "visibility": "organization",
+      "contribution_policy": "private"
+    },
+    "capabilities": [
+      "source_sync",
+      "context_retrieval",
+      "outcome_reporting",
+      "change_observation"
+    ],
+    "metadata": {
+      "fixture_role": "mutable-conversation-source"
+    }
+  },
+  "sync_batch": {
+    "batch_id": "slack-sync:event-page-18:batch:0",
+    "sequence": 0,
+    "run": {
+      "request_id": "slack-sync:event-page-18",
+      "source": {
+        "source_system": "slack",
+        "source_instance": "workspace:T001"
+      },
+      "mode": "incremental",
+      "started_at": "2026-09-18T10:00:00+00:00",
+      "previous_cursor": "event-page:17",
+      "proposed_cursor": "event-page:18"
+    },
+    "records": [
+      {
+        "external_id": "channel:C-AUTH:message:100.0001",
+        "external_version": "edited:0",
+        "modality": "text",
+        "payload": {
+          "inline": "Keep refresh tokens in Redis."
+        },
+        "occurred_at": "2026-09-18T09:40:00+00:00",
+        "observed_at": "2026-09-18T10:00:01+00:00",
+        "scope": {
+          "organization_id": "org:acme",
+          "project_id": "project:payments",
+          "visibility": "project"
+        },
+        "explicit_tags": ["refresh tokens", "redis"],
+        "metadata": {
+          "channel_id": "C-AUTH",
+          "thread_ts": "100.0001",
+          "author_id": "U-ALICE"
+        }
+      },
+      {
+        "external_id": "channel:C-AUTH:message:100.0001",
+        "external_version": "edited:100.0005",
+        "modality": "text",
+        "payload": {
+          "inline": "Move refresh tokens to PostgreSQL; keep Redis only for short-lived sessions."
+        },
+        "occurred_at": "2026-09-18T09:40:00+00:00",
+        "observed_at": "2026-09-18T10:00:02+00:00",
+        "scope": {
+          "organization_id": "org:acme",
+          "project_id": "project:payments",
+          "visibility": "project"
+        },
+        "explicit_tags": ["refresh tokens", "postgresql", "redis"],
+        "metadata": {
+          "channel_id": "C-AUTH",
+          "thread_ts": "100.0001",
+          "author_id": "U-ALICE",
+          "edited_ts": "100.0005"
+        }
+      },
+      {
+        "external_id": "channel:C-AUTH:message:100.0002",
+        "external_version": "edited:0",
+        "modality": "text",
+        "payload": {
+          "inline": "Agreed. AuthService and SessionRepository should change together."
+        },
+        "occurred_at": "2026-09-18T09:42:00+00:00",
+        "observed_at": "2026-09-18T10:00:03+00:00",
+        "scope": {
+          "organization_id": "org:acme",
+          "project_id": "project:payments",
+          "visibility": "project"
+        },
+        "explicit_tags": ["authentication", "session repository"],
+        "metadata": {
+          "channel_id": "C-AUTH",
+          "thread_ts": "100.0001",
+          "author_id": "U-BOB"
+        }
+      }
+    ],
+    "relations": [
+      {
+        "relation_id": "reply:C-AUTH:100.0002:100.0001",
+        "relation_version": "edited:0",
+        "relation_type": "reply_to",
+        "source": {
+          "external_id": "channel:C-AUTH:message:100.0002",
+          "external_version": "edited:0"
+        },
+        "target": {
+          "external_id": "channel:C-AUTH:message:100.0001",
+          "external_version": "edited:100.0005"
+        },
+        "scope": {
+          "organization_id": "org:acme",
+          "project_id": "project:payments",
+          "visibility": "project"
+        },
+        "occurred_at": "2026-09-18T09:42:00+00:00",
+        "observed_at": "2026-09-18T10:00:04+00:00"
+      }
+    ],
+    "tombstones": [
+      {
+        "external_id": "channel:C-AUTH:message:99.0001",
+        "tombstone_version": "deleted:100.0006",
+        "observed_at": "2026-09-18T10:00:05+00:00",
+        "reason": "source_deleted"
+      }
+    ]
+  },
+  "sync_batch_acknowledgement": {
+    "run_request_id": "slack-sync:event-page-18",
+    "batch_id": "slack-sync:event-page-18:batch:0",
+    "sequence": 0,
+    "acknowledged_at": "2026-09-18T10:00:06+00:00",
+    "accepted_records": 3,
+    "accepted_relations": 1,
+    "accepted_tombstones": 1,
+    "failures": []
+  },
+  "sync_commit_acknowledgement": {
+    "request_id": "slack-sync:event-page-18:commit",
+    "run_request_id": "slack-sync:event-page-18",
+    "source": {
+      "source_system": "slack",
+      "source_instance": "workspace:T001"
+    },
+    "committed_cursor": "event-page:18",
+    "committed_at": "2026-09-18T10:00:07+00:00"
+  },
+  "query": {
+    "request_id": "slack-query:refresh-token-decision",
+    "query": "Why are refresh tokens moving to PostgreSQL?",
+    "scope": {
+      "organization_id": "org:acme",
+      "project_id": "project:payments",
+      "visibility": "project"
+    },
+    "top_k": 5,
+    "budget_tokens": 1200,
+    "temporal_mode": "current_state",
+    "reference_time": "2026-09-18T10:30:00+00:00"
+  },
+  "context_pack": {
+    "retrieval_id": "retrieval:slack-refresh-1",
+    "query_request_id": "slack-query:refresh-token-decision",
+    "low_confidence": false,
+    "budget_tokens": 1200,
+    "used_tokens": 74,
+    "items": [
+      {
+        "evidence_id": "evidence:slack-message-100-current",
+        "record": {
+          "source": {
+            "source_system": "slack",
+            "source_instance": "workspace:T001"
+          },
+          "external_id": "channel:C-AUTH:message:100.0001",
+          "external_version": "edited:100.0005"
+        },
+        "modality": "text",
+        "content": "Move refresh tokens to PostgreSQL; keep Redis only for short-lived sessions.",
+        "scope": {
+          "organization_id": "org:acme",
+          "project_id": "project:payments",
+          "visibility": "project"
+        },
+        "score": 0.97,
+        "score_evidence": ["tag:refresh-tokens", "temporal:current"],
+        "metadata": {
+          "channel_id": "C-AUTH",
+          "thread_ts": "100.0001"
+        }
+      },
+      {
+        "evidence_id": "evidence:slack-message-101",
+        "record": {
+          "source": {
+            "source_system": "slack",
+            "source_instance": "workspace:T001"
+          },
+          "external_id": "channel:C-AUTH:message:100.0002",
+          "external_version": "edited:0"
+        },
+        "modality": "text",
+        "content": "AuthService and SessionRepository should change together.",
+        "scope": {
+          "organization_id": "org:acme",
+          "project_id": "project:payments",
+          "visibility": "project"
+        },
+        "score": 0.82,
+        "score_evidence": ["relationship:reply_to"],
+        "metadata": {
+          "channel_id": "C-AUTH",
+          "thread_ts": "100.0001"
+        }
+      }
+    ]
+  },
+  "outcome": {
+    "request_id": "slack-outcome:refresh-token-decision",
+    "retrieval_id": "retrieval:slack-refresh-1",
+    "used_evidence_ids": [
+      "evidence:slack-message-100-current",
+      "evidence:slack-message-101"
+    ],
+    "outcome": "positive",
+    "occurred_at": "2026-09-18T10:31:00+00:00",
+    "reason": "The agent used the decision and its reply to explain affected components."
+  }
+}

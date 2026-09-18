@@ -1,0 +1,243 @@
+{
+  "fixture_id": "connector-contract-devui-v1",
+  "registration": {
+    "source": {
+      "source_system": "devui",
+      "source_instance": "project:cortex"
+    },
+    "connector_id": "devui-reference",
+    "connector_version": "0.1.0",
+    "owner_scope": {
+      "organization_id": "org:portfolio",
+      "project_id": "project:cortex",
+      "visibility": "project",
+      "contribution_policy": "private"
+    },
+    "capabilities": [
+      "source_sync",
+      "context_retrieval",
+      "outcome_reporting"
+    ],
+    "metadata": {
+      "fixture_role": "structured-source"
+    }
+  },
+  "sync_batch": {
+    "batch_id": "devui-sync:scan-42:batch:0",
+    "sequence": 0,
+    "run": {
+      "request_id": "devui-sync:scan-42",
+      "source": {
+        "source_system": "devui",
+        "source_instance": "project:cortex"
+      },
+      "mode": "full",
+      "started_at": "2026-09-18T09:00:00+00:00",
+      "proposed_cursor": "scan:42"
+    },
+    "records": [
+      {
+        "external_id": "module:authentication",
+        "external_version": "graph:42",
+        "modality": "text",
+        "payload": {
+          "inline": "Authentication owns login, password verification, and session entry points."
+        },
+        "occurred_at": "2026-09-18T08:55:00+00:00",
+        "observed_at": "2026-09-18T09:00:01+00:00",
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "explicit_tags": ["authentication", "architecture module"],
+        "metadata": {
+          "entity_type": "module",
+          "display_name": "Authentication"
+        }
+      },
+      {
+        "external_id": "function:src/auth/service.py:login",
+        "external_version": "sha256:login-v1",
+        "modality": "code",
+        "payload": {
+          "inline": "def login(credentials):\n    user = get_user(credentials.email)\n    return verify_password(user, credentials.password)"
+        },
+        "occurred_at": "2026-09-18T08:56:00+00:00",
+        "observed_at": "2026-09-18T09:00:02+00:00",
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "explicit_tags": ["authentication", "login"],
+        "metadata": {
+          "entity_type": "function",
+          "file": "src/auth/service.py",
+          "line": 41
+        }
+      },
+      {
+        "external_id": "function:src/auth/security.py:verify_password",
+        "external_version": "sha256:verify-v1",
+        "modality": "code",
+        "payload": {
+          "inline": "def verify_password(user, password):\n    return password_hasher.verify(user.password_hash, password)"
+        },
+        "occurred_at": "2026-09-18T08:57:00+00:00",
+        "observed_at": "2026-09-18T09:00:03+00:00",
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "explicit_tags": ["authentication", "password verification"],
+        "metadata": {
+          "entity_type": "function",
+          "file": "src/auth/security.py",
+          "line": 12
+        }
+      }
+    ],
+    "relations": [
+      {
+        "relation_id": "belongs:function-login:module-authentication",
+        "relation_version": "graph:42",
+        "relation_type": "belongs_to",
+        "source": {
+          "external_id": "function:src/auth/service.py:login",
+          "external_version": "sha256:login-v1"
+        },
+        "target": {
+          "external_id": "module:authentication",
+          "external_version": "graph:42"
+        },
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "observed_at": "2026-09-18T09:00:04+00:00"
+      },
+      {
+        "relation_id": "calls:login:verify-password",
+        "relation_version": "graph:42",
+        "relation_type": "calls",
+        "source": {
+          "external_id": "function:src/auth/service.py:login",
+          "external_version": "sha256:login-v1"
+        },
+        "target": {
+          "external_id": "function:src/auth/security.py:verify_password",
+          "external_version": "sha256:verify-v1"
+        },
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "observed_at": "2026-09-18T09:00:05+00:00",
+        "confidence": 1.0
+      }
+    ],
+    "tombstones": []
+  },
+  "sync_batch_acknowledgement": {
+    "run_request_id": "devui-sync:scan-42",
+    "batch_id": "devui-sync:scan-42:batch:0",
+    "sequence": 0,
+    "acknowledged_at": "2026-09-18T09:00:06+00:00",
+    "accepted_records": 3,
+    "accepted_relations": 2,
+    "accepted_tombstones": 0,
+    "failures": []
+  },
+  "sync_commit_acknowledgement": {
+    "request_id": "devui-sync:scan-42:commit",
+    "run_request_id": "devui-sync:scan-42",
+    "source": {
+      "source_system": "devui",
+      "source_instance": "project:cortex"
+    },
+    "committed_cursor": "scan:42",
+    "committed_at": "2026-09-18T09:00:07+00:00"
+  },
+  "query": {
+    "request_id": "devui-query:authentication-flow",
+    "query": "How does login verify a password?",
+    "scope": {
+      "organization_id": "org:portfolio",
+      "project_id": "project:cortex",
+      "visibility": "project"
+    },
+    "top_k": 5,
+    "budget_tokens": 1200,
+    "temporal_mode": "current_state",
+    "reference_time": "2026-09-18T09:30:00+00:00"
+  },
+  "context_pack": {
+    "retrieval_id": "retrieval:devui-auth-1",
+    "query_request_id": "devui-query:authentication-flow",
+    "low_confidence": false,
+    "budget_tokens": 1200,
+    "used_tokens": 96,
+    "items": [
+      {
+        "evidence_id": "evidence:login-v1",
+        "record": {
+          "source": {
+            "source_system": "devui",
+            "source_instance": "project:cortex"
+          },
+          "external_id": "function:src/auth/service.py:login",
+          "external_version": "sha256:login-v1"
+        },
+        "modality": "code",
+        "content": "login loads the user and calls verify_password.",
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "score": 0.94,
+        "score_evidence": ["lexical", "relationship:calls"],
+        "metadata": {
+          "file": "src/auth/service.py",
+          "line": 41
+        }
+      },
+      {
+        "evidence_id": "evidence:verify-v1",
+        "record": {
+          "source": {
+            "source_system": "devui",
+            "source_instance": "project:cortex"
+          },
+          "external_id": "function:src/auth/security.py:verify_password",
+          "external_version": "sha256:verify-v1"
+        },
+        "modality": "code",
+        "content": "verify_password compares the stored hash through password_hasher.",
+        "scope": {
+          "organization_id": "org:portfolio",
+          "project_id": "project:cortex",
+          "visibility": "project"
+        },
+        "score": 0.89,
+        "score_evidence": ["relationship:calls"],
+        "metadata": {
+          "file": "src/auth/security.py",
+          "line": 12
+        }
+      }
+    ]
+  },
+  "outcome": {
+    "request_id": "devui-outcome:authentication-flow",
+    "retrieval_id": "retrieval:devui-auth-1",
+    "used_evidence_ids": ["evidence:login-v1", "evidence:verify-v1"],
+    "outcome": "positive",
+    "occurred_at": "2026-09-18T09:31:00+00:00",
+    "reason": "The agent used both functions to explain the call path."
+  }
+}

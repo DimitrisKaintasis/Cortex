@@ -1,6 +1,6 @@
 # Cortex connector and agent API plan
 
-- Status: accepted direction; implementation not started
+- Status: implementation in progress (C1 contract fixtures)
 - Date: 2026-09-18
 - Governing decision: [ADR-0020](decisions/0020-external-connector-and-agent-boundary.md)
 - Current transport: [loopback-only local API](LOCAL-API.md)
@@ -57,7 +57,10 @@ clients, and full bidirectional application integrations.
 | `Source` | One configured origin of external evidence | source system, source instance, connector identity/version, owner |
 | `Record` | One externally identifiable evidence object or version | external ID, payload/reference, modality, scope, visibility, version |
 | `Relation` | Source-owned typed connection between records | source external ID, target external ID, type, confidence/provenance if applicable |
-| `SyncRun` | Retryable incremental synchronization boundary | request ID, source, starting cursor, state, committed cursor |
+| `SyncRun` | Retryable incremental synchronization boundary | request ID, source, mode, starting cursor, proposed cursor |
+| `SyncBatch` | Independently retryable bounded write | stable batch ID, zero-based sequence, run identity, records/relations/tombstones |
+| `SyncBatchAcknowledgement` | Durable result for one batch | matching run/batch/sequence, accepted counts, item-specific failures |
+| `SyncCommitAcknowledgement` | Proof that the source cursor advanced | commit request ID, run/source identity, committed cursor and time |
 | `Scope` | Ownership and access location | organization/project/user/private dimensions independent of namespace |
 | `Query` | Request for relevant evidence | text/structured intent, allowed scope, filters, temporal mode, budget |
 | `EvidenceResult` | One traceable retrieval item | evidence ID, permitted external identity, content/reference, lineage, scores |
@@ -106,7 +109,8 @@ Required constraints:
 - `(source instance, external ID, external version)` is replay-idempotent within its owner scope.
 - A content-changing update creates a new canonical version and a `SUPERSEDES` lineage link.
 - Relations may arrive after their endpoint records and are retry-safe.
-- Unknown metadata is preserved only within size, type, privacy, and allowlist policy.
+- Unknown metadata is preserved only within size, type, privacy, and allowlist policy. Contract
+  metadata accepts JSON-compatible values only and is recursively immutable after validation.
 - Payload references require immutable identity/hash rules before external blobs are supported.
 - Connector-supplied tags are explicit source annotations; inferred tags continue through the
   proposal/review lifecycle.
@@ -116,17 +120,18 @@ Required constraints:
 ```text
 register/resolve source
         -> begin sync(run_id, previous_cursor)
-            -> batch upsert records
-            -> batch upsert relations
-            -> submit tombstones/erasure requests
-            -> validate counts and failures
+            -> submit bounded batch(batch_id, sequence)
+            -> receive durable batch acknowledgement and item failures
+            -> retry or repair failures without advancing the cursor
         -> commit sync(new_cursor)
+            -> receive commit acknowledgement
 ```
 
 Rules:
 
 1. Starting or replaying a sync with the same request identity is safe.
-2. Batches are bounded and independently acknowledged.
+2. Batches are bounded and independently acknowledged by stable `(run request ID, batch ID,
+   sequence)` identity.
 3. Partial failures identify individual records without advancing the committed cursor.
 4. Connector cursors are opaque to Cortex and meaningful only to their source connector.
 5. A crash after durable ingestion but before commit can replay without duplicates.
@@ -135,6 +140,25 @@ Rules:
    and propagation policy.
 8. Optional enrichment runs after canonical source capture; model failure never invalidates the
    committed sync.
+
+Batch acknowledgement and cursor commit are deliberately separate. A successful batch means its
+accepted items are durable and safe to replay; only a commit acknowledgement proves that Cortex
+advanced the source cursor.
+
+## Query temporal contract
+
+Temporal requests carry their boundaries explicitly:
+
+- `as_of` mode requires a timezone-aware `as_of` timestamp;
+- `range` mode requires timezone-aware `range_start` and `range_end`, with start before end;
+- `current_state` may include `as_of` to ask for the state known at that time;
+- range bounds are invalid outside `range` mode, and `as_of` is invalid outside `as_of` or
+  `current_state`; and
+- `timeline_id` scopes a temporal stream without exposing Cortex namespace internals.
+
+All mapping decoders reject unknown contract fields. This strictness makes misspellings and schema
+version mismatches visible at the connector boundary instead of silently replacing intent with
+defaults.
 
 ## Provisional REST surface
 
@@ -283,8 +307,8 @@ cross-scope metrics or ordinary operational logs.
 
 | Phase | Status | Deliverable | Exit gate |
 |---|---|---|---|
-| C0. Freeze boundary | in progress | ADR-0020 and this plan | Architecture, vocabulary, non-goals, and order are reviewed and committed |
-| C1. Contract fixtures | not started | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
+| C0. Freeze boundary | passed | ADR-0020 and this plan | Architecture, vocabulary, non-goals, and order are reviewed and committed |
+| C1. Contract fixtures | in progress | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
 | C2. External record lifecycle | not started | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | not started | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | not started | Stdio/loopback read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |

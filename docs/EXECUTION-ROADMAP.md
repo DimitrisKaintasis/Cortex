@@ -23,7 +23,7 @@ score transformation with controlled examples. The report includes manually revi
 
 Current delivery step: D3a passed — rehearse the legacy corpus upgrade before current-runtime use
 
-Connector delivery step: C0 in progress — review and commit the connector boundary
+Connector delivery step: C1 in progress — review and commit validated contract fixtures
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -96,8 +96,8 @@ does not make the loopback API public or un-defer hosted storage. ADR-0020 and
 
 | Step | Status | Outcome |
 |---|---|---|
-| C0. Freeze connector boundary | in progress | Public concepts, four capability profiles, transport ownership, security boundary, and ordered plan are reviewed and committed |
-| C1. Contract fixtures | not started | DevUI-like structured and Slack-like mutable data validate against transport-independent request/response models |
+| C0. Freeze connector boundary | passed | Public concepts, four capability profiles, transport ownership, security boundary, and ordered plan are reviewed and committed |
+| C1. Contract fixtures | in progress | DevUI-like structured and Slack-like mutable data validate against transport-independent request/response models |
 | C2. External record lifecycle | not started | Source identity, versions, relations, sync runs, cursors, and tombstones are replay-safe across repositories |
 | C3. Python SDK | not started | A connector performs sync, retrieval, and outcomes without Cortex-internal knowledge |
 | C4. Local MCP adapter | not started | IDE agents use read/outcome tools with REST-equivalent policy and results |
@@ -375,3 +375,4 @@ Append one short entry after every work session.
 | 2026-09-04 | D3a | Selected laptop-only storage; changed Ollama defaults to laptop loopback; added atomic PostgreSQL backups, checksum manifests, and isolated restore verification | 172 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; lint and diff checks passed; a real local tag/embedding/retrieval/API smoke passed; live Docker restore is blocked by a stale optional Model Runner socket before PostgreSQL startup | Repair Docker Desktop locally, run live PostgreSQL tests, then create and verify the first real backup |
 | 2026-09-05 | D3a | Completed live storage acceptance after Docker restart; made restore verification inspect legacy schemas and require pgvector/core tables | 176 tests passed with PostgreSQL enabled; original 193 MiB archive restored with all ten table counts matching, including 272,209 atoms; current-schema fixture restored with weight events; real PostgreSQL API health passed; temporary databases cleaned up | Rehearse corpus migration and compare retrieval on a restored copy before upgrading canonical data |
 | 2026-09-18 | C0 | Documented the external connector and agent boundary plus its phased API/SDK/MCP delivery plan | ADR-0020, connector plan, architecture, context ledger, README, and roadmap agree; local links and `git diff --check` passed | Review and commit C0, then build transport-independent DevUI-like and Slack-like contract fixtures |
+| 2026-09-18 | C1 | Added transport-independent source, record, relation, sync, scope, query, evidence, context, and outcome contracts plus strict mapping codecs and DevUI/Slack fixtures | 210 tests passed, 2 optional PostgreSQL tests skipped, 5 subtests passed; maintained Ruff and Pyright surfaces passed | Review and commit C1, then implement ADR-0019 migrations before C2 persistence |

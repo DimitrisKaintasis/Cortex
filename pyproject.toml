@@ -88,6 +88,7 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pyright]
 include = [
     "src/data_retrieval/core",
+    "src/data_retrieval/connectors",
     "src/data_retrieval/domain",
     "src/data_retrieval/ingestion",
     "src/data_retrieval/storage/repository.py",
