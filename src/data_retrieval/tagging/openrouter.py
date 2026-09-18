@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from data_retrieval.domain.models import TagLevel
@@ -13,7 +13,7 @@ from data_retrieval.tagging.proposals import TagProposal
 class OpenRouterTagProposer:
     """Propose atom tags with strict structured output through OpenRouter."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = "openai/gpt-5.6-luna"
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 120.0

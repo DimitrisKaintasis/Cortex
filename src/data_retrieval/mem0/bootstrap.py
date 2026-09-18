@@ -24,6 +24,19 @@ DEFAULT_MAX_BATCH_CHARS = 24_000
 SAFE_ROLES = frozenset({"user", "assistant", "system"})
 
 
+def _validated_mem0_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return a Mem0 config constrained to Cortex's supported vector backend."""
+    effective_config = dict(config or {})
+    vector_store = effective_config.get("vector_store")
+    provider = vector_store.get("provider") if isinstance(vector_store, Mapping) else None
+    if not isinstance(provider, str) or provider.strip().casefold() != "qdrant":
+        raise ValueError(
+            "Cortex's Mem0 integration requires an explicit Qdrant vector_store; "
+            "other Mem0 vector backends are not supported"
+        )
+    return effective_config
+
+
 class Mem0Processor(Protocol):
     """Small boundary around the OSS Mem0 SDK, making the bridge testable."""
 
@@ -41,6 +54,7 @@ class Mem0PythonProcessor:
     """Use the current self-hosted Mem0 Python SDK without a core dependency."""
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+        effective_config = _validated_mem0_config(config)
         try:
             from mem0 import Memory
         except ImportError as error:
@@ -48,7 +62,6 @@ class Mem0PythonProcessor:
                 "Mem0 is not installed; install the optional dependency with "
                 "'python -m pip install -e \".[mem0]\"'"
             ) from error
-        effective_config = dict(config or {})
         self.profile_id = self._profile_id(effective_config)
         self._memory = Memory.from_config(effective_config)
         if not bool(getattr(self._memory, "enable_graph", False)):

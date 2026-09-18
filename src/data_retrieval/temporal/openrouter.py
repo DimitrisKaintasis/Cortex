@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from temporal_history.core import (
@@ -23,7 +23,7 @@ PROMPT_VERSION = "openrouter-temporal-summary-v1-structured"
 class OpenRouterTemporalSummarizer(TemporalSummarizer):
     """Evidence-grounded Temporal History summarization through OpenRouter."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = "openai/gpt-5.6-luna"
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 180.0

@@ -12,6 +12,14 @@ from data_retrieval.tagging.proposals import TagProposal
 from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
 
 
+class CredentialRepresentationTests(unittest.TestCase):
+    def test_provider_representations_do_not_expose_credentials(self) -> None:
+        credential = "test-credential-must-not-appear"
+        for provider in (OpenRouterJsonClient, OpenRouterTagProposer, OpenRouterTemporalSummarizer):
+            with self.subTest(provider=provider.__name__):
+                self.assertNotIn(credential, repr(provider(api_key=credential)))
+
+
 class FakeResponse:
     def __init__(self, body: dict[str, object]) -> None:
         self.body = json.dumps(body).encode("utf-8")

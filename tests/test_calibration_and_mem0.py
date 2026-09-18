@@ -20,6 +20,7 @@ from data_retrieval.mem0 import (
     load_mem0_records,
     normalize_mem0_response,
 )
+from data_retrieval.mem0.bootstrap import _validated_mem0_config
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, RetrievalChannels
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
@@ -70,6 +71,18 @@ class _AlignedEmbedder:
 
 
 class CalibrationAndMem0Tests(unittest.TestCase):
+    def test_mem0_config_requires_explicit_qdrant_vector_store(self) -> None:
+        with self.assertRaisesRegex(ValueError, "explicit Qdrant vector_store"):
+            _validated_mem0_config(None)
+        with self.assertRaisesRegex(ValueError, "explicit Qdrant vector_store"):
+            _validated_mem0_config({"vector_store": {"provider": "faiss"}})
+
+    def test_mem0_config_accepts_qdrant_without_mutating_input(self) -> None:
+        config = {"vector_store": {"provider": " QDRANT "}}
+        validated = _validated_mem0_config(config)
+        self.assertEqual(validated, config)
+        self.assertIsNot(validated, config)
+
     def test_mem0_response_requires_explicit_endpoint_provenance(self) -> None:
         response = {
             "results": [{"id": "memory-1", "memory": "Diagnostic only."}],

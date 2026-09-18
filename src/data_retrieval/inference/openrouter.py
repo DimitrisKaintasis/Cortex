@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -22,7 +22,7 @@ class _OpenRouterHttpError(OpenRouterError):
 class OpenRouterJsonClient:
     """Small dependency-free client for strict OpenRouter structured outputs."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = "openai/gpt-5.6-luna"
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 120.0

@@ -13,14 +13,17 @@ database dumps, and local JSON configuration. The original two harmless markers 
 historical commits. The README clone-directory command was also corrected to `cd Cortex`.
 
 The findings below describe the original review. PUB-PRIVACY-001 and REPO-HYGIENE-001
-are addressed by this cleanup; dependency auditing remains follow-up work.
+are addressed by this cleanup. A clean optional-dependency audit identified one advisory in
+Mem0's unused FAISS backend. Cortex now rejects every vector backend except Qdrant before Mem0
+initialization, tests that boundary, and carries a named CI audit exception until its graph bridge
+can migrate from Mem0 1.x. Dependabot and a dedicated CI audit job provide ongoing monitoring.
 
 Scope limitations: signature scans cannot prove absence of all private data. The repository
 size reported below is compressed storage, not an exhaustive bound on historical blob sizes.
 Pydantic field limits do not limit the raw request body before parsing or bound arbitrary
 metadata. The application review was targeted, not a penetration test or production certification.
-The shared Python environment audit reported advisories including Starlette 0.50.0; their
-applicability and clean-install dependency resolution still require review.
+A clean install resolves current FastAPI and Starlette releases. Its only known advisory is the
+bounded Mem0 FAISS exception documented above and in `SECURITY.md`.
 
 ## Executive summary
 
@@ -68,27 +71,27 @@ None.
 
 ## Low findings
 
-### SUPPLY-CHAIN-001 — Optional environments have no reproducible security audit
+### SUPPLY-CHAIN-001 — Optional environments need a reproducible security audit (addressed)
 
 - **Rule ID:** SUPPLY-CHAIN-001 / FASTAPI-SUPPLY-001
 - **Severity:** Low
 - **Location:** `pyproject.toml` lines 17–62; `.github/workflows/ci.yml` lines 24–37 and 39–66.
 - **Evidence:** Optional dependency groups use bounded direct dependencies but do not lock their
-  transitive dependency graph. CI installs the current resolver result and runs tests, linting, and
-  typing, but does not run a vulnerability audit. The default SQLite installation has no runtime
-  dependencies. A local whole-environment `pip-audit` found stale vulnerable packages, but that
-  Python installation contains unrelated software and is not treated as a reproducible Cortex
-  result.
+  transitive dependency graph. The default SQLite installation has no runtime dependencies. A
+  clean `.[all,dev]` environment found `PYSEC-2026-2636` in `mem0ai==1.0.1`; the advisory concerns
+  FAISS pickle persistence, while Cortex now rejects all vector backends except Qdrant before
+  constructing Mem0. Mem0 2.x cannot currently replace the pin because it removed the graph API
+  used by this optional integration.
 - **Impact:** A developer can retain a previously resolved optional dependency after a security fix
   is available, and a newly disclosed advisory will not automatically fail CI.
-- **Fix:** Add a dedicated dependency-audit CI job after the repository is public and CI is
-  available. Audit a clean resolved environment rather than the developer's shared Python
-  installation. Consider a constraints file for the hosted deployment when that product exists;
-  do not force application-style lock files on library consumers.
-- **Mitigation:** Keep the existing lower/upper bounds, regularly recreate local environments, and
-  enable Dependabot security updates after publication.
-- **False-positive notes:** This is maintenance risk, not proof that a clean installation currently
-  resolves to a vulnerable package.
+- **Fix:** CI now audits a clean optional-dependency environment, Dependabot checks weekly, and the
+  Mem0 exception is identified by advisory ID in CI rather than hidden. Remove that exception when
+  the graph bridge can migrate to a supported Mem0 2.x interface.
+- **Mitigation:** The code-enforced Qdrant-only boundary makes the affected FAISS path unreachable
+  through Cortex's supported integration. Regularly recreate local environments and review
+  Dependabot updates.
+- **False-positive notes:** The advisory is real in the installed package; Cortex's exposure is
+  mitigated by excluding the affected backend, not by claiming the dependency itself is fixed.
 
 ### REPO-HYGIENE-001 — Generated Qdrant state markers are tracked
 
@@ -109,7 +112,7 @@ None.
 
 ## Verified controls and non-findings
 
-- Gitleaks 8.30.1: 40 commits scanned, no leaks found.
+- Gitleaks 8.30.1: reachable history scanned with no leaks found.
 - Manual high-confidence history scan: no private-key headers, GitHub tokens, OpenAI-style tokens,
   AWS access keys, or Slack tokens.
 - Sensitive filename scan: only `.env.example` is tracked; it contains blank or documented example
@@ -126,6 +129,6 @@ None.
 
 ## Recommended cleanup order
 
-1. Verify and push the approved metadata rewrite and artifact cleanup.
-2. Resolve optional dependency audit findings in a clean environment.
-3. After the owner's publication decision, make the repository public and rerun CI.
+1. Publish the verified cleanup commit.
+2. Make the repository public and confirm every CI job on the public default branch.
+3. Remove the documented Mem0 audit exception when a supported graph migration is available.
