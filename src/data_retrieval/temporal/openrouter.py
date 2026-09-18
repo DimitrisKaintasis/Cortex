@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from data_retrieval.inference.openrouter import OpenRouterError, OpenRouterJsonClient
 from temporal_history.core import (
     NormalizedEvent,
     Period,
@@ -13,8 +14,6 @@ from temporal_history.core import (
     SummaryRecord,
     TemporalSummarizer,
 )
-
-from data_retrieval.inference.openrouter import OpenRouterError, OpenRouterJsonClient
 
 PROMPT_VERSION = "openrouter-temporal-summary-v1-structured"
 

@@ -24,11 +24,15 @@ postgres = [
     "psycopg[binary]>=3.2,<4",
 ]
 temporal = [
-    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
+    "click>=8.1,<9",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1.0,<2",
 ]
 benchmarks = [
     "ijson>=3.4,<4",
-    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
+    "click>=8.1,<9",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1.0,<2",
 ]
 mem0 = [
     "mem0ai==1.0.1",
@@ -42,7 +46,9 @@ all = [
     "ijson>=3.4,<4",
     "pgvector>=0.4,<1",
     "psycopg[binary]>=3.2,<4",
-    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
+    "click>=8.1,<9",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1.0,<2",
     "mem0ai==1.0.1",
     "kuzu>=0.11,<1",
     "ollama>=0.6,<1",
@@ -56,13 +62,16 @@ dev = [
     "psycopg[binary]>=3.2,<4",
     "pyright>=1.1.414,<2",
     "pytest>=8,<10",
+    "python-dotenv>=1.0,<2",
     "ruff>=0.9,<1",
-    "temporal-history @ git+https://github.com/tedboudros/temporal-history.git@f2851f28920945f5689c646566d0c69b58065814",
     "uvicorn>=0.38,<1",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+temporal_history = ["graph_template.html", "LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -71,6 +80,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+exclude = ["src/temporal_history"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

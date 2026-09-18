@@ -3,13 +3,12 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from temporal_history.core import NormalizedEvent, Period
-
 from data_retrieval.domain.models import TagLevel
 from data_retrieval.inference.openrouter import OpenRouterError, OpenRouterJsonClient
 from data_retrieval.tagging.openrouter import OpenRouterTagProposer
 from data_retrieval.tagging.proposals import TagProposal
 from data_retrieval.temporal.openrouter import OpenRouterTemporalSummarizer
+from temporal_history.core import NormalizedEvent, Period
 
 
 class CredentialRepresentationTests(unittest.TestCase):

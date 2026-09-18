@@ -3,11 +3,10 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from temporal_history.core import NormalizedEvent, Period
-
 from data_retrieval.domain.models import TagLevel
 from data_retrieval.tagging.ollama import OllamaError, OllamaTagProposer
 from data_retrieval.temporal.ollama import OllamaTemporalSummarizer
+from temporal_history.core import NormalizedEvent, Period
 
 
 class FakeResponse:

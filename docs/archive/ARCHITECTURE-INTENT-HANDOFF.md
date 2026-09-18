@@ -883,7 +883,7 @@ Measure end-to-end task success, invalid tool/action rate, number of recovery lo
 | Historical | DimitrisKaintasis/DebUI/subprojects/data-memory/research/core-tag-functionality/extracted-txt/Weight Updating Mechanisms.txt |
 | Historical | DimitrisKaintasis/DebUI/subprojects/data-memory/research/core-tag-functionality/extracted-txt/To Do _ Possible Features.txt |
 | Historical | DimitrisKaintasis/DebUI/Perfecting Graph Memory Retrieval.md |
-| External reference | tedboudros/temporal-history |
+| Incorporated reference | Vendored Temporal History runtime in `src/temporal_history/` |
 
 ## Appendix B. Handoff instruction
 

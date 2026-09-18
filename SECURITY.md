@@ -11,8 +11,8 @@ sent to them when their optional enrichment features are enabled.
 
 Use a fresh virtual environment for installations and upgrades. CI audits the
 installed optional dependencies with `pip-audit`; Dependabot checks for updates
-weekly. The pinned Git dependency `temporal-history` is not indexed by PyPI's
-advisory service, although its installed dependencies are included in the audit.
+weekly. The vendored Temporal History runtime is scanned as Cortex source, while
+its PyPI-hosted runtime dependencies are included in the dependency audit.
 
 The optional Mem0 graph bridge pins `mem0ai==1.0.1` because Mem0 2.x removed the
 graph interface it uses. Advisory `PYSEC-2026-2636` affects that release's FAISS

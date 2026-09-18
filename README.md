@@ -417,6 +417,9 @@ The Cortex community core in this repository is open source under the
 [Apache License 2.0](LICENSE). You may use, modify, distribute, and self-host it under that
 license's terms.
 
+The vendored Temporal History runtime under `src/temporal_history/` remains under its original
+MIT license. See [third-party notices](THIRD_PARTY_NOTICES.md) for attribution and terms.
+
 A future managed Cortex service may offer additional proprietary capabilities, operational
 tooling, and hosted infrastructure that are not part of this repository. The open-source core is
 intended to remain a substantial, independently useful system rather than a nonfunctional demo.

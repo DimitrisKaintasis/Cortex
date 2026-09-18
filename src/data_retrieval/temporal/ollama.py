@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from data_retrieval.tagging.ollama import OllamaError, OllamaJsonClient
 from temporal_history.core import (
     NormalizedEvent,
     Period,
@@ -13,8 +14,6 @@ from temporal_history.core import (
     SummaryRecord,
     TemporalSummarizer,
 )
-
-from data_retrieval.tagging.ollama import OllamaError, OllamaJsonClient
 
 PROMPT_VERSION = "ollama-temporal-summary-v2"
 

@@ -17,7 +17,8 @@ ownership problems.
 
 ## Decision
 
-1. Pin Temporal History to an exact Git commit until it publishes a stable release.
+1. Vendor the reviewed Temporal History runtime snapshot from an exact commit so Cortex remains
+   installable without access to its private upstream repository.
 2. Keep all imports from its alpha API inside one `TemporalBridge` adapter.
 3. Convert timestamped source atoms to Temporal History normalized events.
 4. Convert generated temporal summaries back into atoms.

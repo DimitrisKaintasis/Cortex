@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Temporal History Graph</title>
+<style>
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #070b14;
+  --panel: #0e1524;
+  --panel-2: #121c2e;
+  --border: #25324a;
+  --text: #e8eef9;
+  --muted: #8fa0bc;
+  --year: #ef4444;
+  --month: #f97316;
+  --week: #eab308;
+  --day: #14b8a6;
+  --six: #22c55e;
+  --pressure: #a855f7;
+}
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+body { display: grid; grid-template-rows: auto auto 1fr; }
+header {
+  min-height: 62px;
+  padding: 13px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #0b1220;
+  border-bottom: 1px solid var(--border);
+}
+h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+.subtitle { margin-top: 4px; color: var(--muted); font-size: 14px; }
+.run-status { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.status-dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 12px #22c55e99; }
+.toolbar {
+  min-height: 58px;
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+select, input, button {
+  height: 36px;
+  border: 1px solid #33425e;
+  border-radius: 7px;
+  background: #131e31;
+  color: var(--text);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 14px;
+}
+input { min-width: 230px; }
+button { cursor: pointer; }
+button:hover { background: #1b2a43; border-color: #4a5e83; }
+.spacer { flex: 1; }
+.legend { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 4px; }
+.swatch { width: 9px; height: 9px; border-radius: 3px; }
+.workspace { min-height: 0; display: grid; grid-template-columns: 1fr 450px; }
+.graph-shell { min-width: 0; min-height: 0; position: relative; background: radial-gradient(circle at 50% 25%, #101a2c 0, var(--bg) 58%); }
+#graph { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#graph.dragging { cursor: grabbing; }
+.graph-help {
+  position: absolute; left: 14px; bottom: 12px; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: #0b1220dd; color: var(--muted); font-size: 13px; pointer-events: none;
+}
+.lane-rail {
+  position: absolute; inset: 0 auto 0 0; width: 82px; z-index: 2;
+  pointer-events: none; background: linear-gradient(90deg, #08101ee8 0%, #08101eaa 72%, transparent 100%);
+}
+.lane-rail span {
+  position: absolute; left: 10px; transform: translateY(-50%);
+  color: #9caecc; font-size: 12px; font-weight: 750; letter-spacing: .08em;
+}
+.inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--border); background: var(--panel); }
+.inspector-empty { padding: 28px 22px; color: var(--muted); font-size: 16px; line-height: 1.6; }
+.inspector-head { position: sticky; top: 0; z-index: 2; padding: 17px 18px; background: #0e1524f2; border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); }
+.inspector-head h2 { margin: 4px 0 0; font-size: 21px; }
+.eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .09em; font-size: 12px; }
+.inspector-body { padding: 16px 18px 30px; }
+.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+.meta { padding: 9px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); }
+.meta b { display: block; margin-top: 4px; font-size: 15px; }
+.section { margin-top: 18px; }
+.section h3 { margin: 0 0 8px; color: #b9c5d9; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+.summary { color: #d8e1f0; font-size: 16px; line-height: 1.65; white-space: pre-wrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { padding: 5px 8px; border: 1px solid #354662; border-radius: 999px; background: #17243a; color: #cbd7ea; font-size: 12px; }
+button.chip { height: auto; }
+.evidence { max-height: 290px; overflow: auto; border: 1px solid var(--border); border-radius: 7px; }
+.event { padding: 10px 11px; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 1.5; }
+.event:last-child { border-bottom: 0; }
+.event-head { margin-bottom: 3px; color: var(--muted); }
+.event-text { color: #d2dced; white-space: pre-wrap; word-break: break-word; }
+.context-json { padding: 10px; overflow: auto; border: 1px solid var(--border); border-radius: 7px; background: #09101c; color: #b7c6dc; font-size: 12px; white-space: pre-wrap; }
+.lane-label { fill: #8fa0bc; font-size: 14px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.lane-line { stroke: #26344b; stroke-width: 1; }
+.edge { fill: none; stroke: #3b4b66; stroke-width: 1.15; opacity: .6; }
+.edge.week-edge { stroke: #8a782e; stroke-dasharray: 6 5; }
+.edge.pressure-edge { stroke: #8b4ac4; stroke-width: 1.7; }
+.edge, .node { transition: opacity .2s ease; }
+.edge.focus-descendant { opacity: 1; stroke-width: 2.2; }
+.edge.context-dim { opacity: .2; }
+.edge.unrelated-below { opacity: .045; }
+.node { cursor: pointer; opacity: 1; }
+.node.focus-descendant { opacity: 1; }
+.node.context-dim { opacity: .34; }
+.node.unrelated-below { opacity: .075; }
+.node rect { stroke-width: 1.4; filter: drop-shadow(0 7px 9px #0007); transition: stroke-width .12s, filter .12s; }
+.node:hover rect, .node.selected rect { stroke-width: 3; filter: drop-shadow(0 0 10px #ffffff33); }
+.node-title { fill: #f4f7fc; font-size: 13px; font-weight: 700; pointer-events: none; }
+.node-sub { fill: #a9b7ce; font-size: 11px; pointer-events: none; }
+.node-count { fill: #d6e0ef; font-size: 10px; font-weight: 650; pointer-events: none; }
+.node.year rect { fill: #31151a; stroke: var(--year); }
+.node.month rect { fill: #351d12; stroke: var(--month); }
+.node.week rect { fill: #302a10; stroke: var(--week); }
+.node.day rect { fill: #0d2b2a; stroke: var(--day); }
+.node.six_hour rect { fill: #102a1b; stroke: var(--six); }
+.node.pressure rect { fill: #28143a; stroke: var(--pressure); }
+.empty-state { fill: #8fa0bc; font-size: 16px; }
+.integrity-badge { padding: 5px 8px; border-radius: 999px; color: #86efac; background: #12301f; border: 1px solid #225c38; }
+@media (max-width: 900px) {
+  .workspace { grid-template-columns: 1fr; grid-template-rows: 58% 42%; }
+  .inspector { border-left: 0; border-top: 1px solid var(--border); }
+  .legend { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Temporal History Graph</h1>
+    <div class="subtitle">Top-down calendar lineage · Year → Month / Week → Day → Six-hour → Pressure</div>
+  </div>
+  <div class="run-status">
+    <span class="status-dot"></span>
+    <span id="runMeta"></span>
+    <span id="integrityBadge" class="integrity-badge"></span>
+  </div>
+</header>
+<section class="toolbar">
+  <select id="scopeSelect" aria-label="Summary scope">
+    <option value="channel">Channel timeline</option>
+    <option value="thread">Thread timeline</option>
+  </select>
+  <select id="threadSelect" aria-label="Thread"></select>
+  <select id="periodSelect" aria-label="Calendar focus"></select>
+  <input id="searchInput" type="search" placeholder="Search summaries, decisions, actions…">
+  <button id="centerButton">Readable view</button>
+  <button id="fitButton">Fit all</button>
+  <button id="zoomInButton" aria-label="Zoom in">＋</button>
+  <button id="zoomOutButton" aria-label="Zoom out">−</button>
+  <div class="spacer"></div>
+  <div class="legend">
+    <span><i class="swatch" style="background:var(--year)"></i>Year</span>
+    <span><i class="swatch" style="background:var(--month)"></i>Month</span>
+    <span><i class="swatch" style="background:var(--week)"></i>Week</span>
+    <span><i class="swatch" style="background:var(--day)"></i>Day</span>
+    <span><i class="swatch" style="background:var(--six)"></i>6-hour</span>
+    <span><i class="swatch" style="background:var(--pressure)"></i>Pressure</span>
+  </div>
+</section>
+<main class="workspace">
+  <section class="graph-shell">
+    <div class="lane-rail" aria-hidden="true">
+      <span style="top:10.3%">YEAR</span>
+      <span style="top:25.7%">MONTH</span>
+      <span style="top:41.1%">WEEK</span>
+      <span style="top:56.6%">DAY</span>
+      <span style="top:72%">6-HOUR</span>
+      <span style="top:87.4%">PRESSURE</span>
+    </div>
+    <svg id="graph" role="img" aria-label="Top-down temporal summary lineage graph">
+      <g id="viewport">
+        <g id="lanes"></g>
+        <g id="edges"></g>
+        <g id="nodes"></g>
+      </g>
+    </svg>
+    <div class="graph-help">Scroll to zoom · drag to pan · select a node for summary and raw evidence</div>
+  </section>
+  <aside id="inspector" class="inspector">
+    <div class="inspector-empty">Select any calendar node to inspect its summary, lineage, pressure continuity, embedded threads, and raw evidence.</div>
+  </aside>
+</main>
+<script id="temporal-data" type="application/json">__DATA__</script>
+<script>
+const DATA = JSON.parse(document.getElementById("temporal-data").textContent);
+const NS = "http://www.w3.org/2000/svg";
+const LEVELS = ["year", "month", "week", "day", "six_hour", "pressure"];
+const LEVEL_Y = {year: 90, month: 225, week: 360, day: 495, six_hour: 630, pressure: 765};
+const NODE_W = 158, NODE_H = 58, NODE_STEP = 194, LEFT_GUTTER = 150, GRAPH_H = 875;
+const TIMEZONE = DATA.manifest.configuration.timezone || "UTC";
+const graph = document.getElementById("graph");
+const viewport = document.getElementById("viewport");
+const laneLayer = document.getElementById("lanes");
+const edgeLayer = document.getElementById("edges");
+const nodeLayer = document.getElementById("nodes");
+const scopeSelect = document.getElementById("scopeSelect");
+const threadSelect = document.getElementById("threadSelect");
+const periodSelect = document.getElementById("periodSelect");
+const searchInput = document.getElementById("searchInput");
+const inspector = document.getElementById("inspector");
+const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+const scheduled = DATA.summaries.map(item => ({...item, status: item.status || "committed"}));
+const pressure = DATA.pressure_summaries.map(item => ({...item, status: item.status || "committed", summary_reason: "pressure"}));
+const allNodes = [...scheduled, ...pressure];
+const allNodeIndex = new Map(allNodes.map(item => [item.summary_id, item]));
+const eventIndex = new Map(DATA.events.map(item => [item.event_id, item]));
+let visibleIndex = new Map();
+let selectedId = null;
+let canvasWidth = 1400;
+let view = {x: 0, y: 0, w: 1400, h: GRAPH_H};
+let drag = null;
+
+function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS(NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  return node;
+}
+function monthKey(iso) {
+  const date = new Date(iso);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en", {year:"numeric", month:"2-digit", timeZone:TIMEZONE}).formatToParts(date).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}`;
+}
+function monthLabel(key) {
+  const [year, month] = key.split("-").map(Number);
+  return new Intl.DateTimeFormat("en", {month: "long", year: "numeric", timeZone: "UTC"}).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+function formatNodeLabel(node) {
+  const date = new Date(node.utc_start);
+  const day = new Intl.DateTimeFormat("en", {month: "short", day: "numeric", timeZone: TIMEZONE}).format(date);
+  if (node.granularity === "year") return new Intl.DateTimeFormat("en", {year:"numeric", timeZone:TIMEZONE}).format(date);
+  if (node.granularity === "month") return monthLabel(monthKey(node.utc_start));
+  if (node.granularity === "week") return `Week of ${day}`;
+  if (node.granularity === "day") return day;
+  if (node.granularity === "six_hour") {
+    const end = new Date(node.utc_end);
+    const hour = value => new Intl.DateTimeFormat("en", {hour:"2-digit", hourCycle:"h23", timeZone:TIMEZONE}).format(value);
+    return `${day} · ${hour(date)}–${hour(end)}`;
+  }
+  return `Pressure · ${day}`;
+}
+function formatRange(node) {
+  const fmt = new Intl.DateTimeFormat("en", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", timeZone:TIMEZONE, timeZoneName:"short"});
+  return `${fmt.format(new Date(node.utc_start))} → ${fmt.format(new Date(node.utc_end))}`;
+}
+function scopeNodes() {
+  if (scopeSelect.value === "channel") return allNodes.filter(node => node.scope_type === "channel");
+  return allNodes.filter(node => node.scope_type === "thread" && node.thread_id === threadSelect.value);
+}
+function updateThreadOptions() {
+  const threads = [...new Set(scheduled.filter(node => node.scope_type === "thread" && node.thread_id).map(node => node.thread_id))].sort();
+  const prior = threadSelect.value;
+  threadSelect.innerHTML = threads.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join("");
+  if (threads.includes(prior)) threadSelect.value = prior;
+  threadSelect.disabled = scopeSelect.value !== "thread";
+}
+function updatePeriodOptions() {
+  const scoped = scopeNodes();
+  const months = [...new Set(scoped.filter(node => node.granularity !== "year").map(node => monthKey(node.utc_start)))].sort();
+  const prior = periodSelect.value || "all";
+  periodSelect.innerHTML = `<option value="all">All history</option>` + months.map(key => `<option value="${key}">${esc(monthLabel(key))}</option>`).join("");
+  periodSelect.value = months.includes(prior) || prior === "all" ? prior : "all";
+}
+function overlapsMonth(node, key) {
+  if (key === "all") return true;
+  if (node.granularity === "year") return monthKey(node.utc_start).slice(0, 4) === key.slice(0, 4);
+  const startKey = monthKey(node.utc_start);
+  const endKey = monthKey(new Date(new Date(node.utc_end).getTime() - 1).toISOString());
+  return startKey <= key && endKey >= key;
+}
+function selectedNodes() {
+  const base = scopeNodes().filter(node => overlapsMonth(node, periodSelect.value));
+  const query = searchInput.value.trim().toLowerCase();
+  if (!query) return base;
+  const baseIndex = new Map(base.map(node => [node.summary_id, node]));
+  const keep = new Set(base.filter(node => JSON.stringify(node).toLowerCase().includes(query)).map(node => node.summary_id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of base) {
+      const children = node.child_summary_ids || [];
+      if (keep.has(node.summary_id)) {
+        for (const child of children) if (baseIndex.has(child) && !keep.has(child)) { keep.add(child); changed = true; }
+      }
+      if (children.some(child => keep.has(child)) && !keep.has(node.summary_id)) { keep.add(node.summary_id); changed = true; }
+    }
+  }
+  return base.filter(node => keep.has(node.summary_id));
+}
+function clearLayer(layer) { while (layer.firstChild) layer.removeChild(layer.firstChild); }
+function renderGraph() {
+  const items = selectedNodes();
+  visibleIndex = new Map(items.map(item => [item.summary_id, item]));
+  const rows = Object.fromEntries(LEVELS.map(level => [level, items.filter(item => item.granularity === level).sort((a,b) => a.utc_start.localeCompare(b.utc_start))]));
+  const maxCount = Math.max(1, ...LEVELS.map(level => rows[level].length));
+  canvasWidth = Math.max(1400, LEFT_GUTTER + maxCount * NODE_STEP + 80);
+  const positions = new Map();
+  clearLayer(laneLayer); clearLayer(edgeLayer); clearLayer(nodeLayer);
+  for (const level of LEVELS) {
+    const y = LEVEL_Y[level];
+    const label = svgEl("text", {x: 22, y: y + 5, class: "lane-label"});
+    label.textContent = level === "six_hour" ? "6-HOUR" : level.toUpperCase();
+    laneLayer.appendChild(label);
+    laneLayer.appendChild(svgEl("line", {x1: 112, y1: y, x2: canvasWidth - 30, y2: y, class: "lane-line"}));
+    const row = rows[level];
+    const rowWidth = Math.max(0, (row.length - 1) * NODE_STEP + NODE_W);
+    const startX = Math.max(LEFT_GUTTER, LEFT_GUTTER + (canvasWidth - LEFT_GUTTER - 60 - rowWidth) / 2);
+    row.forEach((node, index) => positions.set(node.summary_id, {x: startX + index * NODE_STEP, y: y - NODE_H / 2}));
+  }
+  for (const parent of items) {
+    const from = positions.get(parent.summary_id);
+    if (!from) continue;
+    for (const childId of parent.child_summary_ids || []) {
+      const child = visibleIndex.get(childId), to = positions.get(childId);
+      if (!child || !to) continue;
+      const x1 = from.x + NODE_W / 2, y1 = from.y + NODE_H;
+      const x2 = to.x + NODE_W / 2, y2 = to.y;
+      const mid = (y1 + y2) / 2;
+      const edgeClass = child.granularity === "pressure" ? "edge pressure-edge" : parent.granularity === "week" ? "edge week-edge" : "edge";
+      edgeLayer.appendChild(svgEl("path", {d: `M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`, class: edgeClass, "data-parent-id": parent.summary_id, "data-child-id": childId}));
+    }
+  }
+  for (const node of items) {
+    const pos = positions.get(node.summary_id);
+    const group = svgEl("g", {class: `node ${node.granularity}${selectedId === node.summary_id ? " selected" : ""}`, transform: `translate(${pos.x},${pos.y})`, tabindex: "0", "data-summary-id": node.summary_id});
+    group.appendChild(svgEl("rect", {width: NODE_W, height: NODE_H, rx: 9}));
+    const title = svgEl("text", {x: 10, y: 20, class: "node-title"}); title.textContent = formatNodeLabel(node); group.appendChild(title);
+    const sub = svgEl("text", {x: 10, y: 37, class: "node-sub"}); sub.textContent = node.scope_type === "thread" ? "Thread summary" : node.summary_reason === "pressure" ? "Pressure checkpoint" : "Channel summary"; group.appendChild(sub);
+    const count = svgEl("text", {x: NODE_W - 9, y: 50, "text-anchor": "end", class: "node-count"}); count.textContent = `${node.source_event_count ?? (node.source_event_ids || []).length} events`; group.appendChild(count);
+    group.addEventListener("click", event => { event.stopPropagation(); selectNode(node.summary_id); });
+    group.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") selectNode(node.summary_id); });
+    nodeLayer.appendChild(group);
+  }
+  if (!items.length) {
+    const text = svgEl("text", {x: canvasWidth / 2, y: GRAPH_H / 2, "text-anchor": "middle", class: "empty-state"});
+    text.textContent = "No summaries match this scope, period, and search.";
+    nodeLayer.appendChild(text);
+  }
+  focusGraph();
+  if (selectedId && visibleIndex.has(selectedId)) {
+    applySelectionFocus(selectedId);
+    renderInspector(visibleIndex.get(selectedId));
+  }
+  else { selectedId = null; inspector.innerHTML = `<div class="inspector-empty">${items.length.toLocaleString()} nodes visible. Select a node to inspect its summary, lineage, continuity context, and raw evidence.</div>`; }
+}
+function section(title, values) {
+  if (!values || !values.length) return "";
+  return `<div class="section"><h3>${esc(title)}</h3><div class="chips">${values.map(value => `<span class="chip">${esc(value)}</span>`).join("")}</div></div>`;
+}
+function renderInspector(node) {
+  const raw = (node.source_event_ids || []).map(id => eventIndex.get(id)).filter(Boolean);
+  const children = (node.child_summary_ids || []).filter(id => allNodeIndex.has(id));
+  const embedded = node.embedded_thread_summaries || [];
+  inspector.innerHTML = `
+    <div class="inspector-head"><div class="eyebrow">${esc(node.scope_type)} · ${esc(node.granularity)} · ${esc(node.summary_reason || "scheduled")}</div><h2>${esc(formatNodeLabel(node))}</h2></div>
+    <div class="inspector-body">
+      <div class="meta-grid">
+        <div class="meta"><span class="eyebrow">Range</span><b>${esc(formatRange(node))}</b></div>
+        <div class="meta"><span class="eyebrow">Evidence</span><b>${(node.source_event_ids || []).length.toLocaleString()} events</b></div>
+        <div class="meta"><span class="eyebrow">Children</span><b>${children.length.toLocaleString()} summaries</b></div>
+        <div class="meta"><span class="eyebrow">Version</span><b>${esc(node.version || 1)}</b></div>
+      </div>
+      <div class="section"><h3>Summary</h3><div class="summary">${esc(node.summary_text || "No summary text.")}</div></div>
+      ${section("Topics", node.topics)}
+      ${section("Decisions", node.decisions)}
+      ${section("Actions", node.actions)}
+      ${section("Open questions", node.open_questions)}
+      ${section("Coverage gaps", node.coverage_gaps)}
+      ${children.length ? `<div class="section"><h3>Child lineage</h3><div class="chips">${children.map(id => `<button class="chip child-link" data-id="${esc(id)}">${esc(allNodeIndex.get(id).granularity)} · ${esc(formatNodeLabel(allNodeIndex.get(id)))}</button>`).join("")}</div></div>` : ""}
+      ${embedded.length ? `<div class="section"><h3>Embedded thread summaries (${embedded.length})</h3><div class="chips">${embedded.slice(0,50).map(item => `<span class="chip">${esc(item.thread_id)} · ${esc(item.granularity)}</span>`).join("")}</div></div>` : ""}
+      ${node.context_selections && Object.keys(node.context_selections).length ? `<div class="section"><h3>Context selection / pressure continuity</h3><pre class="context-json">${esc(JSON.stringify(node.context_selections, null, 2))}</pre></div>` : ""}
+      <div class="section"><h3>Raw evidence (${raw.length})</h3><div class="evidence">${raw.slice(0,60).map(item => `<div class="event"><div class="event-head">${esc(item.actor_display_name || item.actor_id || "Unknown")} · ${esc(new Date(item.occurred_at).toLocaleString([], {timeZone:TIMEZONE}))}</div><div class="event-text">${esc(item.display_content)}</div></div>`).join("") || `<div class="event">No direct raw events on this node.</div>`}${raw.length > 60 ? `<div class="event">Showing 60 of ${raw.length.toLocaleString()} events.</div>` : ""}</div></div>
+    </div>`;
+  inspector.querySelectorAll(".child-link").forEach(button => button.addEventListener("click", () => selectNode(button.dataset.id)));
+}
+function descendantIds(rootId) {
+  const descendants = new Set();
+  const pending = [...(visibleIndex.get(rootId)?.child_summary_ids || [])];
+  while (pending.length) {
+    const id = pending.shift();
+    if (descendants.has(id) || !visibleIndex.has(id)) continue;
+    descendants.add(id);
+    pending.push(...(visibleIndex.get(id).child_summary_ids || []));
+  }
+  const root = visibleIndex.get(rootId);
+  if (root && (root.granularity === "year" || root.granularity === "month")) {
+    const focusedDays = new Set([...descendants].filter(id => visibleIndex.get(id)?.granularity === "day"));
+    for (const node of visibleIndex.values()) {
+      if (node.granularity === "week" && (node.child_summary_ids || []).some(id => focusedDays.has(id))) {
+        descendants.add(node.summary_id);
+      }
+    }
+  }
+  return descendants;
+}
+function applySelectionFocus(id) {
+  const selected = visibleIndex.get(id);
+  if (!selected) return;
+  const selectedLevel = LEVELS.indexOf(selected.granularity);
+  const descendants = descendantIds(id);
+  nodeLayer.querySelectorAll(".node").forEach(element => {
+    const nodeId = element.getAttribute("data-summary-id");
+    const node = visibleIndex.get(nodeId);
+    const level = LEVELS.indexOf(node.granularity);
+    element.classList.toggle("selected", nodeId === id);
+    element.classList.toggle("focus-descendant", descendants.has(nodeId));
+    element.classList.toggle("context-dim", nodeId !== id && !descendants.has(nodeId) && level <= selectedLevel);
+    element.classList.toggle("unrelated-below", !descendants.has(nodeId) && level > selectedLevel);
+    element.style.opacity = nodeId === id || descendants.has(nodeId) ? "1" : level <= selectedLevel ? ".34" : ".075";
+  });
+  edgeLayer.querySelectorAll(".edge").forEach(element => {
+    const parentId = element.getAttribute("data-parent-id");
+    const childId = element.getAttribute("data-child-id");
+    const child = visibleIndex.get(childId);
+    const isFocused = (parentId === id || descendants.has(parentId)) && descendants.has(childId);
+    element.classList.toggle("focus-descendant", isFocused);
+    element.classList.toggle("context-dim", !isFocused && LEVELS.indexOf(child.granularity) <= selectedLevel);
+    element.classList.toggle("unrelated-below", !isFocused && LEVELS.indexOf(child.granularity) > selectedLevel);
+    element.style.opacity = isFocused ? "1" : LEVELS.indexOf(child.granularity) <= selectedLevel ? ".2" : ".045";
+  });
+}
+function selectNode(id) {
+  selectedId = id;
+  const selected = allNodeIndex.get(id);
+  if (selected) {
+    applySelectionFocus(id);
+    renderInspector(selected);
+  }
+}
+function applyView() { graph.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`); }
+function fitGraph() { view = {x: 0, y: 0, w: canvasWidth, h: GRAPH_H}; applyView(); }
+function focusGraph() {
+  const rect = graph.getBoundingClientRect();
+  const readableWidth = Math.min(canvasWidth, Math.max(1050, GRAPH_H * (rect.width / Math.max(rect.height, 1))));
+  view = {x: Math.max(0, (canvasWidth - readableWidth) / 2), y: 0, w: readableWidth, h: GRAPH_H};
+  applyView();
+}
+function zoom(factor, centerX = view.x + view.w / 2, centerY = view.y + view.h / 2) {
+  const nextW = Math.max(450, Math.min(canvasWidth * 1.3, view.w * factor));
+  const nextH = nextW * (view.h / view.w);
+  view = {x: centerX - (centerX - view.x) * (nextW / view.w), y: centerY - (centerY - view.y) * (nextH / view.h), w: nextW, h: nextH};
+  applyView();
+}
+graph.addEventListener("wheel", event => {
+  event.preventDefault();
+  const rect = graph.getBoundingClientRect();
+  const x = view.x + (event.clientX - rect.left) / rect.width * view.w;
+  const y = view.y + (event.clientY - rect.top) / rect.height * view.h;
+  zoom(event.deltaY < 0 ? .82 : 1.22, x, y);
+}, {passive: false});
+graph.addEventListener("pointerdown", event => {
+  if (event.target.closest(".node")) return;
+  drag = {x:event.clientX, y:event.clientY, viewX:view.x, viewY:view.y};
+  graph.classList.add("dragging");
+  graph.setPointerCapture(event.pointerId);
+});
+graph.addEventListener("pointermove", event => {
+  if (!drag) return;
+  const rect = graph.getBoundingClientRect();
+  view.x = drag.viewX - (event.clientX - drag.x) / rect.width * view.w;
+  view.y = drag.viewY - (event.clientY - drag.y) / rect.height * view.h;
+  applyView();
+});
+graph.addEventListener("pointerup", () => { drag = null; graph.classList.remove("dragging"); });
+graph.addEventListener("pointercancel", () => { drag = null; graph.classList.remove("dragging"); });
+document.getElementById("fitButton").addEventListener("click", fitGraph);
+document.getElementById("centerButton").addEventListener("click", focusGraph);
+document.getElementById("zoomInButton").addEventListener("click", () => zoom(.78));
+document.getElementById("zoomOutButton").addEventListener("click", () => zoom(1.28));
+scopeSelect.addEventListener("change", () => { updateThreadOptions(); updatePeriodOptions(); selectedId = null; renderGraph(); });
+threadSelect.addEventListener("change", () => { updatePeriodOptions(); selectedId = null; renderGraph(); });
+periodSelect.addEventListener("change", () => { selectedId = null; renderGraph(); });
+searchInput.addEventListener("input", renderGraph);
+document.getElementById("runMeta").textContent = `${DATA.manifest.configuration.model} · ${DATA.manifest.counts.normalized_events.toLocaleString()} events`;
+document.getElementById("integrityBadge").textContent = DATA.integrity.passed ? "Integrity passed" : "Integrity failed";
+updateThreadOptions();
+updatePeriodOptions();
+renderGraph();
+</script>
+</body>
+</html>

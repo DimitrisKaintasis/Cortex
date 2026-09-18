@@ -25,6 +25,11 @@ metadata. The application review was targeted, not a penetration test or product
 A clean install resolves current FastAPI and Starlette releases. Its only known advisory is the
 bounded Mem0 FAISS exception documented above and in `SECURITY.md`.
 
+The private Temporal History repository is no longer an installation dependency. Only its
+MIT-licensed runtime package at the pinned integration commit was incorporated, with permission
+and attribution. That snapshot contains no data files or secret-scan findings. Upstream history,
+documentation, tests, datasets, and release artifacts were not imported.
+
 ## Executive summary
 
 No credentials, private keys, database files, backup dumps, or high-confidence secret patterns

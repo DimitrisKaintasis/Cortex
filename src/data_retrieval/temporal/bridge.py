@@ -7,16 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from temporal_history.core import (
-    GRANULARITIES,
-    MockSummarizer,
-    StateStore,
-    TemporalSummarizer,
-    run_scope_hierarchy,
-    stable_hash,
-)
-from temporal_history.models import NormalizedEvent, SummaryRecord
-
 from data_retrieval.core.identifiers import content_hash, stable_id
 from data_retrieval.domain.models import (
     Atom,
@@ -27,6 +17,15 @@ from data_retrieval.domain.models import (
     Document,
     IngestionBundle,
 )
+from temporal_history.core import (
+    GRANULARITIES,
+    MockSummarizer,
+    StateStore,
+    TemporalSummarizer,
+    run_scope_hierarchy,
+    stable_hash,
+)
+from temporal_history.models import NormalizedEvent, SummaryRecord
 
 BRIDGE_VERSION = "temporal-atom-bridge-v1"
 ACTOR_TYPES = {"human", "bot", "app", "agent", "system", "unknown"}
