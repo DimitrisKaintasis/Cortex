@@ -2,7 +2,7 @@
 
 Status: active
 
-Last updated: 2026-09-06
+Last updated: 2026-09-18
 
 Active research next step: development-only query-sensitive routing/fusion experiment (step C in
 [the learning/retrieval math audit](LEARNING-RETRIEVAL-MATH-AUDIT.md)). The local LoCoMo pilot
@@ -22,6 +22,8 @@ one rank regression at 10x. End strength-only sweeps; next isolate route selecti
 score transformation with controlled examples. The report includes manually reviewed traces.
 
 Current delivery step: D3a passed — rehearse the legacy corpus upgrade before current-runtime use
+
+Connector delivery step: C0 in progress — review and commit the connector boundary
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -85,6 +87,28 @@ still uses its historical schema. Next, rehearse the application's automatic tag
 weight-ledger migration on a restored copy, compare retrieval and provenance, and only then
 upgrade the canonical corpus. Opening it with the current repository/API performs migrations;
 the backup verifier deliberately does not.
+
+## Connector product track
+
+This track turns the local application boundary into a reusable connector and agent contract. It
+does not make the loopback API public or un-defer hosted storage. ADR-0020 and
+`CONNECTOR-API-PLAN.md` are authoritative for its boundary and acceptance matrix.
+
+| Step | Status | Outcome |
+|---|---|---|
+| C0. Freeze connector boundary | in progress | Public concepts, four capability profiles, transport ownership, security boundary, and ordered plan are reviewed and committed |
+| C1. Contract fixtures | not started | DevUI-like structured and Slack-like mutable data validate against transport-independent request/response models |
+| C2. External record lifecycle | not started | Source identity, versions, relations, sync runs, cursors, and tombstones are replay-safe across repositories |
+| C3. Python SDK | not started | A connector performs sync, retrieval, and outcomes without Cortex-internal knowledge |
+| C4. Local MCP adapter | not started | IDE agents use read/outcome tools with REST-equivalent policy and results |
+| C5. DevUI reference connector | not started | Structured project entities round-trip between DevUI identity and Cortex evidence |
+| C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, and access metadata use the same core contract |
+| C7. Hosted remote REST/MCP | deferred | Authenticated remote agents connect only after D3b and the full authorization/operations gate |
+
+C1 is the next implementation step and does not require persistent schema changes. C2 depends on
+ADR-0019's versioned migration mechanism and a rehearsed upgrade path. C7 remains deferred until
+identity, scope authorization, TLS, rate limiting, audit, retention/deletion, backup/recovery, and
+incident behavior are accepted and tested.
 
 ## Step 0 — Preserve the accepted baseline
 
@@ -350,3 +374,4 @@ Append one short entry after every work session.
 | 2026-09-04 | D2 | Added an optional loopback FastAPI transport over canonical ingestion, explainable retrieval, candidate review, and attributable feedback | 165 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; API flow and fixed loopback bind are covered; a real Uvicorn health/OpenAPI smoke passed; `src` and `tests` passed Ruff | Choose hosted PostgreSQL and define backup/restore acceptance gates |
 | 2026-09-04 | D3a | Selected laptop-only storage; changed Ollama defaults to laptop loopback; added atomic PostgreSQL backups, checksum manifests, and isolated restore verification | 172 tests passed, 2 live PostgreSQL tests skipped, 2 subtests passed; lint and diff checks passed; a real local tag/embedding/retrieval/API smoke passed; live Docker restore is blocked by a stale optional Model Runner socket before PostgreSQL startup | Repair Docker Desktop locally, run live PostgreSQL tests, then create and verify the first real backup |
 | 2026-09-05 | D3a | Completed live storage acceptance after Docker restart; made restore verification inspect legacy schemas and require pgvector/core tables | 176 tests passed with PostgreSQL enabled; original 193 MiB archive restored with all ten table counts matching, including 272,209 atoms; current-schema fixture restored with weight events; real PostgreSQL API health passed; temporary databases cleaned up | Rehearse corpus migration and compare retrieval on a restored copy before upgrading canonical data |
+| 2026-09-18 | C0 | Documented the external connector and agent boundary plus its phased API/SDK/MCP delivery plan | ADR-0020, connector plan, architecture, context ledger, README, and roadmap agree; local links and `git diff --check` passed | Review and commit C0, then build transport-independent DevUI-like and Slack-like contract fixtures |

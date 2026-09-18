@@ -59,6 +59,28 @@ change ranking behavior rather than restore a missing prerequisite.
 - Result diversification, raw-evidence quotas, and broader semantic fallback thresholds.
 - Source-specific adapters for code ASTs, Git history, chats, and other structured inputs.
 
+## External connector and agent boundary — accepted 2026-09-18
+
+- ADR-0020 makes Cortex agent-agnostic infrastructure with four composable integration
+  capabilities: source sync, context retrieval, attributable outcome reporting, and optional
+  change observation.
+- The public vocabulary is source, externally identified record/version, relation, sync run,
+  scope, query, evidence result, context pack, outcome, and subscription. Connector authors do
+  not create atoms, tags, weights, calibration events, or repository rows.
+- REST/OpenAPI is the canonical software contract. A thin Python SDK is the reference developer
+  experience, and MCP is an agent-facing adapter over the same application services rather than a
+  separate domain or bulk-sync API.
+- Stable external identity, replay idempotency, incremental cursors, versioned updates,
+  supersession, tombstones, source provenance, and result round-tripping are required connector
+  semantics.
+- Namespace remains distinct from scope and authorization. Local stdio/loopback integration may
+  proceed under the laptop trust boundary; remote REST/MCP stays gated on hosted storage,
+  identity, authorization, deletion, audit, rate limits, migrations, backup, and recovery.
+- DevUI is the first structured reference connector and Slack is the first mutable conversational
+  reference connector. Their mapping logic remains outside the Cortex core.
+- `CONNECTOR-API-PLAN.md` is the executable product plan. A generic connector framework or
+  scaffolding tool is extracted only after both reference connectors expose real repetition.
+
 ## Recovered repair dependencies — accepted 2026-09-02
 
 The architecture audit in `ARCHITECTURE-RECONCILIATION.md` identified capabilities that were

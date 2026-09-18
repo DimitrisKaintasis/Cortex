@@ -402,6 +402,10 @@ scripts/             # diagnostic and benchmark utilities
 - Schema compatibility is currently handled inside the adapters. A versioned migration policy is
   accepted in [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md), but extracting the
   existing compatibility steps into ordered migrations remains implementation work.
+- A generic external connector and agent boundary is accepted in
+  [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Stable external-record
+  lifecycle, the connector SDK, reference connectors, and MCP adapter remain planned work; the
+  current API is still loopback-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.
@@ -431,6 +435,7 @@ intended to remain a substantial, independently useful system rather than a nonf
 - [Architecture and component contracts](docs/ARCHITECTURE.md)
 - [Evidence-packing policy](docs/EVIDENCE-PACKING.md)
 - [Architecture reconciliation and recovered scope](docs/ARCHITECTURE-RECONCILIATION.md)
+- [Connector and agent API plan](docs/CONNECTOR-API-PLAN.md)
 - [Architecture decision records](docs/decisions/)
 
 ### Run it locally

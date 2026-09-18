@@ -72,6 +72,40 @@ source adapters
 SQLite is the deterministic local and test adapter. PostgreSQL is the scale and online target.
 The Mac is a replaceable inference worker and never the canonical data owner.
 
+## External integration boundary
+
+Cortex is application and agent infrastructure, not an agent framework. External integrations
+use four composable capabilities: source synchronization, context retrieval, attributable outcome
+reporting, and optional change observation. A connector may implement one capability or combine
+them into a bidirectional application integration.
+
+```text
+external sources -> connector contract -> canonical Cortex core -> context contract -> consumers
+                                             ^                         |
+                                             |---- attributable outcome|
+```
+
+The public contract uses sources, externally identified records, relations, sync runs, scopes,
+queries, evidence results, context packs, and outcomes. Atoms, tag IDs, weights, calibration
+events, repository schemas, and processor orchestration remain internal. Connectors never write
+the canonical database directly.
+
+REST/OpenAPI is the authoritative software integration surface. A Python SDK provides the
+reference client experience, while MCP adapts the same application services for agent tool
+discovery and calls. MCP does not own bulk synchronization or create a second retrieval path.
+
+Changed external content becomes a new traceable version rather than overwriting canonical
+evidence. Incremental sync is bounded, retry-safe, cursor-aware, and commits its source cursor only
+after durable capture. Owner-authorized deletion, tombstoning, and legal erasure remain explicit
+audited lifecycles.
+
+The current implementation remains loopback-only. Remote REST or MCP requires verified identity,
+scope authorization independent of namespace, TLS, rate limiting, auditing, retention/deletion,
+versioned migrations, backup/recovery, and an accepted always-reachable deployment.
+
+ADR-0020 is authoritative for this boundary. `docs/CONNECTOR-API-PLAN.md` defines the phased
+delivery plan and acceptance matrix.
+
 ## Collective topology
 
 The future system is one logical layered graph rather than one flat store of every user's data:
@@ -147,6 +181,8 @@ idempotent. A profile change produces new versioned output rather than mutating 
 | Responsibility | Owner | Supplier/consumer boundary |
 |---|---|---|
 | Raw capture, identity, and deduplication | Core | Source adapters provide bytes and source metadata |
+| External record mapping and incremental sync | Connector + core contract | Connector owns source mapping/cursor; core owns validation, identity, versions, and durable commit |
+| REST, SDK, and MCP transports | Application boundary | All transports call the same core services and policy checks |
 | Canonical storage | Core | PostgreSQL online; SQLite local/test |
 | Provenance and immutable event history | Core | Every processor supplies support and version data |
 | Conversational fact extraction | Mem0 | Remains in Mem0 working state; not duplicated by the bootstrap |
