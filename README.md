@@ -87,7 +87,7 @@ Python 3.13 or newer is required.
 
 ```powershell
 git clone https://github.com/DimitrisKaintasis/Cortex.git
-cd Data-Retrieval
+cd Cortex
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

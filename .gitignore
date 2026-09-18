@@ -35,6 +35,15 @@ mac-remote-llmserver-ed25519.pub
 /artifacts/longmemeval-dev6-entity-mem0-kuzu-v1
 /artifacts/longmemeval-dev6-entity-mem0-qdrant-v1/
 
+# Generated vector stores can contain source payloads; keep curated reports separately.
+/artifacts/*qdrant*/
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.local.json
+
 # Editors and operating systems
 .idea/
 .vscode/
