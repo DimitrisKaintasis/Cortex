@@ -2,7 +2,7 @@
 
 **Explainable, adaptive retrieval for long-lived AI memory.**
 
-[![CI](https://github.com/DimitrisKaintasis/Data-Retrieval/actions/workflows/ci.yml/badge.svg)](https://github.com/DimitrisKaintasis/Data-Retrieval/actions/workflows/ci.yml)
+[![CI](https://github.com/DimitrisKaintasis/Cortex/actions/workflows/ci.yml/badge.svg)](https://github.com/DimitrisKaintasis/Cortex/actions/workflows/ci.yml)
 
 Cortex ingests text evidence and structured text records, preserves the original evidence, and
 retrieves it through lexical, semantic, tag, relationship, and temporal signals. Every result
@@ -86,7 +86,7 @@ than changing a connection flag.
 Python 3.13 or newer is required.
 
 ```powershell
-git clone https://github.com/DimitrisKaintasis/Data-Retrieval.git
+git clone https://github.com/DimitrisKaintasis/Cortex.git
 cd Data-Retrieval
 
 python -m venv .venv
