@@ -907,7 +907,9 @@ class PostgreSQLRepository:
             LIMIT %s
             """
         )
-        vector = Vector(query_vector)
+        # pgvector 0.5 accepts mutable lists or NumPy arrays, while Cortex keeps
+        # embeddings immutable in its domain model. Convert only at the adapter boundary.
+        vector = Vector(list(query_vector))
         rows = self._fetchall(
             query,
             (vector, namespace, provider, model, dimensions, vector, limit),
@@ -944,7 +946,7 @@ class PostgreSQLRepository:
                         item.provider,
                         item.model,
                         item.dimensions,
-                        Vector(item.vector),
+                        Vector(list(item.vector)),
                         item.content_hash,
                         item.created_at,
                     )
