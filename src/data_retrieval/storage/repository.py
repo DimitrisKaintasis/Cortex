@@ -14,7 +14,9 @@ from data_retrieval.connectors.contracts import (
     SyncBatchAcknowledgement,
     SyncCommitAcknowledgement,
     SyncRun,
+    Tombstone,
 )
+from data_retrieval.connectors.projection import ConnectorRecordProjection
 from data_retrieval.domain.models import (
     Atom,
     AtomKind,
@@ -233,6 +235,12 @@ class Repository(Protocol):
         """Persist a complete ingestion bundle atomically."""
         ...
 
+    def get_suppressed_connector_atom_ids(
+        self, atom_ids: tuple[str, ...]
+    ) -> frozenset[str]:
+        """Return connector-projected atoms excluded from normal serving."""
+        ...
+
 
 @runtime_checkable
 class ConnectorLifecycleRepository(Protocol):
@@ -275,7 +283,32 @@ class ConnectorLifecycleRepository(Protocol):
     def get_connector_cursor(self, source: SourceRef) -> str | None: ...
 
 
-class CortexRepository(Repository, ConnectorLifecycleRepository, Protocol):
+@runtime_checkable
+class ConnectorProjectionRepository(Protocol):
+    """Persistence boundary for Cortex-owned serving projections."""
+
+    def store_connector_record_projection(
+        self, projection: ConnectorRecordProjection
+    ) -> ConnectorRecordProjection: ...
+
+    def get_connector_record_projection(
+        self, record: RecordRef
+    ) -> ConnectorRecordProjection | None: ...
+
+    def apply_connector_tombstone_projection(
+        self, *, tombstone: Tombstone, applied_at: datetime
+    ) -> None: ...
+
+    def get_suppressed_connector_atom_ids(
+        self, atom_ids: tuple[str, ...]
+    ) -> frozenset[str]: ...
+
+    def connector_run_projection_complete(self, run_request_id: str) -> bool: ...
+
+
+class CortexRepository(
+    Repository, ConnectorLifecycleRepository, ConnectorProjectionRepository, Protocol
+):
     """Combined local application boundary implemented by every storage adapter."""
 
 

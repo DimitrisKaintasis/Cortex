@@ -21,6 +21,10 @@ from data_retrieval.connectors.contracts import (
     SyncRun,
     Tombstone,
 )
+from data_retrieval.connectors.projection import (
+    ConnectorRecordProjection,
+    ConnectorServingState,
+)
 from data_retrieval.core.weight_events import (
     calibration_transition_events,
     edge_coordinates,
@@ -69,7 +73,7 @@ class InMemoryRepository:
         self._connector_sources: dict[tuple[str, str], Source] = {}
         self._connector_runs: dict[str, SyncRun] = {}
         self._connector_batches: dict[
-            tuple[str, str, int], tuple[str, SyncBatchAcknowledgement]
+            tuple[str, str, int], tuple[str, SyncBatchAcknowledgement, SyncBatch]
         ] = {}
         self._connector_records: dict[tuple[str, str, str, str], Record] = {}
         self._connector_record_predecessors: dict[
@@ -82,6 +86,10 @@ class InMemoryRepository:
         self._connector_cursors: dict[tuple[str, str], str] = {}
         self._connector_commits: dict[str, SyncCommitAcknowledgement] = {}
         self._connector_committed_runs: dict[str, str] = {}
+        self._connector_record_projections: dict[
+            tuple[str, str, str, str], ConnectorRecordProjection
+        ] = {}
+        self._connector_tombstone_projections: set[tuple[str, str, str, str]] = set()
         self._lock = RLock()
 
     def get_document(self, document_id: str) -> Document | None:
@@ -804,7 +812,7 @@ class InMemoryRepository:
             batch_key = (batch.run.request_id, batch.batch_id, batch.sequence)
             existing_batch = self._connector_batches.get(batch_key)
             if existing_batch is not None:
-                existing_fingerprint, acknowledgement = existing_batch
+                existing_fingerprint, acknowledgement, _ = existing_batch
                 if existing_fingerprint != fingerprint:
                     raise ValueError("sync batch identity conflicts with different payload")
                 return acknowledgement
@@ -921,7 +929,7 @@ class InMemoryRepository:
                 failures=tuple(failures),
             )
             self._connector_runs[batch.run.request_id] = batch.run
-            self._connector_batches[batch_key] = (fingerprint, acknowledgement)
+            self._connector_batches[batch_key] = (fingerprint, acknowledgement, batch)
             self._connector_records = records
             self._connector_record_predecessors = predecessors
             self._connector_current_records = current_records
@@ -950,20 +958,28 @@ class InMemoryRepository:
             if run is None:
                 raise ValueError("sync run does not exist")
             run_batches = [
-                acknowledgement
-                for (stored_run, _, _), (_, acknowledgement) in self._connector_batches.items()
+                (acknowledgement, batch)
+                for (stored_run, _, _), (
+                    _,
+                    acknowledgement,
+                    batch,
+                ) in self._connector_batches.items()
                 if stored_run == run_request_id
             ]
             if not run_batches:
                 raise ValueError("sync run has no durable batches")
             unresolved_failures = tuple(
                 failure
-                for acknowledgement in run_batches
+                for acknowledgement, _ in run_batches
                 for failure in acknowledgement.failures
                 if not self._connector_failure_is_resolved(run.source, failure)
             )
             if unresolved_failures:
                 raise ValueError("sync run has item failures and cannot commit its cursor")
+            if not self.connector_run_projection_complete(run_request_id):
+                raise ValueError(
+                    "sync run has unprojected records or tombstones and cannot commit its cursor"
+                )
             if run.proposed_cursor is None:
                 raise ValueError("sync run requires proposed_cursor before commit")
             acknowledgement = SyncCommitAcknowledgement(
@@ -1029,6 +1045,117 @@ class InMemoryRepository:
     def get_connector_cursor(self, source: SourceRef) -> str | None:
         with self._lock:
             return self._connector_cursors.get(source.key)
+
+    def store_connector_record_projection(
+        self, projection: ConnectorRecordProjection
+    ) -> ConnectorRecordProjection:
+        with self._lock:
+            existing = self._connector_record_projections.get(projection.record.version_key)
+            if existing is not None:
+                if (
+                    existing.namespace != projection.namespace
+                    or existing.document_id != projection.document_id
+                    or existing.atom_ids != projection.atom_ids
+                    or existing.evidence_ids != projection.evidence_ids
+                ):
+                    raise ValueError("connector record projection conflicts with existing data")
+                return existing
+            tombstone = self._connector_current_tombstones.get(projection.record.object_key)
+            record = self._connector_records[projection.record.version_key]
+            stored = projection
+            if tombstone is not None and tombstone.observed_at >= record.observed_at:
+                stored = ConnectorRecordProjection(
+                    record=projection.record,
+                    namespace=projection.namespace,
+                    document_id=projection.document_id,
+                    atom_ids=projection.atom_ids,
+                    evidence_ids=projection.evidence_ids,
+                    projected_at=projection.projected_at,
+                    serving_state=ConnectorServingState.TOMBSTONED,
+                )
+            self._connector_record_projections[projection.record.version_key] = stored
+            return stored
+
+    def get_connector_record_projection(
+        self, record: RecordRef
+    ) -> ConnectorRecordProjection | None:
+        if record.external_version is None:
+            raise ValueError("connector projection lookup requires external_version")
+        with self._lock:
+            return self._connector_record_projections.get(record.version_key)
+
+    def apply_connector_tombstone_projection(
+        self, *, tombstone: Tombstone, applied_at: datetime
+    ) -> None:
+        with self._lock:
+            self._connector_tombstone_projections.add(tombstone.version_key)
+            for key, projection in tuple(self._connector_record_projections.items()):
+                if projection.record.object_key != tombstone.record.object_key:
+                    continue
+                record = self._connector_records[key]
+                if record.observed_at > tombstone.observed_at:
+                    continue
+                self._connector_record_projections[key] = ConnectorRecordProjection(
+                    record=projection.record,
+                    namespace=projection.namespace,
+                    document_id=projection.document_id,
+                    atom_ids=projection.atom_ids,
+                    evidence_ids=projection.evidence_ids,
+                    projected_at=projection.projected_at,
+                    serving_state=ConnectorServingState.TOMBSTONED,
+                )
+
+    def get_suppressed_connector_atom_ids(
+        self, atom_ids: tuple[str, ...]
+    ) -> frozenset[str]:
+        selected = set(atom_ids)
+        with self._lock:
+            return frozenset(
+                atom_id
+                for projection in self._connector_record_projections.values()
+                if projection.serving_state is ConnectorServingState.TOMBSTONED
+                for atom_id in projection.atom_ids
+                if atom_id in selected
+            )
+
+    def connector_run_projection_complete(self, run_request_id: str) -> bool:
+        with self._lock:
+            batches = tuple(
+                (acknowledgement, batch)
+                for (stored_run, _, _), (
+                    _,
+                    acknowledgement,
+                    batch,
+                ) in self._connector_batches.items()
+                if stored_run == run_request_id
+            )
+            for acknowledgement, batch in batches:
+                failures = {failure.key for failure in acknowledgement.failures}
+                for record in batch.records:
+                    key = (
+                        SyncItemType.RECORD,
+                        record.ref.external_id,
+                        record.ref.external_version or "",
+                    )
+                    if (
+                        key not in failures
+                        and record.ref.version_key
+                        not in self._connector_record_projections
+                    ):
+                        return False
+                for tombstone in batch.tombstones:
+                    key = (
+                        SyncItemType.TOMBSTONE,
+                        tombstone.record.external_id,
+                        tombstone.tombstone_version,
+                    )
+                    if (
+                        key not in failures
+                        and tombstone.version_key
+                        not in self._connector_tombstone_projections
+                    ):
+                        return False
+            return True
 
     @property
     def document_count(self) -> int:

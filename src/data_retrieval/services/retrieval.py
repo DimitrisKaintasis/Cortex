@@ -149,6 +149,19 @@ class RetrievalService:
         context_ids = set(candidate_ids)
         for link in links:
             context_ids.update((link.from_atom_id, link.to_atom_id))
+        suppressed = self.repository.get_suppressed_connector_atom_ids(
+            tuple(context_ids)
+        )
+        if suppressed:
+            base_candidate_ids.difference_update(suppressed)
+            candidate_ids.difference_update(suppressed)
+            context_ids.difference_update(suppressed)
+            links = tuple(
+                link
+                for link in links
+                if link.from_atom_id not in suppressed
+                and link.to_atom_id not in suppressed
+            )
         atoms = self.repository.get_atoms(tuple(sorted(context_ids)))
         atom_lookup = {atom.atom_id: atom for atom in atoms}
         candidate_ids.intersection_update(atom_lookup)

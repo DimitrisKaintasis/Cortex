@@ -23,6 +23,8 @@ from data_retrieval.connectors.codec import (
     source_to_mapping,
     sync_batch_acknowledgement_from_mapping,
     sync_batch_acknowledgement_to_mapping,
+    sync_batch_from_mapping,
+    sync_batch_to_mapping,
     sync_commit_acknowledgement_from_mapping,
     sync_commit_acknowledgement_to_mapping,
     sync_run_from_mapping,
@@ -42,6 +44,11 @@ from data_retrieval.connectors.contracts import (
     SyncItemType,
     SyncMode,
     SyncRun,
+    Tombstone,
+)
+from data_retrieval.connectors.projection import (
+    ConnectorRecordProjection,
+    ConnectorServingState,
 )
 from data_retrieval.core.weight_events import (
     EdgeCoordinates,
@@ -1680,7 +1687,7 @@ class PostgreSQLRepository:
                 )
             receipt = self._connection.execute(
                 f"""
-                SELECT fingerprint, acknowledgement_json
+                SELECT fingerprint, acknowledgement_json, payload_json
                 FROM {SCHEMA}.connector_sync_batches
                 WHERE run_request_id = %s AND batch_id = %s AND sequence = %s
                 """,
@@ -1689,6 +1696,19 @@ class PostgreSQLRepository:
             if receipt is not None:
                 if str(receipt["fingerprint"]) != fingerprint:
                     raise ValueError("sync batch identity conflicts with different payload")
+                if receipt["payload_json"] is None:
+                    self._connection.execute(
+                        f"""
+                        UPDATE {SCHEMA}.connector_sync_batches SET payload_json = %s
+                        WHERE run_request_id = %s AND batch_id = %s AND sequence = %s
+                        """,
+                        (
+                            Jsonb(sync_batch_to_mapping(batch)),
+                            batch.run.request_id,
+                            batch.batch_id,
+                            batch.sequence,
+                        ),
+                    )
                 return sync_batch_acknowledgement_from_mapping(
                     receipt["acknowledgement_json"]
                 )
@@ -1711,8 +1731,8 @@ class PostgreSQLRepository:
                 f"""
                 INSERT INTO {SCHEMA}.connector_sync_batches (
                     run_request_id, batch_id, sequence, fingerprint,
-                    acknowledgement_json
-                ) VALUES (%s, %s, %s, %s, %s)
+                    acknowledgement_json, payload_json
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     batch.run.request_id,
@@ -1720,6 +1740,7 @@ class PostgreSQLRepository:
                     batch.sequence,
                     fingerprint,
                     Jsonb(sync_batch_acknowledgement_to_mapping(acknowledgement)),
+                    Jsonb(sync_batch_to_mapping(batch)),
                 ),
             )
             return acknowledgement
@@ -1991,6 +2012,10 @@ class PostgreSQLRepository:
             )
             if unresolved_failures:
                 raise ValueError("sync run has item failures and cannot commit its cursor")
+            if not self.connector_run_projection_complete(run_request_id):
+                raise ValueError(
+                    "sync run has unprojected records or tombstones and cannot commit its cursor"
+                )
             run = sync_run_from_mapping(run_row["payload_json"])
             if run.proposed_cursor is None:
                 raise ValueError("sync run requires proposed_cursor before commit")
@@ -2149,6 +2174,225 @@ class PostgreSQLRepository:
             source.key,
         )
         return str(row["committed_cursor"]) if row and row["committed_cursor"] else None
+
+    def store_connector_record_projection(
+        self, projection: ConnectorRecordProjection
+    ) -> ConnectorRecordProjection:
+        with self._lock, self._connection.transaction():
+            existing = self.get_connector_record_projection(projection.record)
+            if existing is not None:
+                if (
+                    existing.namespace != projection.namespace
+                    or existing.document_id != projection.document_id
+                    or existing.atom_ids != projection.atom_ids
+                    or existing.evidence_ids != projection.evidence_ids
+                ):
+                    raise ValueError("connector record projection conflicts with existing data")
+                return existing
+            state = self._connection.execute(
+                f"""
+                SELECT records.observed_at, objects.tombstoned_at
+                FROM {SCHEMA}.connector_records AS records
+                JOIN {SCHEMA}.connector_record_objects AS objects
+                  ON objects.source_system = records.source_system
+                 AND objects.source_instance = records.source_instance
+                 AND objects.external_id = records.external_id
+                WHERE records.source_system = %s AND records.source_instance = %s
+                  AND records.external_id = %s AND records.external_version = %s
+                """,
+                projection.record.version_key,
+            ).fetchone()
+            if state is None:
+                raise ValueError("connector record must be durable before projection")
+            serving_state = ConnectorServingState.ACTIVE
+            if (
+                state["tombstoned_at"] is not None
+                and state["tombstoned_at"] >= state["observed_at"]
+            ):
+                serving_state = ConnectorServingState.TOMBSTONED
+            self._connection.execute(
+                f"""
+                INSERT INTO {SCHEMA}.connector_record_projections (
+                    source_system, source_instance, external_id, external_version,
+                    namespace, document_id, projected_at, serving_state
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    *projection.record.version_key,
+                    projection.namespace,
+                    projection.document_id,
+                    projection.projected_at,
+                    serving_state.value,
+                ),
+            )
+            self._executemany(
+                f"""
+                INSERT INTO {SCHEMA}.connector_projection_atoms (
+                    atom_id, evidence_id, source_system, source_instance,
+                    external_id, external_version
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    (atom_id, evidence, *projection.record.version_key)
+                    for atom_id, evidence in zip(
+                        projection.atom_ids, projection.evidence_ids, strict=True
+                    )
+                ),
+            )
+            return ConnectorRecordProjection(
+                record=projection.record,
+                namespace=projection.namespace,
+                document_id=projection.document_id,
+                atom_ids=projection.atom_ids,
+                evidence_ids=projection.evidence_ids,
+                projected_at=projection.projected_at,
+                serving_state=serving_state,
+            )
+
+    def get_connector_record_projection(
+        self, record: RecordRef
+    ) -> ConnectorRecordProjection | None:
+        if record.external_version is None:
+            raise ValueError("connector projection lookup requires external_version")
+        row = self._fetchone(
+            f"""
+            SELECT namespace, document_id, projected_at, serving_state
+            FROM {SCHEMA}.connector_record_projections
+            WHERE source_system = %s AND source_instance = %s
+              AND external_id = %s AND external_version = %s
+            """,
+            record.version_key,
+        )
+        if row is None:
+            return None
+        atoms = self._fetchall(
+            f"""
+            SELECT projected.atom_id, projected.evidence_id
+            FROM {SCHEMA}.connector_projection_atoms AS projected
+            JOIN {SCHEMA}.atoms AS atoms ON atoms.atom_id = projected.atom_id
+            WHERE projected.source_system = %s AND projected.source_instance = %s
+              AND projected.external_id = %s AND projected.external_version = %s
+            ORDER BY atoms.position, projected.atom_id
+            """,
+            record.version_key,
+        )
+        return ConnectorRecordProjection(
+            record=record,
+            namespace=str(row["namespace"]),
+            document_id=str(row["document_id"]),
+            atom_ids=tuple(str(atom["atom_id"]) for atom in atoms),
+            evidence_ids=tuple(str(atom["evidence_id"]) for atom in atoms),
+            projected_at=row["projected_at"],
+            serving_state=ConnectorServingState(str(row["serving_state"])),
+        )
+
+    def apply_connector_tombstone_projection(
+        self, *, tombstone: Tombstone, applied_at: datetime
+    ) -> None:
+        with self._lock, self._connection.transaction():
+            self._connection.execute(
+                f"""
+                INSERT INTO {SCHEMA}.connector_tombstone_projections (
+                    source_system, source_instance, external_id,
+                    tombstone_version, applied_at
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (*tombstone.version_key, applied_at),
+            )
+            self._connection.execute(
+                f"""
+                UPDATE {SCHEMA}.connector_record_projections AS projections
+                SET serving_state = 'tombstoned'
+                WHERE projections.source_system = %s
+                  AND projections.source_instance = %s
+                  AND projections.external_id = %s
+                  AND EXISTS (
+                    SELECT 1 FROM {SCHEMA}.connector_records AS records
+                    WHERE records.source_system = projections.source_system
+                      AND records.source_instance = projections.source_instance
+                      AND records.external_id = projections.external_id
+                      AND records.external_version = projections.external_version
+                      AND records.observed_at <= %s
+                  )
+                """,
+                (*tombstone.record.object_key, tombstone.observed_at),
+            )
+
+    def get_suppressed_connector_atom_ids(
+        self, atom_ids: tuple[str, ...]
+    ) -> frozenset[str]:
+        if not atom_ids:
+            return frozenset()
+        rows = self._fetchall(
+            f"""
+            SELECT atoms.atom_id
+            FROM {SCHEMA}.connector_projection_atoms AS atoms
+            JOIN {SCHEMA}.connector_record_projections AS projections
+              ON projections.source_system = atoms.source_system
+             AND projections.source_instance = atoms.source_instance
+             AND projections.external_id = atoms.external_id
+             AND projections.external_version = atoms.external_version
+            WHERE projections.serving_state = 'tombstoned'
+              AND atoms.atom_id = ANY(%s)
+            """,
+            (list(atom_ids),),
+        )
+        return frozenset(str(row["atom_id"]) for row in rows)
+
+    def connector_run_projection_complete(self, run_request_id: str) -> bool:
+        rows = self._fetchall(
+            f"""
+            SELECT payload_json, acknowledgement_json
+            FROM {SCHEMA}.connector_sync_batches WHERE run_request_id = %s
+            """,
+            (run_request_id,),
+        )
+        for row in rows:
+            if row["payload_json"] is None:
+                return False
+            batch = sync_batch_from_mapping(row["payload_json"])
+            acknowledgement = sync_batch_acknowledgement_from_mapping(
+                row["acknowledgement_json"]
+            )
+            failures = {failure.key for failure in acknowledgement.failures}
+            for record in batch.records:
+                failure_key = (
+                    SyncItemType.RECORD,
+                    record.ref.external_id,
+                    record.ref.external_version or "",
+                )
+                if failure_key in failures:
+                    continue
+                projected = self._fetchone(
+                    f"""
+                    SELECT 1 FROM {SCHEMA}.connector_record_projections
+                    WHERE source_system = %s AND source_instance = %s
+                      AND external_id = %s AND external_version = %s
+                    """,
+                    record.ref.version_key,
+                )
+                if projected is None:
+                    return False
+            for tombstone in batch.tombstones:
+                failure_key = (
+                    SyncItemType.TOMBSTONE,
+                    tombstone.record.external_id,
+                    tombstone.tombstone_version,
+                )
+                if failure_key in failures:
+                    continue
+                projected = self._fetchone(
+                    f"""
+                    SELECT 1 FROM {SCHEMA}.connector_tombstone_projections
+                    WHERE source_system = %s AND source_instance = %s
+                      AND external_id = %s AND tombstone_version = %s
+                    """,
+                    tombstone.version_key,
+                )
+                if projected is None:
+                    return False
+        return True
 
     def _connector_record_exists(self, record: RecordRef) -> bool:
         if record.external_version is None:

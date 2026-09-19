@@ -19,7 +19,8 @@ from data_retrieval.connectors.contracts import (
     SyncRun,
 )
 from data_retrieval.domain.models import utc_now
-from data_retrieval.storage.repository import ConnectorLifecycleRepository
+from data_retrieval.services.connector_projection import ConnectorProjectionService
+from data_retrieval.storage.repository import CortexRepository
 
 
 class ConnectorSyncService:
@@ -27,12 +28,13 @@ class ConnectorSyncService:
 
     def __init__(
         self,
-        repository: ConnectorLifecycleRepository,
+        repository: CortexRepository,
         *,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self.repository = repository
         self.clock = clock
+        self.projection = ConnectorProjectionService(repository, clock=clock)
 
     def register_source(self, source: Source) -> Source:
         return self.repository.register_connector_source(source)
@@ -46,6 +48,11 @@ class ConnectorSyncService:
             raise ValueError("connector source is not registered")
         if ConnectorCapability.SOURCE_SYNC not in source.capabilities:
             raise ValueError("connector source does not allow source_sync")
+        if any(record.payload.reference_uri is not None for record in batch.records):
+            raise ValueError(
+                "referenced connector payload projection is not supported; "
+                "submit inline content"
+            )
         for scope in (
             *(record.scope for record in batch.records),
             *(relation.scope for relation in batch.relations),
@@ -55,11 +62,13 @@ class ConnectorSyncService:
                 item_value = getattr(scope, name)
                 if owner_value is not None and item_value != owner_value:
                     raise ValueError(f"connector item scope is outside source owner {name}")
-        return self.repository.apply_connector_sync_batch(
+        acknowledgement = self.repository.apply_connector_sync_batch(
             batch=batch,
             fingerprint=_batch_fingerprint(batch),
             acknowledged_at=self.clock(),
         )
+        self.projection.project_batch(batch, acknowledgement)
+        return acknowledgement
 
     def commit(
         self, *, request_id: str, run_request_id: str
