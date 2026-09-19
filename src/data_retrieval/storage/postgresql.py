@@ -76,6 +76,8 @@ from data_retrieval.storage.migrations import (
     BASELINE_SCHEMA,
     CANONICAL_TABLES,
     CONNECTOR_LIFECYCLE_SCHEMA,
+    CONNECTOR_PROJECTION_SCHEMA,
+    CONNECTOR_PROJECTION_TABLES,
     CONNECTOR_TABLES,
     CURRENT_SCHEMA_VERSION,
     pending_migrations,
@@ -108,6 +110,8 @@ class PostgreSQLRepository:
                     self._apply_baseline_schema()
                 elif migration == CONNECTOR_LIFECYCLE_SCHEMA:
                     self._apply_connector_lifecycle_schema()
+                elif migration == CONNECTOR_PROJECTION_SCHEMA:
+                    self._apply_connector_projection_schema()
                 else:
                     raise RuntimeError(
                         f"missing PostgreSQL migration implementation: {migration.name}"
@@ -160,6 +164,7 @@ class PostgreSQLRepository:
     def _validate_schema(self) -> None:
         self._validate_schema_structure()
         self._validate_connector_schema_structure()
+        self._validate_connector_projection_schema_structure()
         if self.schema_version != CURRENT_SCHEMA_VERSION:
             raise RuntimeError(
                 f"PostgreSQL schema version is {self.schema_version}, expected "
@@ -207,6 +212,32 @@ class PostgreSQLRepository:
             raise RuntimeError(
                 "PostgreSQL connector schema invariant failed; missing tables: "
                 + ", ".join(missing_tables)
+            )
+
+    def _validate_connector_projection_schema_structure(self) -> None:
+        rows = self._connection.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
+            (SCHEMA,),
+        ).fetchall()
+        actual_tables = {str(row["table_name"]) for row in rows}
+        missing_tables = sorted(CONNECTOR_PROJECTION_TABLES - actual_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "PostgreSQL connector projection schema invariant failed; missing tables: "
+                + ", ".join(missing_tables)
+            )
+        column = self._connection.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = 'connector_sync_batches'
+              AND column_name = 'payload_json'
+            """,
+            (SCHEMA,),
+        ).fetchone()
+        if column is None:
+            raise RuntimeError(
+                "PostgreSQL connector projection schema invariant failed; "
+                "connector_sync_batches.payload_json is missing"
             )
 
     def _apply_baseline_schema(self) -> None:
@@ -649,6 +680,107 @@ class PostgreSQLRepository:
                 self._connection.execute(statement)
             self._validate_connector_schema_structure()
             self._record_schema_version(CONNECTOR_LIFECYCLE_SCHEMA)
+
+    def _apply_connector_projection_schema(self) -> None:
+        with self._connection.transaction():
+            self._connection.execute(
+                f"ALTER TABLE {SCHEMA}.connector_sync_batches ADD COLUMN payload_json JSONB"
+            )
+            self._connection.execute(
+                f"""
+                CREATE TABLE {SCHEMA}.connector_record_projections (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    external_version TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    document_id TEXT NOT NULL UNIQUE
+                        REFERENCES {SCHEMA}.documents(document_id),
+                    projected_at TIMESTAMPTZ NOT NULL,
+                    serving_state TEXT NOT NULL DEFAULT 'active'
+                        CHECK(serving_state IN ('active', 'tombstoned')),
+                    PRIMARY KEY(
+                        source_system, source_instance, external_id, external_version
+                    ),
+                    FOREIGN KEY(
+                        source_system, source_instance, external_id, external_version
+                    ) REFERENCES {SCHEMA}.connector_records(
+                        source_system, source_instance, external_id, external_version
+                    )
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE TABLE {SCHEMA}.connector_projection_atoms (
+                    atom_id TEXT PRIMARY KEY REFERENCES {SCHEMA}.atoms(atom_id),
+                    evidence_id TEXT NOT NULL UNIQUE,
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    external_version TEXT NOT NULL,
+                    FOREIGN KEY(
+                        source_system, source_instance, external_id, external_version
+                    ) REFERENCES {SCHEMA}.connector_record_projections(
+                        source_system, source_instance, external_id, external_version
+                    )
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE TABLE {SCHEMA}.connector_tombstone_projections (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    tombstone_version TEXT NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY(
+                        source_system, source_instance, external_id, tombstone_version
+                    ),
+                    FOREIGN KEY(
+                        source_system, source_instance, external_id, tombstone_version
+                    ) REFERENCES {SCHEMA}.connector_tombstones(
+                        source_system, source_instance, external_id, tombstone_version
+                    )
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE TABLE {SCHEMA}.connector_query_receipts (
+                    request_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    retrieval_id TEXT NOT NULL UNIQUE,
+                    context_json JSONB NOT NULL
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE TABLE {SCHEMA}.connector_outcome_receipts (
+                    request_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    acknowledgement_json JSONB NOT NULL
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE INDEX idx_connector_projection_record
+                ON {SCHEMA}.connector_projection_atoms(
+                    source_system, source_instance, external_id, external_version
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                CREATE INDEX idx_connector_projection_serving
+                ON {SCHEMA}.connector_record_projections(namespace, serving_state)
+                """
+            )
+            self._validate_connector_projection_schema_structure()
+            self._record_schema_version(CONNECTOR_PROJECTION_SCHEMA)
 
     def get_document(self, document_id: str) -> Document | None:
         row = self._fetchone(

@@ -75,6 +75,8 @@ from data_retrieval.storage.migrations import (
     BASELINE_SCHEMA,
     CANONICAL_TABLES,
     CONNECTOR_LIFECYCLE_SCHEMA,
+    CONNECTOR_PROJECTION_SCHEMA,
+    CONNECTOR_PROJECTION_TABLES,
     CONNECTOR_TABLES,
     CURRENT_SCHEMA_VERSION,
     pending_migrations,
@@ -111,6 +113,8 @@ class SQLiteRepository:
                 self._apply_baseline_schema()
             elif migration == CONNECTOR_LIFECYCLE_SCHEMA:
                 self._apply_connector_lifecycle_schema()
+            elif migration == CONNECTOR_PROJECTION_SCHEMA:
+                self._apply_connector_projection_schema()
             else:
                 raise RuntimeError(f"missing SQLite migration implementation: {migration.name}")
             current_version = migration.version
@@ -479,6 +483,90 @@ class SQLiteRepository:
                 f"PRAGMA user_version = {CONNECTOR_LIFECYCLE_SCHEMA.version}"
             )
 
+    def _apply_connector_projection_schema(self) -> None:
+        with self._connection:
+            self._connection.executescript(
+                """
+                BEGIN IMMEDIATE;
+
+                ALTER TABLE connector_sync_batches ADD COLUMN payload_json TEXT;
+
+                CREATE TABLE connector_record_projections (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    external_version TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    document_id TEXT NOT NULL UNIQUE REFERENCES documents(document_id),
+                    projected_at TEXT NOT NULL,
+                    serving_state TEXT NOT NULL DEFAULT 'active'
+                        CHECK(serving_state IN ('active', 'tombstoned')),
+                    PRIMARY KEY(
+                        source_system, source_instance, external_id, external_version
+                    ),
+                    FOREIGN KEY(
+                        source_system, source_instance, external_id, external_version
+                    ) REFERENCES connector_records(
+                        source_system, source_instance, external_id, external_version
+                    )
+                );
+
+                CREATE TABLE connector_projection_atoms (
+                    atom_id TEXT PRIMARY KEY REFERENCES atoms(atom_id),
+                    evidence_id TEXT NOT NULL UNIQUE,
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    external_version TEXT NOT NULL,
+                    FOREIGN KEY(
+                        source_system, source_instance, external_id, external_version
+                    ) REFERENCES connector_record_projections(
+                        source_system, source_instance, external_id, external_version
+                    )
+                );
+
+                CREATE TABLE connector_tombstone_projections (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    tombstone_version TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    PRIMARY KEY(
+                        source_system, source_instance, external_id, tombstone_version
+                    ),
+                    FOREIGN KEY(
+                        source_system, source_instance, external_id, tombstone_version
+                    ) REFERENCES connector_tombstones(
+                        source_system, source_instance, external_id, tombstone_version
+                    )
+                );
+
+                CREATE TABLE connector_query_receipts (
+                    request_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    retrieval_id TEXT NOT NULL UNIQUE,
+                    context_json TEXT NOT NULL
+                );
+
+                CREATE TABLE connector_outcome_receipts (
+                    request_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    acknowledgement_json TEXT NOT NULL
+                );
+
+                CREATE INDEX idx_connector_projection_record
+                    ON connector_projection_atoms(
+                        source_system, source_instance, external_id, external_version
+                    );
+                CREATE INDEX idx_connector_projection_serving
+                    ON connector_record_projections(namespace, serving_state);
+                """
+            )
+            self._validate_connector_projection_schema_structure()
+            self._connection.execute(
+                f"PRAGMA user_version = {CONNECTOR_PROJECTION_SCHEMA.version}"
+            )
+
     @property
     def schema_version(self) -> int:
         row = self._connection.execute("PRAGMA user_version").fetchone()
@@ -489,6 +577,7 @@ class SQLiteRepository:
     def _validate_schema(self) -> None:
         self._validate_schema_structure()
         self._validate_connector_schema_structure()
+        self._validate_connector_projection_schema_structure()
         if self.schema_version != CURRENT_SCHEMA_VERSION:
             raise RuntimeError(
                 f"SQLite schema version is {self.schema_version}, expected {CURRENT_SCHEMA_VERSION}"
@@ -534,6 +623,29 @@ class SQLiteRepository:
             raise RuntimeError(
                 "SQLite connector schema invariant failed; missing tables: "
                 + ", ".join(missing_tables)
+            )
+
+    def _validate_connector_projection_schema_structure(self) -> None:
+        rows = self._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        actual_tables = {str(row["name"]) for row in rows}
+        missing_tables = sorted(CONNECTOR_PROJECTION_TABLES - actual_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "SQLite connector projection schema invariant failed; missing tables: "
+                + ", ".join(missing_tables)
+            )
+        batch_columns = {
+            str(row["name"])
+            for row in self._connection.execute(
+                "PRAGMA table_info(connector_sync_batches)"
+            ).fetchall()
+        }
+        if "payload_json" not in batch_columns:
+            raise RuntimeError(
+                "SQLite connector projection schema invariant failed; "
+                "connector_sync_batches.payload_json is missing"
             )
 
     def get_document(self, document_id: str) -> Document | None:

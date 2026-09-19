@@ -19,7 +19,12 @@ class MigrationIdentity:
 
 BASELINE_SCHEMA = MigrationIdentity(1, "baseline_canonical_schema")
 CONNECTOR_LIFECYCLE_SCHEMA = MigrationIdentity(2, "external_connector_lifecycle")
-MIGRATIONS = (BASELINE_SCHEMA, CONNECTOR_LIFECYCLE_SCHEMA)
+CONNECTOR_PROJECTION_SCHEMA = MigrationIdentity(3, "external_record_projection")
+MIGRATIONS = (
+    BASELINE_SCHEMA,
+    CONNECTOR_LIFECYCLE_SCHEMA,
+    CONNECTOR_PROJECTION_SCHEMA,
+)
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 CANONICAL_TABLES = frozenset(
     {
@@ -46,6 +51,15 @@ CONNECTOR_TABLES = frozenset(
         "connector_records",
         "connector_relations",
         "connector_tombstones",
+    }
+)
+CONNECTOR_PROJECTION_TABLES = frozenset(
+    {
+        "connector_record_projections",
+        "connector_projection_atoms",
+        "connector_tombstone_projections",
+        "connector_query_receipts",
+        "connector_outcome_receipts",
     }
 )
 

@@ -191,6 +191,11 @@ class TagLifecycleTests(unittest.TestCase):
             )
             connection.executescript(
                 """
+                DROP TABLE connector_outcome_receipts;
+                DROP TABLE connector_query_receipts;
+                DROP TABLE connector_tombstone_projections;
+                DROP TABLE connector_projection_atoms;
+                DROP TABLE connector_record_projections;
                 DROP TABLE connector_sync_batches;
                 DROP TABLE connector_sync_runs;
                 DROP TABLE connector_relations;

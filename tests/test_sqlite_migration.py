@@ -8,6 +8,7 @@ from pathlib import Path
 from data_retrieval.domain.models import AtomLink, AtomLinkRelation, IngestionBundle
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.storage.migrations import (
+    CONNECTOR_PROJECTION_TABLES,
     CONNECTOR_TABLES,
     CURRENT_SCHEMA_VERSION,
     UnsupportedSchemaVersion,
@@ -31,6 +32,11 @@ class _InterruptedConnectorMigrationRepository(SQLiteRepository):
         raise RuntimeError("simulated connector migration interruption")
 
 
+class _InterruptedProjectionMigrationRepository(SQLiteRepository):
+    def _validate_connector_projection_schema_structure(self) -> None:
+        raise RuntimeError("simulated projection migration interruption")
+
+
 class SQLiteMigrationTests(unittest.TestCase):
     def test_fresh_database_is_built_by_the_versioned_baseline_migration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -52,6 +58,7 @@ class SQLiteMigrationTests(unittest.TestCase):
             self.assertEqual(version, CURRENT_SCHEMA_VERSION)
             self.assertIn("documents", tables)
             self.assertIn("weight_events", tables)
+            self.assertTrue(CONNECTOR_PROJECTION_TABLES.issubset(tables))
 
     def test_current_database_startup_is_a_schema_no_op(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -147,6 +154,76 @@ class SQLiteMigrationTests(unittest.TestCase):
             self.assertEqual(version, 1)
             self.assertTrue(CONNECTOR_TABLES.isdisjoint(tables))
 
+    def test_interrupted_projection_migration_rolls_back_version_three(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "interrupted-projection.sqlite3"
+
+            with self.assertRaisesRegex(
+                RuntimeError, "simulated projection migration interruption"
+            ):
+                _InterruptedProjectionMigrationRepository(path)
+
+            connection = sqlite3.connect(path)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            batch_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(connector_sync_batches)"
+                ).fetchall()
+            }
+            connection.close()
+
+            self.assertEqual(version, 2)
+            self.assertTrue(CONNECTOR_PROJECTION_TABLES.isdisjoint(tables))
+            self.assertNotIn("payload_json", batch_columns)
+
+    def test_version_two_database_is_backed_up_before_projection_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "version-two.sqlite3"
+            with SQLiteRepository(path):
+                pass
+            connection = sqlite3.connect(path)
+            for table in CONNECTOR_PROJECTION_TABLES:
+                connection.execute(f"DROP TABLE {table}")
+            connection.execute(
+                "ALTER TABLE connector_sync_batches DROP COLUMN payload_json"
+            )
+            connection.execute("PRAGMA user_version = 2")
+            connection.commit()
+            connection.close()
+
+            with SQLiteRepository(path) as repository:
+                backup_path = repository.last_migration_backup
+                self.assertEqual(repository.schema_version, CURRENT_SCHEMA_VERSION)
+                self.assertIsNotNone(backup_path)
+
+            assert backup_path is not None
+            backup = sqlite3.connect(backup_path)
+            backup_version = int(backup.execute("PRAGMA user_version").fetchone()[0])
+            backup_tables = {
+                str(row[0])
+                for row in backup.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            batch_columns = {
+                str(row[1])
+                for row in backup.execute(
+                    "PRAGMA table_info(connector_sync_batches)"
+                ).fetchall()
+            }
+            backup.close()
+
+            self.assertEqual(backup_version, 2)
+            self.assertTrue(CONNECTOR_PROJECTION_TABLES.isdisjoint(backup_tables))
+            self.assertNotIn("payload_json", batch_columns)
+
     def test_version_one_database_is_backed_up_before_connector_migration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "version-one.sqlite3"
@@ -154,6 +231,11 @@ class SQLiteMigrationTests(unittest.TestCase):
                 pass
             connection = sqlite3.connect(path)
             for table in (
+                "connector_outcome_receipts",
+                "connector_query_receipts",
+                "connector_tombstone_projections",
+                "connector_projection_atoms",
+                "connector_record_projections",
                 "connector_sync_batches",
                 "connector_relations",
                 "connector_tombstones",
