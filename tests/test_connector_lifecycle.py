@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,8 @@ from data_retrieval.connectors import (
 from data_retrieval.connectors.codec import source_from_mapping
 from data_retrieval.services.connector_sync import ConnectorSyncService
 from data_retrieval.storage.memory import InMemoryRepository
+from data_retrieval.storage.repository import ConnectorLifecycleRepository
+from data_retrieval.storage.sqlite import SQLiteRepository
 
 
 class _Clock:
@@ -28,13 +31,16 @@ class _Clock:
         return value
 
 
-class ConnectorLifecycleTests(unittest.TestCase):
+class _ConnectorLifecycleBehavior:
     def setUp(self) -> None:
         fixture_root = Path(__file__).parents[1] / "evals"
         self.devui = self._load(fixture_root / "connector_contract_devui_v1.json")
         self.slack = self._load(fixture_root / "connector_contract_slack_v1.json")
-        self.repository = InMemoryRepository()
+        self.repository = self.make_repository()
         self.service = ConnectorSyncService(self.repository, clock=_Clock())
+
+    def make_repository(self) -> ConnectorLifecycleRepository:
+        raise NotImplementedError
 
     @staticmethod
     def _load(path: Path) -> dict[str, object]:
@@ -186,6 +192,53 @@ class ConnectorLifecycleTests(unittest.TestCase):
                 external_id="module:authentication",
             )
         )
+
+
+class InMemoryConnectorLifecycleTests(_ConnectorLifecycleBehavior, unittest.TestCase):
+    def make_repository(self) -> ConnectorLifecycleRepository:
+        return InMemoryRepository()
+
+
+class SQLiteConnectorLifecycleTests(_ConnectorLifecycleBehavior, unittest.TestCase):
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory()
+        self._database_path = (
+            Path(self._temporary_directory.name) / "connector-lifecycle.sqlite3"
+        )
+        super().setUp()
+
+    def tearDown(self) -> None:
+        assert isinstance(self.repository, SQLiteRepository)
+        self.repository.close()
+        self._temporary_directory.cleanup()
+
+    def make_repository(self) -> ConnectorLifecycleRepository:
+        return SQLiteRepository(self._database_path)
+
+    def test_lifecycle_state_survives_reopen(self) -> None:
+        source = source_from_mapping(self.devui["registration"])
+        batch = sync_batch_from_mapping(self.devui["sync_batch"])
+        self.service.register_source(source)
+        acknowledgement = self.service.submit_batch(batch)
+        assert isinstance(self.repository, SQLiteRepository)
+        self.repository.close()
+
+        self.repository = SQLiteRepository(self._database_path)
+        self.service = ConnectorSyncService(self.repository, clock=_Clock())
+
+        self.assertEqual(self.service.submit_batch(batch), acknowledgement)
+        self.assertEqual(
+            self.service.get_current_record(
+                source=source.source,
+                external_id=batch.records[0].ref.external_id,
+            ),
+            batch.records[0],
+        )
+        committed = self.service.commit(
+            request_id="devui-sync:scan-42:commit",
+            run_request_id=batch.run.request_id,
+        )
+        self.assertEqual(committed.committed_cursor, "scan:42")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from pathlib import Path
 from data_retrieval.domain.models import AtomLink, AtomLinkRelation, IngestionBundle
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.storage.migrations import (
+    CONNECTOR_TABLES,
     CURRENT_SCHEMA_VERSION,
     UnsupportedSchemaVersion,
 )
@@ -23,6 +24,11 @@ class _InterruptedMigrationRepository(SQLiteRepository):
 class _FailedInvariantRepository(SQLiteRepository):
     def _validate_schema_structure(self) -> None:
         raise RuntimeError("simulated invariant failure")
+
+
+class _InterruptedConnectorMigrationRepository(SQLiteRepository):
+    def _validate_connector_schema_structure(self) -> None:
+        raise RuntimeError("simulated connector migration interruption")
 
 
 class SQLiteMigrationTests(unittest.TestCase):
@@ -118,6 +124,66 @@ class SQLiteMigrationTests(unittest.TestCase):
 
             self.assertEqual(version, 0)
             self.assertEqual(tables, [])
+
+    def test_interrupted_connector_migration_rolls_back_version_two(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "interrupted-connector.sqlite3"
+
+            with self.assertRaisesRegex(
+                RuntimeError, "simulated connector migration interruption"
+            ):
+                _InterruptedConnectorMigrationRepository(path)
+
+            connection = sqlite3.connect(path)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            connection.close()
+
+            self.assertEqual(version, 1)
+            self.assertTrue(CONNECTOR_TABLES.isdisjoint(tables))
+
+    def test_version_one_database_is_backed_up_before_connector_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "version-one.sqlite3"
+            with SQLiteRepository(path):
+                pass
+            connection = sqlite3.connect(path)
+            for table in (
+                "connector_sync_batches",
+                "connector_relations",
+                "connector_tombstones",
+                "connector_records",
+                "connector_record_objects",
+                "connector_sync_runs",
+                "connector_sources",
+            ):
+                connection.execute(f"DROP TABLE {table}")
+            connection.execute("PRAGMA user_version = 1")
+            connection.commit()
+            connection.close()
+
+            with SQLiteRepository(path) as repository:
+                backup_path = repository.last_migration_backup
+                self.assertEqual(repository.schema_version, CURRENT_SCHEMA_VERSION)
+                self.assertIsNotNone(backup_path)
+
+            assert backup_path is not None
+            backup = sqlite3.connect(backup_path)
+            backup_version = int(backup.execute("PRAGMA user_version").fetchone()[0])
+            backup_tables = {
+                str(row[0])
+                for row in backup.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            backup.close()
+            self.assertEqual(backup_version, 1)
+            self.assertTrue(CONNECTOR_TABLES.isdisjoint(backup_tables))
 
     def test_pre_retrieval_schema_is_upgraded_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

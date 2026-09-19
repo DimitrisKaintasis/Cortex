@@ -243,6 +243,68 @@ def sync_batch_to_mapping(batch: SyncBatch) -> dict[str, object]:
     }
 
 
+def record_from_mapping(value: object, source: SourceRef) -> Record:
+    return _record(_mapping(value, "record"), source)
+
+
+def relation_from_mapping(value: object, source: SourceRef) -> Relation:
+    return _relation(_mapping(value, "relation"), source)
+
+
+def tombstone_from_mapping(value: object, source: SourceRef) -> Tombstone:
+    return _tombstone(_mapping(value, "tombstone"), source)
+
+
+def sync_run_from_mapping(value: object) -> SyncRun:
+    data = _mapping(value, "sync run")
+    wrapped = {
+        "batch_id": "decoder",
+        "sequence": 0,
+        "run": data,
+        "records": [],
+        "relations": [],
+        "tombstones": [],
+    }
+    return sync_batch_from_mapping(wrapped).run
+
+
+def sync_batch_acknowledgement_to_mapping(
+    acknowledgement: SyncBatchAcknowledgement,
+) -> dict[str, object]:
+    return {
+        "run_request_id": acknowledgement.run_request_id,
+        "batch_id": acknowledgement.batch_id,
+        "sequence": acknowledgement.sequence,
+        "acknowledged_at": acknowledgement.acknowledged_at.isoformat(),
+        "accepted_records": acknowledgement.accepted_records,
+        "accepted_relations": acknowledgement.accepted_relations,
+        "accepted_tombstones": acknowledgement.accepted_tombstones,
+        "failures": [
+            {
+                "item_type": failure.item_type.value,
+                "item_id": failure.item_id,
+                "item_version": failure.item_version,
+                "code": failure.code,
+                "message": failure.message,
+                "retryable": failure.retryable,
+            }
+            for failure in acknowledgement.failures
+        ],
+    }
+
+
+def sync_commit_acknowledgement_to_mapping(
+    acknowledgement: SyncCommitAcknowledgement,
+) -> dict[str, object]:
+    return {
+        "request_id": acknowledgement.request_id,
+        "run_request_id": acknowledgement.run_request_id,
+        "source": _source_ref_mapping(acknowledgement.source),
+        "committed_cursor": acknowledgement.committed_cursor,
+        "committed_at": acknowledgement.committed_at.isoformat(),
+    }
+
+
 def _strings(value: object, name: str) -> tuple[str, ...]:
     values = _sequence(value, name)
     if any(not isinstance(item, str) for item in values):

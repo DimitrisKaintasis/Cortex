@@ -12,6 +12,35 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from data_retrieval.connectors.codec import (
+    record_from_mapping,
+    record_to_mapping,
+    relation_from_mapping,
+    relation_to_mapping,
+    source_from_mapping,
+    source_to_mapping,
+    sync_batch_acknowledgement_from_mapping,
+    sync_batch_acknowledgement_to_mapping,
+    sync_commit_acknowledgement_from_mapping,
+    sync_commit_acknowledgement_to_mapping,
+    sync_run_from_mapping,
+    sync_run_to_mapping,
+    tombstone_to_mapping,
+)
+from data_retrieval.connectors.contracts import (
+    Record,
+    RecordRef,
+    Relation,
+    Source,
+    SourceRef,
+    SyncBatch,
+    SyncBatchAcknowledgement,
+    SyncCommitAcknowledgement,
+    SyncItemFailure,
+    SyncItemType,
+    SyncMode,
+    SyncRun,
+)
 from data_retrieval.core.weight_events import (
     EdgeCoordinates,
     calibration_transition_events,
@@ -45,6 +74,8 @@ from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
 from data_retrieval.storage.migrations import (
     BASELINE_SCHEMA,
     CANONICAL_TABLES,
+    CONNECTOR_LIFECYCLE_SCHEMA,
+    CONNECTOR_TABLES,
     CURRENT_SCHEMA_VERSION,
     pending_migrations,
 )
@@ -72,11 +103,16 @@ class SQLiteRepository:
 
     def _migrate_schema(self) -> None:
         current_version = self.schema_version
-        for migration in pending_migrations(current_version):
-            if migration != BASELINE_SCHEMA:
-                raise RuntimeError(f"missing SQLite migration implementation: {migration.name}")
+        migrations = pending_migrations(current_version)
+        if migrations:
             self.last_migration_backup = self._preserve_pre_migration_backup(current_version)
-            self._apply_baseline_schema()
+        for migration in migrations:
+            if migration == BASELINE_SCHEMA:
+                self._apply_baseline_schema()
+            elif migration == CONNECTOR_LIFECYCLE_SCHEMA:
+                self._apply_connector_lifecycle_schema()
+            else:
+                raise RuntimeError(f"missing SQLite migration implementation: {migration.name}")
             current_version = migration.version
         self._validate_schema()
 
@@ -330,6 +366,119 @@ class SQLiteRepository:
             self._validate_schema_structure()
             self._connection.execute(f"PRAGMA user_version = {BASELINE_SCHEMA.version}")
 
+    def _apply_connector_lifecycle_schema(self) -> None:
+        with self._connection:
+            self._connection.executescript(
+                """
+                BEGIN IMMEDIATE;
+
+                CREATE TABLE connector_sources (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    committed_cursor TEXT,
+                    PRIMARY KEY(source_system, source_instance)
+                );
+
+                CREATE TABLE connector_sync_runs (
+                    request_id TEXT PRIMARY KEY,
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'running'
+                        CHECK(status IN ('running', 'committed')),
+                    commit_request_id TEXT UNIQUE,
+                    commit_ack_json TEXT,
+                    FOREIGN KEY(source_system, source_instance)
+                        REFERENCES connector_sources(source_system, source_instance)
+                );
+
+                CREATE TABLE connector_sync_batches (
+                    run_request_id TEXT NOT NULL
+                        REFERENCES connector_sync_runs(request_id),
+                    batch_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL CHECK(sequence >= 0),
+                    fingerprint TEXT NOT NULL,
+                    acknowledgement_json TEXT NOT NULL,
+                    PRIMARY KEY(run_request_id, batch_id, sequence)
+                );
+
+                CREATE TABLE connector_record_objects (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    current_version TEXT,
+                    current_observed_at TEXT,
+                    tombstone_version TEXT,
+                    tombstoned_at TEXT,
+                    PRIMARY KEY(source_system, source_instance, external_id),
+                    FOREIGN KEY(source_system, source_instance)
+                        REFERENCES connector_sources(source_system, source_instance)
+                );
+
+                CREATE TABLE connector_records (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    external_version TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    predecessor_version TEXT,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY(
+                        source_system, source_instance, external_id, external_version
+                    ),
+                    FOREIGN KEY(source_system, source_instance, external_id)
+                        REFERENCES connector_record_objects(
+                            source_system, source_instance, external_id
+                        )
+                );
+
+                CREATE TABLE connector_relations (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    relation_id TEXT NOT NULL,
+                    relation_version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY(
+                        source_system, source_instance, relation_id, relation_version
+                    ),
+                    FOREIGN KEY(source_system, source_instance)
+                        REFERENCES connector_sources(source_system, source_instance)
+                );
+
+                CREATE TABLE connector_tombstones (
+                    source_system TEXT NOT NULL,
+                    source_instance TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    tombstone_version TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY(
+                        source_system, source_instance, external_id, tombstone_version
+                    ),
+                    FOREIGN KEY(source_system, source_instance, external_id)
+                        REFERENCES connector_record_objects(
+                            source_system, source_instance, external_id
+                        )
+                );
+
+                CREATE INDEX idx_connector_records_current
+                    ON connector_records(
+                        source_system, source_instance, external_id, observed_at
+                    );
+                CREATE INDEX idx_connector_relations_source
+                    ON connector_relations(source_system, source_instance, relation_id);
+                CREATE INDEX idx_connector_tombstones_object
+                    ON connector_tombstones(
+                        source_system, source_instance, external_id, observed_at
+                    );
+                """
+            )
+            self._validate_connector_schema_structure()
+            self._connection.execute(
+                f"PRAGMA user_version = {CONNECTOR_LIFECYCLE_SCHEMA.version}"
+            )
+
     @property
     def schema_version(self) -> int:
         row = self._connection.execute("PRAGMA user_version").fetchone()
@@ -339,6 +488,7 @@ class SQLiteRepository:
 
     def _validate_schema(self) -> None:
         self._validate_schema_structure()
+        self._validate_connector_schema_structure()
         if self.schema_version != CURRENT_SCHEMA_VERSION:
             raise RuntimeError(
                 f"SQLite schema version is {self.schema_version}, expected {CURRENT_SCHEMA_VERSION}"
@@ -373,6 +523,18 @@ class SQLiteRepository:
                     f"SQLite schema invariant failed; {table} is missing columns: "
                     + ", ".join(missing_columns)
                 )
+
+    def _validate_connector_schema_structure(self) -> None:
+        rows = self._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        actual_tables = {str(row["name"]) for row in rows}
+        missing_tables = sorted(CONNECTOR_TABLES - actual_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "SQLite connector schema invariant failed; missing tables: "
+                + ", ".join(missing_tables)
+            )
 
     def get_document(self, document_id: str) -> Document | None:
         with self._lock:
@@ -1280,6 +1442,551 @@ class SQLiteRepository:
             self._upsert_atom_links(bundle.atom_links)
             self._upsert_tag_candidates(bundle.tag_candidates)
             self._upsert_weight_events(events)
+
+    def register_connector_source(self, source: Source) -> Source:
+        payload = self._json(source_to_mapping(source))
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                """
+                SELECT payload_json FROM connector_sources
+                WHERE source_system = ? AND source_instance = ?
+                """,
+                source.source.key,
+            ).fetchone()
+            if row is not None:
+                if str(row["payload_json"]) != payload:
+                    raise ValueError(
+                        "connector source registration conflicts with existing source"
+                    )
+                return source
+            self._connection.execute(
+                """
+                INSERT INTO connector_sources (
+                    source_system, source_instance, payload_json
+                ) VALUES (?, ?, ?)
+                """,
+                (*source.source.key, payload),
+            )
+        return source
+
+    def get_connector_source(self, source: SourceRef) -> Source | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT payload_json FROM connector_sources
+                WHERE source_system = ? AND source_instance = ?
+                """,
+                source.key,
+            ).fetchone()
+        return (
+            source_from_mapping(self._object(str(row["payload_json"])))
+            if row is not None
+            else None
+        )
+
+    def apply_connector_sync_batch(
+        self,
+        *,
+        batch: SyncBatch,
+        fingerprint: str,
+        acknowledged_at: datetime,
+    ) -> SyncBatchAcknowledgement:
+        with self._lock, self._connection:
+            source_row = self._connection.execute(
+                """
+                SELECT committed_cursor FROM connector_sources
+                WHERE source_system = ? AND source_instance = ?
+                """,
+                batch.run.source.key,
+            ).fetchone()
+            if source_row is None:
+                raise ValueError("connector source is not registered")
+
+            run_payload = self._json(sync_run_to_mapping(batch.run))
+            run_row = self._connection.execute(
+                "SELECT payload_json FROM connector_sync_runs WHERE request_id = ?",
+                (batch.run.request_id,),
+            ).fetchone()
+            if run_row is not None and str(run_row["payload_json"]) != run_payload:
+                raise ValueError("sync request identity conflicts with existing run")
+            if run_row is None:
+                if (
+                    batch.run.mode is SyncMode.INCREMENTAL
+                    and batch.run.previous_cursor != source_row["committed_cursor"]
+                ):
+                    raise ValueError("sync previous_cursor does not match committed cursor")
+                self._connection.execute(
+                    """
+                    INSERT INTO connector_sync_runs (
+                        request_id, source_system, source_instance, payload_json
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (batch.run.request_id, *batch.run.source.key, run_payload),
+                )
+
+            receipt = self._connection.execute(
+                """
+                SELECT fingerprint, acknowledgement_json
+                FROM connector_sync_batches
+                WHERE run_request_id = ? AND batch_id = ? AND sequence = ?
+                """,
+                (batch.run.request_id, batch.batch_id, batch.sequence),
+            ).fetchone()
+            if receipt is not None:
+                if str(receipt["fingerprint"]) != fingerprint:
+                    raise ValueError("sync batch identity conflicts with different payload")
+                return sync_batch_acknowledgement_from_mapping(
+                    self._object(str(receipt["acknowledgement_json"]))
+                )
+
+            failures: list[SyncItemFailure] = []
+            accepted_records = 0
+            accepted_relations = 0
+            accepted_tombstones = 0
+            for record in batch.records:
+                assert record.ref.external_version is not None
+                payload = self._json(record_to_mapping(record))
+                key = record.ref.version_key
+                existing = self._connection.execute(
+                    """
+                    SELECT payload_json FROM connector_records
+                    WHERE source_system = ? AND source_instance = ?
+                      AND external_id = ? AND external_version = ?
+                    """,
+                    key,
+                ).fetchone()
+                if existing is not None and str(existing["payload_json"]) != payload:
+                    failures.append(
+                        self._connector_failure(
+                            SyncItemType.RECORD,
+                            record.ref.external_id,
+                            record.ref.external_version,
+                            "record version already exists with different content",
+                        )
+                    )
+                    continue
+                if existing is None:
+                    object_key = record.ref.object_key
+                    self._connection.execute(
+                        """
+                        INSERT INTO connector_record_objects (
+                            source_system, source_instance, external_id
+                        ) VALUES (?, ?, ?)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        object_key,
+                    )
+                    state = self._connection.execute(
+                        """
+                        SELECT current_version, current_observed_at
+                        FROM connector_record_objects
+                        WHERE source_system = ? AND source_instance = ? AND external_id = ?
+                        """,
+                        object_key,
+                    ).fetchone()
+                    assert state is not None
+                    current_observed = (
+                        datetime.fromisoformat(str(state["current_observed_at"]))
+                        if state["current_observed_at"] is not None
+                        else None
+                    )
+                    becomes_current = (
+                        current_observed is None or record.observed_at >= current_observed
+                    )
+                    predecessor = (
+                        str(state["current_version"])
+                        if becomes_current and state["current_version"] is not None
+                        else None
+                    )
+                    self._connection.execute(
+                        """
+                        INSERT INTO connector_records (
+                            source_system, source_instance, external_id, external_version,
+                            observed_at, predecessor_version, payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (*key, record.observed_at.isoformat(), predecessor, payload),
+                    )
+                    if becomes_current:
+                        self._connection.execute(
+                            """
+                            UPDATE connector_record_objects
+                            SET current_version = ?, current_observed_at = ?
+                            WHERE source_system = ? AND source_instance = ?
+                              AND external_id = ?
+                            """,
+                            (
+                                record.ref.external_version,
+                                record.observed_at.isoformat(),
+                                *object_key,
+                            ),
+                        )
+                accepted_records += 1
+
+            for relation in batch.relations:
+                payload = self._json(relation_to_mapping(relation))
+                key = relation.version_key
+                existing = self._connection.execute(
+                    """
+                    SELECT payload_json FROM connector_relations
+                    WHERE source_system = ? AND source_instance = ?
+                      AND relation_id = ? AND relation_version = ?
+                    """,
+                    key,
+                ).fetchone()
+                if existing is not None and str(existing["payload_json"]) != payload:
+                    failures.append(
+                        self._connector_failure(
+                            SyncItemType.RELATION,
+                            relation.relation_id,
+                            relation.relation_version,
+                            "relation version already exists with different content",
+                        )
+                    )
+                    continue
+                if existing is None and not all(
+                    self._connector_record_exists(endpoint)
+                    for endpoint in (relation.source, relation.target)
+                ):
+                    failures.append(
+                        SyncItemFailure(
+                            item_type=SyncItemType.RELATION,
+                            item_id=relation.relation_id,
+                            item_version=relation.relation_version,
+                            code="missing_endpoint",
+                            message="relation endpoint record version is not durable",
+                            retryable=True,
+                        )
+                    )
+                    continue
+                if existing is None:
+                    self._connection.execute(
+                        """
+                        INSERT INTO connector_relations (
+                            source_system, source_instance, relation_id,
+                            relation_version, payload_json
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (*key, payload),
+                    )
+                accepted_relations += 1
+
+            for tombstone in batch.tombstones:
+                payload = self._json(tombstone_to_mapping(tombstone))
+                key = tombstone.version_key
+                existing = self._connection.execute(
+                    """
+                    SELECT payload_json FROM connector_tombstones
+                    WHERE source_system = ? AND source_instance = ?
+                      AND external_id = ? AND tombstone_version = ?
+                    """,
+                    key,
+                ).fetchone()
+                if existing is not None and str(existing["payload_json"]) != payload:
+                    failures.append(
+                        self._connector_failure(
+                            SyncItemType.TOMBSTONE,
+                            tombstone.record.external_id,
+                            tombstone.tombstone_version,
+                            "tombstone version already exists with different content",
+                        )
+                    )
+                    continue
+                if existing is None:
+                    object_key = tombstone.record.object_key
+                    self._connection.execute(
+                        """
+                        INSERT INTO connector_record_objects (
+                            source_system, source_instance, external_id
+                        ) VALUES (?, ?, ?)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        object_key,
+                    )
+                    state = self._connection.execute(
+                        """
+                        SELECT tombstoned_at FROM connector_record_objects
+                        WHERE source_system = ? AND source_instance = ? AND external_id = ?
+                        """,
+                        object_key,
+                    ).fetchone()
+                    assert state is not None
+                    current_tombstone = (
+                        datetime.fromisoformat(str(state["tombstoned_at"]))
+                        if state["tombstoned_at"] is not None
+                        else None
+                    )
+                    self._connection.execute(
+                        """
+                        INSERT INTO connector_tombstones (
+                            source_system, source_instance, external_id,
+                            tombstone_version, observed_at, payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (*key, tombstone.observed_at.isoformat(), payload),
+                    )
+                    if (
+                        current_tombstone is None
+                        or tombstone.observed_at >= current_tombstone
+                    ):
+                        self._connection.execute(
+                            """
+                            UPDATE connector_record_objects
+                            SET tombstone_version = ?, tombstoned_at = ?
+                            WHERE source_system = ? AND source_instance = ?
+                              AND external_id = ?
+                            """,
+                            (
+                                tombstone.tombstone_version,
+                                tombstone.observed_at.isoformat(),
+                                *object_key,
+                            ),
+                        )
+                accepted_tombstones += 1
+
+            acknowledgement = SyncBatchAcknowledgement(
+                run_request_id=batch.run.request_id,
+                batch_id=batch.batch_id,
+                sequence=batch.sequence,
+                acknowledged_at=acknowledged_at,
+                accepted_records=accepted_records,
+                accepted_relations=accepted_relations,
+                accepted_tombstones=accepted_tombstones,
+                failures=tuple(failures),
+            )
+            self._connection.execute(
+                """
+                INSERT INTO connector_sync_batches (
+                    run_request_id, batch_id, sequence, fingerprint,
+                    acknowledgement_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    batch.run.request_id,
+                    batch.batch_id,
+                    batch.sequence,
+                    fingerprint,
+                    self._json(sync_batch_acknowledgement_to_mapping(acknowledgement)),
+                ),
+            )
+            return acknowledgement
+
+    def commit_connector_sync(
+        self,
+        *,
+        request_id: str,
+        run_request_id: str,
+        committed_at: datetime,
+    ) -> SyncCommitAcknowledgement:
+        with self._lock, self._connection:
+            existing = self._connection.execute(
+                """
+                SELECT request_id, commit_ack_json FROM connector_sync_runs
+                WHERE commit_request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["request_id"]) != run_request_id:
+                    raise ValueError(
+                        "sync commit request identity conflicts with existing commit"
+                    )
+                return sync_commit_acknowledgement_from_mapping(
+                    self._object(str(existing["commit_ack_json"]))
+                )
+            run_row = self._connection.execute(
+                """
+                SELECT payload_json, status, commit_request_id
+                FROM connector_sync_runs WHERE request_id = ?
+                """,
+                (run_request_id,),
+            ).fetchone()
+            if run_row is None:
+                raise ValueError("sync run does not exist")
+            if str(run_row["status"]) == "committed":
+                raise ValueError("sync run was already committed by a different request")
+            receipts = self._connection.execute(
+                """
+                SELECT acknowledgement_json FROM connector_sync_batches
+                WHERE run_request_id = ?
+                """,
+                (run_request_id,),
+            ).fetchall()
+            if not receipts:
+                raise ValueError("sync run has no durable batches")
+            acknowledgements = tuple(
+                sync_batch_acknowledgement_from_mapping(
+                    self._object(str(row["acknowledgement_json"]))
+                )
+                for row in receipts
+            )
+            if any(not acknowledgement.complete for acknowledgement in acknowledgements):
+                raise ValueError("sync run has item failures and cannot commit its cursor")
+            run = sync_run_from_mapping(self._object(str(run_row["payload_json"])))
+            if run.proposed_cursor is None:
+                raise ValueError("sync run requires proposed_cursor before commit")
+            acknowledgement = SyncCommitAcknowledgement(
+                request_id=request_id,
+                run_request_id=run_request_id,
+                source=run.source,
+                committed_cursor=run.proposed_cursor,
+                committed_at=committed_at,
+            )
+            self._connection.execute(
+                """
+                UPDATE connector_sources SET committed_cursor = ?
+                WHERE source_system = ? AND source_instance = ?
+                """,
+                (run.proposed_cursor, *run.source.key),
+            )
+            self._connection.execute(
+                """
+                UPDATE connector_sync_runs
+                SET status = 'committed', commit_request_id = ?, commit_ack_json = ?
+                WHERE request_id = ?
+                """,
+                (
+                    request_id,
+                    self._json(sync_commit_acknowledgement_to_mapping(acknowledgement)),
+                    run_request_id,
+                ),
+            )
+            return acknowledgement
+
+    def get_connector_sync_run(self, request_id: str) -> SyncRun | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM connector_sync_runs WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        return (
+            sync_run_from_mapping(self._object(str(row["payload_json"])))
+            if row is not None
+            else None
+        )
+
+    def get_connector_record(self, record: RecordRef) -> Record | None:
+        if record.external_version is None:
+            raise ValueError("connector record lookup requires external_version")
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT payload_json FROM connector_records
+                WHERE source_system = ? AND source_instance = ?
+                  AND external_id = ? AND external_version = ?
+                """,
+                record.version_key,
+            ).fetchone()
+        return (
+            record_from_mapping(self._object(str(row["payload_json"])), record.source)
+            if row is not None
+            else None
+        )
+
+    def get_current_connector_record(
+        self, *, source: SourceRef, external_id: str
+    ) -> Record | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT records.payload_json, objects.current_observed_at,
+                       objects.tombstoned_at
+                FROM connector_record_objects AS objects
+                JOIN connector_records AS records
+                  ON records.source_system = objects.source_system
+                 AND records.source_instance = objects.source_instance
+                 AND records.external_id = objects.external_id
+                 AND records.external_version = objects.current_version
+                WHERE objects.source_system = ? AND objects.source_instance = ?
+                  AND objects.external_id = ?
+                """,
+                (*source.key, external_id),
+            ).fetchone()
+        if row is None:
+            return None
+        if row["tombstoned_at"] is not None and datetime.fromisoformat(
+            str(row["tombstoned_at"])
+        ) >= datetime.fromisoformat(str(row["current_observed_at"])):
+            return None
+        return record_from_mapping(self._object(str(row["payload_json"])), source)
+
+    def get_connector_record_predecessor(self, record: RecordRef) -> RecordRef | None:
+        if record.external_version is None:
+            raise ValueError("connector predecessor lookup requires external_version")
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT predecessor_version FROM connector_records
+                WHERE source_system = ? AND source_instance = ?
+                  AND external_id = ? AND external_version = ?
+                """,
+                record.version_key,
+            ).fetchone()
+        if row is None or row["predecessor_version"] is None:
+            return None
+        return RecordRef(
+            source=record.source,
+            external_id=record.external_id,
+            external_version=str(row["predecessor_version"]),
+        )
+
+    def get_connector_relation(
+        self, *, source: SourceRef, relation_id: str, relation_version: str
+    ) -> Relation | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT payload_json FROM connector_relations
+                WHERE source_system = ? AND source_instance = ?
+                  AND relation_id = ? AND relation_version = ?
+                """,
+                (*source.key, relation_id, relation_version),
+            ).fetchone()
+        return (
+            relation_from_mapping(self._object(str(row["payload_json"])), source)
+            if row is not None
+            else None
+        )
+
+    def get_connector_cursor(self, source: SourceRef) -> str | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT committed_cursor FROM connector_sources
+                WHERE source_system = ? AND source_instance = ?
+                """,
+                source.key,
+            ).fetchone()
+        return str(row["committed_cursor"]) if row and row["committed_cursor"] else None
+
+    def _connector_record_exists(self, record: RecordRef) -> bool:
+        if record.external_version is None:
+            return False
+        row = self._connection.execute(
+            """
+            SELECT 1 FROM connector_records
+            WHERE source_system = ? AND source_instance = ?
+              AND external_id = ? AND external_version = ?
+            """,
+            record.version_key,
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
+    def _connector_failure(
+        item_type: SyncItemType,
+        item_id: str,
+        item_version: str,
+        message: str,
+    ) -> SyncItemFailure:
+        return SyncItemFailure(
+            item_type=item_type,
+            item_id=item_id,
+            item_version=item_version,
+            code="version_conflict",
+            message=message,
+            retryable=False,
+        )
 
     def close(self) -> None:
         with self._lock:
