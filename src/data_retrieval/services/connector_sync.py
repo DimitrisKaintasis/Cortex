@@ -37,6 +37,9 @@ class ConnectorSyncService:
     def register_source(self, source: Source) -> Source:
         return self.repository.register_connector_source(source)
 
+    def get_source(self, source: SourceRef) -> Source | None:
+        return self.repository.get_connector_source(source)
+
     def submit_batch(self, batch: SyncBatch) -> SyncBatchAcknowledgement:
         source = self.repository.get_connector_source(batch.run.source)
         if source is None:

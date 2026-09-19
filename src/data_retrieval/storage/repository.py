@@ -275,6 +275,10 @@ class ConnectorLifecycleRepository(Protocol):
     def get_connector_cursor(self, source: SourceRef) -> str | None: ...
 
 
+class CortexRepository(Repository, ConnectorLifecycleRepository, Protocol):
+    """Combined local application boundary implemented by every storage adapter."""
+
+
 @runtime_checkable
 class StagedIngestionRepository(Protocol):
     """Optional capability for bounded-memory, restart-safe ingestion."""

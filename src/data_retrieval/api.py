@@ -8,18 +8,28 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from data_retrieval.connectors.codec import (
+    source_from_mapping,
+    source_to_mapping,
+    sync_batch_acknowledgement_to_mapping,
+    sync_batch_from_mapping,
+    sync_commit_acknowledgement_to_mapping,
+    sync_run_to_mapping,
+)
+from data_retrieval.connectors.contracts import SourceRef
 from data_retrieval.domain.models import TagCandidate, TagCandidateState
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import OllamaEmbedder
+from data_retrieval.services.connector_sync import ConnectorSyncService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_lifecycle import TagLifecycleService
-from data_retrieval.storage.repository import Repository
+from data_retrieval.storage.repository import CortexRepository, Repository
 from data_retrieval.storage.sqlite import SQLiteRepository
 from data_retrieval.tagging.ollama import OllamaTagProposer
 
@@ -44,7 +54,7 @@ class LocalApiConfig:
         return "postgresql" if self.postgres_dsn else "sqlite"
 
     @contextmanager
-    def open_repository(self) -> Iterator[Repository]:
+    def open_repository(self) -> Iterator[CortexRepository]:
         if self.postgres_dsn:
             try:
                 from data_retrieval.storage.postgresql import PostgreSQLRepository
@@ -58,7 +68,7 @@ class LocalApiConfig:
                     "PostgreSQL dependencies are not installed; install them with "
                     "'python -m pip install -e \".[postgres]\"'"
                 ) from error
-            repository: Repository = PostgreSQLRepository(self.postgres_dsn)
+            repository: CortexRepository = PostgreSQLRepository(self.postgres_dsn)
         else:
             repository = SQLiteRepository(self.database_path)
         try:
@@ -109,6 +119,10 @@ class TagResolutionCreate(ApiModel):
     reason: str | None = Field(default=None, max_length=10_000)
 
 
+class SyncCommitCreate(ApiModel):
+    request_id: str = Field(min_length=1, max_length=500)
+
+
 def create_app(config: LocalApiConfig | None = None) -> FastAPI:
     settings = config or LocalApiConfig()
     app = FastAPI(
@@ -144,6 +158,53 @@ def create_app(config: LocalApiConfig | None = None) -> FastAPI:
         with settings.open_repository() as repository:
             namespaces = repository.list_namespaces(prefix=prefix)
         return {"count": len(namespaces), "namespaces": namespaces}
+
+    @app.post("/v1/sources", status_code=201)
+    def register_source(request: dict[str, Any]) -> dict[str, object]:
+        source = source_from_mapping(request)
+        with settings.open_repository() as repository:
+            registered = ConnectorSyncService(repository).register_source(source)
+        return source_to_mapping(registered)
+
+    @app.get("/v1/sources/{source_system}/{source_instance:path}")
+    def get_source(source_system: str, source_instance: str) -> dict[str, object]:
+        with settings.open_repository() as repository:
+            source = ConnectorSyncService(repository).get_source(
+                SourceRef(source_system, source_instance)
+            )
+        if source is None:
+            raise HTTPException(status_code=404, detail="connector source was not found")
+        return source_to_mapping(source)
+
+    @app.post("/v1/sync-runs/{run_request_id}/batches")
+    def submit_sync_batch(
+        run_request_id: str, request: dict[str, Any]
+    ) -> dict[str, object]:
+        batch = sync_batch_from_mapping(request)
+        if batch.run.request_id != run_request_id:
+            raise ValueError("sync run path does not match batch request_id")
+        with settings.open_repository() as repository:
+            acknowledgement = ConnectorSyncService(repository).submit_batch(batch)
+        return sync_batch_acknowledgement_to_mapping(acknowledgement)
+
+    @app.post("/v1/sync-runs/{run_request_id}:commit")
+    def commit_sync(
+        run_request_id: str, request: SyncCommitCreate
+    ) -> dict[str, object]:
+        with settings.open_repository() as repository:
+            acknowledgement = ConnectorSyncService(repository).commit(
+                request_id=request.request_id,
+                run_request_id=run_request_id,
+            )
+        return sync_commit_acknowledgement_to_mapping(acknowledgement)
+
+    @app.get("/v1/sync-runs/{run_request_id}")
+    def get_sync_run(run_request_id: str) -> dict[str, object]:
+        with settings.open_repository() as repository:
+            run = ConnectorSyncService(repository).get_run(run_request_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="sync run was not found")
+        return sync_run_to_mapping(run)
 
     @app.post("/v1/documents", status_code=201)
     def create_document(request: DocumentCreate) -> dict[str, object]:

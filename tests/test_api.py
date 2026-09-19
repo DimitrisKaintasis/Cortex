@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from data_retrieval.api import LocalApiConfig, create_app
+from data_retrieval.connectors.codec import source_from_mapping, sync_run_from_mapping
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.tag_enrichment import TagEnrichmentService
 from data_retrieval.storage.sqlite import SQLiteRepository
@@ -29,6 +31,55 @@ class StubTagProposer:
 
 
 class LocalApiTests(unittest.TestCase):
+    def test_connector_source_batch_replay_and_commit_flow(self) -> None:
+        fixture_path = (
+            Path(__file__).parents[1] / "evals" / "connector_contract_devui_v1.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        registration = fixture["registration"]
+        batch = fixture["sync_batch"]
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "data.sqlite3"
+            with TestClient(create_app(LocalApiConfig(database_path=database))) as client:
+                registered = client.post("/v1/sources", json=registration)
+                fetched = client.get(
+                    "/v1/sources/devui/project:cortex",
+                )
+                accepted = client.post(
+                    "/v1/sync-runs/devui-sync:scan-42/batches",
+                    json=batch,
+                )
+                replayed = client.post(
+                    "/v1/sync-runs/devui-sync:scan-42/batches",
+                    json=batch,
+                )
+                run = client.get("/v1/sync-runs/devui-sync:scan-42")
+                committed = client.post(
+                    "/v1/sync-runs/devui-sync:scan-42:commit",
+                    json={"request_id": "devui-sync:scan-42:commit"},
+                )
+                committed_replay = client.post(
+                    "/v1/sync-runs/devui-sync:scan-42:commit",
+                    json={"request_id": "devui-sync:scan-42:commit"},
+                )
+
+        self.assertEqual(registered.status_code, 201)
+        self.assertEqual(
+            source_from_mapping(registered.json()), source_from_mapping(registration)
+        )
+        self.assertEqual(source_from_mapping(fetched.json()), source_from_mapping(registration))
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json(), replayed.json())
+        self.assertEqual(accepted.json()["accepted_records"], len(batch["records"]))
+        self.assertEqual(accepted.json()["accepted_relations"], len(batch["relations"]))
+        self.assertEqual(
+            sync_run_from_mapping(run.json()), sync_run_from_mapping(batch["run"])
+        )
+        self.assertEqual(committed.status_code, 200)
+        self.assertEqual(committed.json(), committed_replay.json())
+        self.assertEqual(committed.json()["committed_cursor"], "scan:42")
+
     def test_ingestion_retrieval_explanation_and_feedback_flow(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "data.sqlite3"
