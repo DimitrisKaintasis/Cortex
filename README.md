@@ -287,6 +287,12 @@ python -m ruff check src tests scripts/smoke_minimal_install.py
 python -m pyright
 ```
 
+Development uses short-lived feature branches. Run the focused tests for the changed behavior
+before each commit; before pushing, run the complete test suite plus Ruff and Pyright. A change
+that depends on PostgreSQL or another optional live service must also pass its live integration
+tests before the branch is merged. CI repeats these gates independently--it does not replace the
+local pre-push check.
+
 GitHub Actions runs three independent checks on every push and pull request: a dependency-free
 SQLite smoke test, the lint, typed-core and Python test suite, and the PostgreSQL adapter tests
 against a real pgvector service container. This keeps the simple setup and scale adapter
@@ -403,8 +409,9 @@ scripts/             # diagnostic and benchmark utilities
 - Schema compatibility is handled by the adapter-owned versioned migration framework accepted in
   [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md). SQLite persists `user_version`
   and creates a recoverable sibling backup before upgrading a non-empty legacy database;
-  PostgreSQL persists `schema_metadata`. A verified live PostgreSQL upgrade rehearsal remains
-  required before adding the connector persistence schema.
+  PostgreSQL persists `schema_metadata`. The verified live PostgreSQL upgrade rehearsal passed on
+  an isolated restore; the canonical corpus was deliberately left unchanged. Connector lifecycle
+  persistence may now proceed through the same versioned framework.
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
   contract models and DevUI/Slack fixtures are implemented; stable external-record persistence,

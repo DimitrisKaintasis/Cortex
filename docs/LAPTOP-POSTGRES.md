@@ -110,6 +110,12 @@ Disabling the related preference did not resolve startup and was reverted to avo
 unrelated Docker feature. The user's Docker restart resolved the failure on 2026-09-05.
 PostgreSQL resumed healthy on loopback with its existing volume intact.
 
+The stale-runtime-file failure recurred on 2026-09-19 for `dockerInference`,
+`docker-secrets-engine/engine.sock`, and `userAnalyticsOtlpHttp.sock`. With Docker stopped, the
+zero-byte endpoints were renamed through Docker's WSL-mounted host filesystem to recoverable
+`.stale-20260919*` files. No container volume or database file was moved. Docker then started
+normally, and the temporary preference changes tried during diagnosis were reverted.
+
 ## Live acceptance evidence — 2026-09-05 (Europe/Athens)
 
 Docker Engine 29.0.1 and the existing `pgvector/pgvector:0.8.6-pg17` container were healthy.
@@ -151,10 +157,33 @@ rankings after migration or provide off-device disaster recovery. Both archives 
 manifests remain in ignored laptop storage. Temporary restore/test databases were removed after
 verification; the original database and archives were preserved.
 
-## Next: legacy corpus migration rehearsal
+## Legacy corpus migration rehearsal — 2026-09-19 (Europe/Athens)
 
-The original corpus predates the current tag-candidate and weight-ledger tables. Before opening
-it through the current application, restore a working copy and rehearse normal schema
-initialization. It can quarantine legacy proposed tags and seed historical weight baselines,
-so compare provenance and retrieval before upgrading the canonical database. The backup verifier
-only restores and inspects; it never triggers those application migrations.
+The ADR-0019 gate was exercised against an isolated restore of the original archive; the canonical
+`data_retrieval` database was never opened by the application and remains on its historical
+schema. The archive checksum and all ten pre-migration table counts were verified again before
+repository startup.
+
+Normal `PostgreSQLRepository` startup upgraded the restored database from schema version 0 to 1.
+The migration took roughly three minutes on this laptop; most of that time was spent quarantining
+and deleting the legacy proposed-tag catalog. A second repository startup was a true no-op: schema
+version remained 1 and the `schema_metadata.updated_at` value did not change.
+
+The semantic accounting was:
+
+- 26,300 documents, 272,209 atoms, 14,435 embeddings, and 57,893 atom links preserved.
+- 62,883 unreviewed atom-tag edges converted to `tag_candidates`.
+- 19 explicitly evidenced atom-tag edges preserved as canonical.
+- 57,914 baseline `weight_events` created: 57,893 atom links, 19 atom tags, and 2 tag relations.
+- Zero document/atom count mismatches and zero remaining `proposed_new` tags.
+
+For retrieval comparison, the three largest legacy namespaces were checked before and after the
+migration. All 36 lexical top-20 cases matched exactly; fingerprints of the pre-existing atom
+retrieval fields and every embedding row also matched. Tag-channel results are intentionally not
+identical: unreviewed model tags no longer participate as canonical graph evidence until reviewed.
+
+All three live PostgreSQL integration tests passed, followed by all 222 project tests with the live
+test DSN enabled. Both disposable rehearsal databases were then force-dropped after their exact
+prefixed names were verified. The backup archive and its manifest remain available. Upgrading the
+canonical corpus is still a separate backup-first operation, not an automatic consequence of this
+rehearsal.

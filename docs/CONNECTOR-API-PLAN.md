@@ -1,6 +1,6 @@
 # Cortex connector and agent API plan
 
-- Status: C1 contract fixtures passed; ADR-0019 migration gate in progress before C2
+- Status: C1 contract fixtures and ADR-0019 migration gate passed; C2 is next
 - Date: 2026-09-18
 - Governing decision: [ADR-0020](decisions/0020-external-connector-and-agent-boundary.md)
 - Current transport: [loopback-only local API](LOCAL-API.md)
@@ -316,10 +316,10 @@ cross-scope metrics or ordinary operational logs.
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
 
-C1 may begin under the current local deployment. C2 cannot change persistent schemas until the
-ADR-0019 migration mechanism is implemented and upgrade recovery is rehearsed. C7 must not be
-un-deferred merely to demonstrate Slack; a temporary tunnel is a demo shortcut, not the supported
-security architecture.
+C1 passed under the current local deployment. C2's schema prerequisite also passed: the ADR-0019
+migration mechanism is implemented and upgrade recovery was rehearsed against an isolated restore
+of the legacy PostgreSQL corpus. C7 must not be un-deferred merely to demonstrate Slack; a
+temporary tunnel is a demo shortcut, not the supported security architecture.
 
 ## Reference connector sequence
 
