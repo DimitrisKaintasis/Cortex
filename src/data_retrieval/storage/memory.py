@@ -7,6 +7,8 @@ from datetime import datetime
 from threading import RLock
 
 from data_retrieval.connectors.contracts import (
+    ContextPack,
+    Outcome,
     Record,
     RecordRef,
     Relation,
@@ -90,6 +92,8 @@ class InMemoryRepository:
             tuple[str, str, str, str], ConnectorRecordProjection
         ] = {}
         self._connector_tombstone_projections: set[tuple[str, str, str, str]] = set()
+        self._connector_query_receipts: dict[str, tuple[str, ContextPack]] = {}
+        self._connector_outcome_receipts: dict[str, tuple[str, Outcome]] = {}
         self._lock = RLock()
 
     def get_document(self, document_id: str) -> Document | None:
@@ -581,6 +585,11 @@ class InMemoryRepository:
     def get_retrieval_event(self, retrieval_id: str) -> dict[str, object] | None:
         with self._lock:
             event = self._retrieval_events.get(retrieval_id)
+            return dict(event) if event else None
+
+    def get_feedback_event(self, feedback_id: str) -> dict[str, object] | None:
+        with self._lock:
+            event = self._feedback_events.get(feedback_id)
             return dict(event) if event else None
 
     def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]:
@@ -1156,6 +1165,82 @@ class InMemoryRepository:
                     ):
                         return False
             return True
+
+    def get_connector_projection_by_atom(
+        self, atom_id: str
+    ) -> ConnectorRecordProjection | None:
+        with self._lock:
+            return next(
+                (
+                    projection
+                    for projection in self._connector_record_projections.values()
+                    if atom_id in projection.atom_ids
+                ),
+                None,
+            )
+
+    def get_connector_atom_id(self, evidence_id: str) -> str | None:
+        with self._lock:
+            for projection in self._connector_record_projections.values():
+                for atom_id, stored_evidence_id in zip(
+                    projection.atom_ids, projection.evidence_ids, strict=True
+                ):
+                    if stored_evidence_id == evidence_id:
+                        return atom_id
+            return None
+
+    def get_connector_query_receipt(
+        self, request_id: str
+    ) -> tuple[str, ContextPack] | None:
+        with self._lock:
+            return self._connector_query_receipts.get(request_id)
+
+    def get_connector_context(self, retrieval_id: str) -> ContextPack | None:
+        with self._lock:
+            return next(
+                (
+                    context
+                    for _, context in self._connector_query_receipts.values()
+                    if context.retrieval_id == retrieval_id
+                ),
+                None,
+            )
+
+    def store_connector_query_receipt(
+        self, *, fingerprint: str, context: ContextPack
+    ) -> ContextPack:
+        with self._lock:
+            existing = self._connector_query_receipts.get(context.query_request_id)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    raise ValueError("query request identity conflicts with different payload")
+                return existing[1]
+            self._connector_query_receipts[context.query_request_id] = (
+                fingerprint,
+                context,
+            )
+            return context
+
+    def get_connector_outcome_receipt(
+        self, request_id: str
+    ) -> tuple[str, Outcome] | None:
+        with self._lock:
+            return self._connector_outcome_receipts.get(request_id)
+
+    def store_connector_outcome_receipt(
+        self, *, fingerprint: str, outcome: Outcome
+    ) -> Outcome:
+        with self._lock:
+            existing = self._connector_outcome_receipts.get(outcome.request_id)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    raise ValueError("outcome request identity conflicts with different payload")
+                return existing[1]
+            self._connector_outcome_receipts[outcome.request_id] = (
+                fingerprint,
+                outcome,
+            )
+            return outcome
 
     @property
     def document_count(self) -> int:

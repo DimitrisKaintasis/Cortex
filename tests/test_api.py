@@ -60,6 +60,7 @@ class LocalApiTests(unittest.TestCase):
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
         registration = fixture["registration"]
         batch = fixture["sync_batch"]
+        query = fixture["query"]
 
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "data.sqlite3"
@@ -85,6 +86,18 @@ class LocalApiTests(unittest.TestCase):
                     "/v1/sync-runs/devui-sync:scan-42:commit",
                     json={"request_id": "devui-sync:scan-42:commit"},
                 )
+                context = client.post("/v1/queries", json=query)
+                context_replay = client.post("/v1/queries", json=query)
+                outcome_payload = {
+                    "request_id": "devui-outcome:api-test",
+                    "retrieval_id": context.json()["retrieval_id"],
+                    "used_evidence_ids": [context.json()["items"][0]["evidence_id"]],
+                    "outcome": "positive",
+                    "occurred_at": "2026-09-18T12:31:00+03:00",
+                    "reason": "Used by the API integration test.",
+                }
+                outcome = client.post("/v1/outcomes", json=outcome_payload)
+                outcome_replay = client.post("/v1/outcomes", json=outcome_payload)
 
         self.assertEqual(registered.status_code, 201)
         self.assertEqual(
@@ -101,6 +114,13 @@ class LocalApiTests(unittest.TestCase):
         self.assertEqual(committed.status_code, 200)
         self.assertEqual(committed.json(), committed_replay.json())
         self.assertEqual(committed.json()["committed_cursor"], "scan:42")
+        self.assertEqual(context.status_code, 200)
+        self.assertEqual(context.json(), context_replay.json())
+        self.assertTrue(context.json()["items"])
+        self.assertNotIn("atom_id", context.json()["items"][0])
+        self.assertIn("external_id", context.json()["items"][0]["record"])
+        self.assertEqual(outcome.status_code, 200)
+        self.assertEqual(outcome.json(), outcome_replay.json())
 
     def test_ingestion_retrieval_explanation_and_feedback_flow(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -13,6 +13,10 @@ from typing import Any
 from uuid import uuid4
 
 from data_retrieval.connectors.codec import (
+    context_pack_from_mapping,
+    context_pack_to_mapping,
+    outcome_from_mapping,
+    outcome_to_mapping,
     record_from_mapping,
     record_to_mapping,
     relation_from_mapping,
@@ -30,6 +34,8 @@ from data_retrieval.connectors.codec import (
     tombstone_to_mapping,
 )
 from data_retrieval.connectors.contracts import (
+    ContextPack,
+    Outcome,
     Record,
     RecordRef,
     Relation,
@@ -1399,6 +1405,14 @@ class SQLiteRepository:
             ).fetchone()
         return self._object(row["payload_json"]) if row else None
 
+    def get_feedback_event(self, feedback_id: str) -> dict[str, object] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM feedback_events WHERE feedback_id = ?",
+                (feedback_id,),
+            ).fetchone()
+        return self._object(row["payload_json"]) if row else None
+
     def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]:
         if not signal_ids:
             return frozenset()
@@ -2342,6 +2356,133 @@ class SQLiteRepository:
                     if projected is None:
                         return False
             return True
+
+    def get_connector_projection_by_atom(
+        self, atom_id: str
+    ) -> ConnectorRecordProjection | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT source_system, source_instance, external_id, external_version
+                FROM connector_projection_atoms WHERE atom_id = ?
+                """,
+                (atom_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self.get_connector_record_projection(
+            RecordRef(
+                source=SourceRef(str(row["source_system"]), str(row["source_instance"])),
+                external_id=str(row["external_id"]),
+                external_version=str(row["external_version"]),
+            )
+        )
+
+    def get_connector_atom_id(self, evidence_id: str) -> str | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT atom_id FROM connector_projection_atoms WHERE evidence_id = ?",
+                (evidence_id,),
+            ).fetchone()
+        return str(row["atom_id"]) if row is not None else None
+
+    def get_connector_query_receipt(
+        self, request_id: str
+    ) -> tuple[str, ContextPack] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT fingerprint, context_json FROM connector_query_receipts
+                WHERE request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return (
+            str(row["fingerprint"]),
+            context_pack_from_mapping(self._object(str(row["context_json"]))),
+        )
+
+    def get_connector_context(self, retrieval_id: str) -> ContextPack | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT context_json FROM connector_query_receipts
+                WHERE retrieval_id = ?
+                """,
+                (retrieval_id,),
+            ).fetchone()
+        return (
+            context_pack_from_mapping(self._object(str(row["context_json"])))
+            if row is not None
+            else None
+        )
+
+    def store_connector_query_receipt(
+        self, *, fingerprint: str, context: ContextPack
+    ) -> ContextPack:
+        with self._lock, self._connection:
+            existing = self.get_connector_query_receipt(context.query_request_id)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    raise ValueError("query request identity conflicts with different payload")
+                return existing[1]
+            self._connection.execute(
+                """
+                INSERT INTO connector_query_receipts (
+                    request_id, fingerprint, retrieval_id, context_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    context.query_request_id,
+                    fingerprint,
+                    context.retrieval_id,
+                    self._json(context_pack_to_mapping(context)),
+                ),
+            )
+            return context
+
+    def get_connector_outcome_receipt(
+        self, request_id: str
+    ) -> tuple[str, Outcome] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT fingerprint, acknowledgement_json
+                FROM connector_outcome_receipts WHERE request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return (
+            str(row["fingerprint"]),
+            outcome_from_mapping(self._object(str(row["acknowledgement_json"]))),
+        )
+
+    def store_connector_outcome_receipt(
+        self, *, fingerprint: str, outcome: Outcome
+    ) -> Outcome:
+        with self._lock, self._connection:
+            existing = self.get_connector_outcome_receipt(outcome.request_id)
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    raise ValueError("outcome request identity conflicts with different payload")
+                return existing[1]
+            self._connection.execute(
+                """
+                INSERT INTO connector_outcome_receipts (
+                    request_id, fingerprint, acknowledgement_json
+                ) VALUES (?, ?, ?)
+                """,
+                (
+                    outcome.request_id,
+                    fingerprint,
+                    self._json(outcome_to_mapping(outcome)),
+                ),
+            )
+            return outcome
 
     def _connector_record_exists(self, record: RecordRef) -> bool:
         if record.external_version is None:

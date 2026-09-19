@@ -1,7 +1,7 @@
 # Cortex connector and agent API plan
 
-- Status: C2 passed; C3 source-sync REST, Python SDK, and contract kit implemented; retrieval and outcomes pending
-- Date: 2026-09-19
+- Status: C2 passed; C3 implementation complete and under final acceptance
+- Date: 2026-09-20
 - Governing decision: [ADR-0020](decisions/0020-external-connector-and-agent-boundary.md)
 - Current transport: [loopback-only local API](LOCAL-API.md)
 
@@ -307,7 +307,7 @@ cross-scope metrics or ordinary operational logs.
 | C0. Freeze boundary | passed | ADR-0020 and this plan | Architecture, vocabulary, non-goals, and order are reviewed and committed |
 | C1. Contract fixtures | passed | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
 | C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
-| C3. Python SDK | in progress | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
+| C3. Python SDK | acceptance | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | not started | Stdio/loopback read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
 | C5. DevUI reference connector | not started | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
@@ -327,14 +327,16 @@ proved through the SDK and reference-connector round trips in C3, C5, and C6. C7
 un-deferred merely to demonstrate Slack; a temporary tunnel is a demo shortcut, not the supported
 security architecture.
 
-C3 currently exposes source registration, consolidated sync batches, run inspection, and explicit
-cursor commit through the loopback REST API and the typed `cortex` Python package. The SDK has
+C3 exposes source registration, consolidated sync batches, run inspection, explicit cursor
+commit, scoped queries, context packs, and attributable outcomes through the loopback REST API and
+the typed `cortex` Python package. The SDK has
 structured errors, timeout configuration, explicit close/context-manager behavior, no automatic
 retry, and a session helper that never commits on context exit. Its standalone contract-test kit
 validates source/batch mappings and full query/context/outcome fixture linkage without importing a
-repository. The remaining C3 query and outcome methods are gated on the explicit generic
-record-to-retrieval projection and scope-routing decision; they must not smuggle namespace or atom
-identities into the connector contract.
+repository. The generic projection derives deterministic internal routing from `Scope`, keeps
+external record envelopes canonical, creates version lineage, suppresses tombstoned projections,
+and exposes only opaque evidence IDs. Cursor commit is blocked until accepted records and
+tombstones are projected. Outcome learning accepts only evidence returned by the named retrieval.
 
 ## Reference connector sequence
 

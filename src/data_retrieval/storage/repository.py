@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from data_retrieval.connectors.contracts import (
+    ContextPack,
+    Outcome,
     Record,
     RecordRef,
     Relation,
@@ -191,6 +193,8 @@ class Repository(Protocol):
 
     def get_retrieval_event(self, retrieval_id: str) -> dict[str, object] | None: ...
 
+    def get_feedback_event(self, feedback_id: str) -> dict[str, object] | None: ...
+
     def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]: ...
 
     def list_weight_events(
@@ -304,6 +308,30 @@ class ConnectorProjectionRepository(Protocol):
     ) -> frozenset[str]: ...
 
     def connector_run_projection_complete(self, run_request_id: str) -> bool: ...
+
+    def get_connector_projection_by_atom(
+        self, atom_id: str
+    ) -> ConnectorRecordProjection | None: ...
+
+    def get_connector_atom_id(self, evidence_id: str) -> str | None: ...
+
+    def get_connector_query_receipt(
+        self, request_id: str
+    ) -> tuple[str, ContextPack] | None: ...
+
+    def get_connector_context(self, retrieval_id: str) -> ContextPack | None: ...
+
+    def store_connector_query_receipt(
+        self, *, fingerprint: str, context: ContextPack
+    ) -> ContextPack: ...
+
+    def get_connector_outcome_receipt(
+        self, request_id: str
+    ) -> tuple[str, Outcome] | None: ...
+
+    def store_connector_outcome_receipt(
+        self, *, fingerprint: str, outcome: Outcome
+    ) -> Outcome: ...
 
 
 class CortexRepository(

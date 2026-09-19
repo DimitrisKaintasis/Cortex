@@ -1,7 +1,6 @@
 # Connector SDK quickstart
 
-Status: C3 source-sync slice implemented; retrieval and outcome methods pending the generic
-record-to-retrieval projection decision.
+Status: C3 sync, retrieval, and attributable outcome methods implemented for the local API.
 
 ## Mental model
 
@@ -12,7 +11,9 @@ does not import a repository or create atoms, tags, weights, or database rows.
 
 ```text
 source API -> your mapping -> Source / Record / Relation / Tombstone
-                              -> CortexClient -> loopback REST -> ConnectorSyncService
+                              -> CortexClient -> loopback REST -> durable projection
+application question -> Query -> ContextPack with external RecordRef + opaque evidence IDs
+application result -> Outcome using returned evidence IDs -> bounded Cortex learning
 ```
 
 ## Install and run locally
@@ -123,3 +124,41 @@ in a later batch, and call `commit` only after every required item is durable.
 
 `CortexApiError` exposes `status_code`, `retryable`, and `retry_after`. These are guidance for the
 connector's explicit retry policy; the SDK does not automatically retry writes.
+
+## Retrieve context and report an outcome
+
+Connectors never submit namespaces or atom IDs. Cortex derives an internal routing namespace from
+the public `Scope`, returns the source-owned `RecordRef`, and uses opaque evidence IDs for outcome
+attribution:
+
+```python
+from cortex import Outcome, OutcomeValue, Query
+
+with CortexClient(base_url="http://127.0.0.1:8765") as client:
+    context = client.query(
+        Query(
+            request_id="answer-ticket:184",
+            query="Where should refresh tokens be stored?",
+            scope=scope,
+            top_k=5,
+            budget_tokens=1200,
+        )
+    )
+    if context.items:
+        accepted = client.report_outcome(
+            Outcome(
+                request_id="answer-ticket:184:outcome",
+                retrieval_id=context.retrieval_id,
+                used_evidence_ids=(context.items[0].evidence_id,),
+                outcome=OutcomeValue.POSITIVE,
+                occurred_at=datetime.now(UTC),
+                reason="The evidence was used in the final answer.",
+            )
+        )
+```
+
+Query and outcome request IDs are replay-safe. Reusing either ID with a changed payload is rejected.
+An outcome can credit only evidence returned by its named retrieval. Updates create `SUPERSEDES`
+lineage; tombstones remove matching projected evidence from normal serving without deleting its
+history. Referenced payload fetching is not enabled yet, so sync rejects `reference_uri` records
+before the run becomes durable; submit inline content for this local milestone.

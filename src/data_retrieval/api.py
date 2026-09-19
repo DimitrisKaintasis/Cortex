@@ -13,6 +13,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from data_retrieval.connectors.codec import (
+    context_pack_to_mapping,
+    outcome_from_mapping,
+    outcome_to_mapping,
+    query_from_mapping,
     source_from_mapping,
     source_to_mapping,
     sync_batch_acknowledgement_to_mapping,
@@ -21,6 +25,8 @@ from data_retrieval.connectors.codec import (
     sync_run_to_mapping,
 )
 from data_retrieval.connectors.contracts import (
+    ContextPack,
+    Outcome,
     Source,
     SourceRef,
     SyncBatch,
@@ -28,9 +34,13 @@ from data_retrieval.connectors.contracts import (
     SyncCommitAcknowledgement,
     SyncRun,
 )
+from data_retrieval.connectors.contracts import (
+    Query as ConnectorQuery,
+)
 from data_retrieval.domain.models import TagCandidate, TagCandidateState
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import OllamaEmbedder
+from data_retrieval.services.connector_access import ConnectorAccessService
 from data_retrieval.services.connector_sync import ConnectorSyncService
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
@@ -260,6 +270,33 @@ def create_app(config: LocalApiConfig | None = None) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="sync run was not found")
         return sync_run_to_mapping(run)
+
+    @app.post(
+        "/v1/queries",
+        openapi_extra=_contract_operation(request=ConnectorQuery, response=ContextPack),
+    )
+    def connector_query(request: dict[str, Any]) -> dict[str, object]:
+        query = query_from_mapping(request)
+        with settings.open_repository() as repository:
+            context = ConnectorAccessService(
+                repository,
+                retrieval=RetrievalService(
+                    repository,
+                    tag_proposer=_tag_proposer(settings),
+                    embedder=_embedder(settings),
+                ),
+            ).query(query)
+        return context_pack_to_mapping(context)
+
+    @app.post(
+        "/v1/outcomes",
+        openapi_extra=_contract_operation(request=Outcome, response=Outcome),
+    )
+    def connector_outcome(request: dict[str, Any]) -> dict[str, object]:
+        outcome = outcome_from_mapping(request)
+        with settings.open_repository() as repository:
+            acknowledgement = ConnectorAccessService(repository).report_outcome(outcome)
+        return outcome_to_mapping(acknowledgement)
 
     @app.post("/v1/documents", status_code=201)
     def create_document(request: DocumentCreate) -> dict[str, object]:

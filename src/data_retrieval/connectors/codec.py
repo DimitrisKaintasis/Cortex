@@ -577,6 +577,23 @@ def query_from_mapping(value: object) -> Query:
     )
 
 
+def query_to_mapping(query: Query) -> dict[str, object]:
+    return {
+        "request_id": query.request_id,
+        "query": query.query,
+        "scope": _scope_mapping(query.scope),
+        "top_k": query.top_k,
+        "budget_tokens": query.budget_tokens,
+        "timeline_id": query.timeline_id,
+        "temporal_mode": query.temporal_mode.value,
+        "as_of": query.as_of.isoformat() if query.as_of else None,
+        "range_start": query.range_start.isoformat() if query.range_start else None,
+        "range_end": query.range_end.isoformat() if query.range_end else None,
+        "reference_time": (
+            query.reference_time.isoformat() if query.reference_time else None
+        ),
+        "metadata": _plain_json(query.metadata),
+    }
 def context_pack_from_mapping(value: object) -> ContextPack:
     data = _mapping(value, "context pack")
     _reject_unknown(
@@ -607,6 +624,29 @@ def context_pack_from_mapping(value: object) -> ContextPack:
     )
 
 
+def context_pack_to_mapping(context: ContextPack) -> dict[str, object]:
+    return {
+        "retrieval_id": context.retrieval_id,
+        "query_request_id": context.query_request_id,
+        "items": [
+            {
+                "evidence_id": item.evidence_id,
+                "record": _record_ref_mapping(item.record, include_source=True),
+                "modality": item.modality.value,
+                "content": item.content,
+                "scope": _scope_mapping(item.scope),
+                "score": item.score,
+                "score_evidence": list(item.score_evidence),
+                "lineage_evidence_ids": list(item.lineage_evidence_ids),
+                "metadata": _plain_json(item.metadata),
+            }
+            for item in context.items
+        ],
+        "low_confidence": context.low_confidence,
+        "budget_tokens": context.budget_tokens,
+        "used_tokens": context.used_tokens,
+        "abstention_reason": context.abstention_reason,
+    }
 def _evidence_result(data: Mapping[str, Any]) -> EvidenceResult:
     _reject_unknown(
         data,
@@ -661,6 +701,17 @@ def outcome_from_mapping(value: object) -> Outcome:
         occurred_at=_required_datetime(data, "occurred_at"),
         reason=_optional_string(data, "reason") or "",
     )
+
+
+def outcome_to_mapping(outcome: Outcome) -> dict[str, object]:
+    return {
+        "request_id": outcome.request_id,
+        "retrieval_id": outcome.retrieval_id,
+        "used_evidence_ids": list(outcome.used_evidence_ids),
+        "outcome": outcome.outcome.value,
+        "occurred_at": outcome.occurred_at.isoformat(),
+        "reason": outcome.reason,
+    }
 
 
 def sync_batch_acknowledgement_from_mapping(value: object) -> SyncBatchAcknowledgement:

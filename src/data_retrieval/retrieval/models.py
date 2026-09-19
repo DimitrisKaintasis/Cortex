@@ -156,6 +156,7 @@ class FeedbackRequest:
     outcome: str
     reason: str = ""
     used_mem0: bool = False
+    occurred_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.feedback_id.strip() or not self.retrieval_id.strip():
@@ -164,3 +165,7 @@ class FeedbackRequest:
             raise ValueError("outcome must be positive or negative")
         if not self.selected_atom_ids:
             raise ValueError("at least one selected atom is required")
+        if self.occurred_at is not None and (
+            self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None
+        ):
+            raise ValueError("occurred_at must include a timezone")

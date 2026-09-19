@@ -100,8 +100,8 @@ does not make the loopback API public or un-defer hosted storage. ADR-0020 and
 |---|---|---|
 | C0. Freeze connector boundary | passed | Public concepts, four capability profiles, transport ownership, security boundary, and ordered plan are reviewed and committed |
 | C1. Contract fixtures | passed | DevUI-like structured and Slack-like mutable data validate against transport-independent request/response models |
-| C2. External record lifecycle | not started | Source identity, versions, relations, sync runs, cursors, and tombstones are replay-safe across repositories |
-| C3. Python SDK | not started | A connector performs sync, retrieval, and outcomes without Cortex-internal knowledge |
+| C2. External record lifecycle | passed | Source identity, versions, relations, sync runs, cursors, and tombstones are replay-safe across repositories |
+| C3. Python SDK | acceptance | A connector performs sync, retrieval, and outcomes without Cortex-internal knowledge |
 | C4. Local MCP adapter | not started | IDE agents use read/outcome tools with REST-equivalent policy and results |
 | C5. DevUI reference connector | not started | Structured project entities round-trip between DevUI identity and Cortex evidence |
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, and access metadata use the same core contract |

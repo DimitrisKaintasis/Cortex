@@ -8,6 +8,10 @@ from urllib.parse import quote
 import httpx
 
 from data_retrieval.connectors.codec import (
+    context_pack_from_mapping,
+    outcome_from_mapping,
+    outcome_to_mapping,
+    query_to_mapping,
     source_from_mapping,
     source_to_mapping,
     sync_batch_acknowledgement_from_mapping,
@@ -16,6 +20,9 @@ from data_retrieval.connectors.codec import (
     sync_run_from_mapping,
 )
 from data_retrieval.connectors.contracts import (
+    ContextPack,
+    Outcome,
+    Query,
     Record,
     Relation,
     Source,
@@ -128,6 +135,16 @@ class CortexClient:
                 return None
             raise
         return sync_run_from_mapping(payload)
+
+    def query(self, query: Query) -> ContextPack:
+        payload = self._request("POST", "v1/queries", json=query_to_mapping(query))
+        return context_pack_from_mapping(payload)
+
+    def report_outcome(self, outcome: Outcome) -> Outcome:
+        payload = self._request(
+            "POST", "v1/outcomes", json=outcome_to_mapping(outcome)
+        )
+        return outcome_from_mapping(payload)
 
     def sync(self, run: SyncRun, *, start_sequence: int = 0) -> SyncSession:
         return SyncSession(self, run, start_sequence=start_sequence)

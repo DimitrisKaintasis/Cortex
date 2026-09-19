@@ -8,7 +8,12 @@ from cortex.testing import (
 )
 from data_retrieval.connectors import (
     ConnectorCapability,
+    ContextPack,
     ContributionPolicy,
+    EvidenceResult,
+    Outcome,
+    OutcomeValue,
+    Query,
     Record,
     RecordModality,
     RecordPayload,
@@ -22,6 +27,7 @@ from data_retrieval.connectors import (
     SyncCommitAcknowledgement,
     SyncMode,
     SyncRun,
+    TemporalQueryMode,
     Tombstone,
     Visibility,
 )
@@ -29,9 +35,14 @@ from data_retrieval.connectors import (
 __all__ = [
     "ConnectorCapability",
     "ConnectorContractReport",
+    "ContextPack",
     "ContributionPolicy",
     "CortexApiError",
     "CortexClient",
+    "EvidenceResult",
+    "Outcome",
+    "OutcomeValue",
+    "Query",
     "Record",
     "RecordModality",
     "RecordPayload",
@@ -47,6 +58,7 @@ __all__ = [
     "SyncRun",
     "SyncSession",
     "Tombstone",
+    "TemporalQueryMode",
     "Visibility",
     "validate_connector_fixture",
     "validate_source_sync",

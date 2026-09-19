@@ -14,7 +14,12 @@ from cortex import (
     validate_connector_fixture,
     validate_source_sync,
 )
-from data_retrieval.connectors import sync_batch_from_mapping
+from data_retrieval.connectors import (
+    context_pack_from_mapping,
+    outcome_from_mapping,
+    query_from_mapping,
+    sync_batch_from_mapping,
+)
 from data_retrieval.connectors.codec import (
     source_from_mapping,
     sync_batch_acknowledgement_to_mapping,
@@ -35,6 +40,38 @@ class CortexClientTests(unittest.TestCase):
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
         self.source = source_from_mapping(fixture["registration"])
         self.batch = sync_batch_from_mapping(fixture["sync_batch"])
+        self.query = query_from_mapping(fixture["query"])
+        self.context = context_pack_from_mapping(fixture["context_pack"])
+        self.outcome = outcome_from_mapping(fixture["outcome"])
+
+    def test_typed_query_and_outcome_methods_round_trip_public_contracts(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path == "/v1/queries":
+                return httpx.Response(200, json=self._fixture_mapping("context_pack"))
+            if request.url.path == "/v1/outcomes":
+                return httpx.Response(200, json=json.loads(request.content))
+            return httpx.Response(404, json={"detail": "not found"})
+
+        with CortexClient(
+            base_url="http://cortex.test",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            self.assertEqual(client.query(self.query), self.context)
+            self.assertEqual(client.report_outcome(self.outcome), self.outcome)
+
+        self.assertEqual([request.url.path for request in requests], [
+            "/v1/queries",
+            "/v1/outcomes",
+        ])
+
+    def _fixture_mapping(self, key: str) -> object:
+        fixture_path = (
+            Path(__file__).parents[1] / "evals" / "connector_contract_devui_v1.json"
+        )
+        return json.loads(fixture_path.read_text(encoding="utf-8"))[key]
 
     def test_typed_sync_session_uses_http_contract_and_commits_explicitly(self) -> None:
         requests: list[httpx.Request] = []
