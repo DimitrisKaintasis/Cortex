@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+import json
+import unittest
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from data_retrieval.connectors import (
+    RecordPayload,
+    SourceRef,
+    SyncBatch,
+    sync_batch_from_mapping,
+    sync_batch_to_mapping,
+)
+from data_retrieval.connectors.codec import source_from_mapping
+from data_retrieval.services.connector_sync import ConnectorSyncService
+from data_retrieval.storage.memory import InMemoryRepository
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.value = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        value = self.value
+        self.value += timedelta(seconds=1)
+        return value
+
+
+class ConnectorLifecycleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        fixture_root = Path(__file__).parents[1] / "evals"
+        self.devui = self._load(fixture_root / "connector_contract_devui_v1.json")
+        self.slack = self._load(fixture_root / "connector_contract_slack_v1.json")
+        self.repository = InMemoryRepository()
+        self.service = ConnectorSyncService(self.repository, clock=_Clock())
+
+    @staticmethod
+    def _load(path: Path) -> dict[str, object]:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(value, dict)
+        return value
+
+    def test_batch_mapping_is_canonical_and_round_trips(self) -> None:
+        batch = sync_batch_from_mapping(self.slack["sync_batch"])
+
+        self.assertEqual(sync_batch_from_mapping(sync_batch_to_mapping(batch)), batch)
+
+    def test_versions_lineage_relations_tombstones_and_commit_are_replay_safe(self) -> None:
+        source = source_from_mapping(self.slack["registration"])
+        batch = sync_batch_from_mapping(self.slack["sync_batch"])
+        batch = replace(batch, run=replace(batch.run, previous_cursor=None))
+        self.service.register_source(source)
+
+        first = self.service.submit_batch(batch)
+        replay = self.service.submit_batch(batch)
+
+        self.assertEqual(first, replay)
+        self.assertTrue(first.complete)
+        self.assertEqual(first.accepted_records, 3)
+        current = self.service.get_current_record(
+            source=source.source,
+            external_id="channel:C-AUTH:message:100.0001",
+        )
+        self.assertIsNotNone(current)
+        assert current is not None
+        self.assertEqual(current.ref.external_version, "edited:100.0005")
+        self.assertEqual(
+            self.service.get_record_predecessor(current.ref),
+            batch.records[0].ref,
+        )
+        self.assertEqual(
+            self.service.get_relation(
+                source=source.source,
+                relation_id=batch.relations[0].relation_id,
+                relation_version=batch.relations[0].relation_version,
+            ),
+            batch.relations[0],
+        )
+        self.assertIsNone(
+            self.service.get_current_record(
+                source=source.source,
+                external_id=batch.tombstones[0].record.external_id,
+            )
+        )
+
+        committed = self.service.commit(
+            request_id="slack-sync:event-page-18:commit",
+            run_request_id=batch.run.request_id,
+        )
+        committed_replay = self.service.commit(
+            request_id="slack-sync:event-page-18:commit",
+            run_request_id=batch.run.request_id,
+        )
+        self.assertEqual(committed, committed_replay)
+        self.assertEqual(self.service.get_cursor(source.source), "event-page:18")
+
+    def test_source_batch_and_commit_identity_conflicts_are_rejected(self) -> None:
+        source = source_from_mapping(self.devui["registration"])
+        batch = sync_batch_from_mapping(self.devui["sync_batch"])
+        self.service.register_source(source)
+        with self.assertRaisesRegex(ValueError, "registration conflicts"):
+            self.service.register_source(replace(source, connector_version="0.2.0"))
+
+        self.service.submit_batch(batch)
+        changed_record = replace(
+            batch.records[0],
+            payload=RecordPayload(inline="different content for the same version"),
+        )
+        conflicting = replace(batch, records=(changed_record, *batch.records[1:]))
+        with self.assertRaisesRegex(ValueError, "different payload"):
+            self.service.submit_batch(conflicting)
+
+        self.service.commit(
+            request_id="devui-sync:scan-42:commit",
+            run_request_id=batch.run.request_id,
+        )
+        with self.assertRaisesRegex(ValueError, "already committed"):
+            self.service.commit(
+                request_id="devui-sync:scan-42:second-commit",
+                run_request_id=batch.run.request_id,
+            )
+
+    def test_missing_relation_endpoint_is_item_failure_and_blocks_cursor_commit(self) -> None:
+        source = source_from_mapping(self.devui["registration"])
+        original = sync_batch_from_mapping(self.devui["sync_batch"])
+        self.service.register_source(source)
+        missing_target = replace(
+            original.relations[0].target,
+            external_id="missing:record",
+            external_version="missing:1",
+        )
+        relation = replace(original.relations[0], target=missing_target)
+        batch = SyncBatch(
+            batch_id="missing-relation:batch:0",
+            sequence=0,
+            run=replace(
+                original.run,
+                request_id="missing-relation:run",
+                proposed_cursor="missing-relation:cursor",
+            ),
+            relations=(relation,),
+        )
+
+        acknowledgement = self.service.submit_batch(batch)
+
+        self.assertFalse(acknowledgement.complete)
+        self.assertEqual(acknowledgement.failures[0].code, "missing_endpoint")
+        self.assertTrue(acknowledgement.failures[0].retryable)
+        with self.assertRaisesRegex(ValueError, "item failures"):
+            self.service.commit(
+                request_id="missing-relation:commit",
+                run_request_id=batch.run.request_id,
+            )
+
+    def test_incremental_run_requires_the_committed_previous_cursor(self) -> None:
+        source = source_from_mapping(self.slack["registration"])
+        batch = sync_batch_from_mapping(self.slack["sync_batch"])
+        self.service.register_source(source)
+
+        with self.assertRaisesRegex(ValueError, "previous_cursor"):
+            self.service.submit_batch(batch)
+
+    def test_item_scope_cannot_escape_registered_owner(self) -> None:
+        source = source_from_mapping(self.devui["registration"])
+        batch = sync_batch_from_mapping(self.devui["sync_batch"])
+        escaped_scope = replace(batch.records[0].scope, project_id="project:other")
+        escaped = replace(
+            batch,
+            records=(replace(batch.records[0], scope=escaped_scope), *batch.records[1:]),
+        )
+        self.service.register_source(source)
+
+        with self.assertRaisesRegex(ValueError, "outside source owner project_id"):
+            self.service.submit_batch(escaped)
+
+    def test_unknown_source_is_rejected(self) -> None:
+        batch = sync_batch_from_mapping(self.devui["sync_batch"])
+
+        with self.assertRaisesRegex(ValueError, "not registered"):
+            self.service.submit_batch(batch)
+        self.assertIsNone(
+            self.service.get_current_record(
+                source=SourceRef("devui", "project:cortex"),
+                external_id="module:authentication",
+            )
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

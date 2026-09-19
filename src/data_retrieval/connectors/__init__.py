@@ -5,8 +5,10 @@ from data_retrieval.connectors.codec import (
     outcome_from_mapping,
     query_from_mapping,
     source_from_mapping,
+    source_to_mapping,
     sync_batch_acknowledgement_from_mapping,
     sync_batch_from_mapping,
+    sync_batch_to_mapping,
     sync_commit_acknowledgement_from_mapping,
 )
 from data_retrieval.connectors.contracts import (
@@ -65,7 +67,9 @@ __all__ = [
     "outcome_from_mapping",
     "query_from_mapping",
     "source_from_mapping",
+    "source_to_mapping",
     "sync_batch_acknowledgement_from_mapping",
     "sync_batch_from_mapping",
+    "sync_batch_to_mapping",
     "sync_commit_acknowledgement_from_mapping",
 ]

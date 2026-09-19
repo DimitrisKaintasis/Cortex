@@ -124,6 +124,125 @@ def _metadata(data: Mapping[str, Any]) -> dict[str, Any]:
     return dict(_mapping(value, "metadata"))
 
 
+def _plain_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _plain_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_plain_json(item) for item in value]
+    return value
+
+
+def _source_ref_mapping(source: SourceRef) -> dict[str, object]:
+    return {
+        "source_system": source.source_system,
+        "source_instance": source.source_instance,
+    }
+
+
+def _scope_mapping(scope: Scope) -> dict[str, object]:
+    return {
+        "organization_id": scope.organization_id,
+        "project_id": scope.project_id,
+        "user_id": scope.user_id,
+        "device_id": scope.device_id,
+        "visibility": scope.visibility.value,
+        "contribution_policy": scope.contribution_policy.value,
+    }
+
+
+def source_to_mapping(source: Source) -> dict[str, object]:
+    return {
+        "source": _source_ref_mapping(source.source),
+        "connector_id": source.connector_id,
+        "connector_version": source.connector_version,
+        "owner_scope": _scope_mapping(source.owner_scope),
+        "capabilities": [capability.value for capability in source.capabilities],
+        "metadata": _plain_json(source.metadata),
+    }
+
+
+def sync_run_to_mapping(run: SyncRun) -> dict[str, object]:
+    return {
+        "request_id": run.request_id,
+        "source": _source_ref_mapping(run.source),
+        "mode": run.mode.value,
+        "started_at": run.started_at.isoformat(),
+        "previous_cursor": run.previous_cursor,
+        "proposed_cursor": run.proposed_cursor,
+    }
+
+
+def record_to_mapping(record: Record, *, include_source: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "inline": record.payload.inline,
+        "reference_uri": record.payload.reference_uri,
+        "content_hash": record.payload.content_hash,
+        "media_type": record.payload.media_type,
+    }
+    result: dict[str, object] = {
+        "external_id": record.ref.external_id,
+        "external_version": record.ref.external_version,
+        "modality": record.modality.value,
+        "payload": payload,
+        "scope": _scope_mapping(record.scope),
+        "observed_at": record.observed_at.isoformat(),
+        "occurred_at": record.occurred_at.isoformat() if record.occurred_at else None,
+        "explicit_tags": list(record.explicit_tags),
+        "metadata": _plain_json(record.metadata),
+    }
+    if include_source:
+        result["source"] = _source_ref_mapping(record.ref.source)
+    return result
+
+
+def _record_ref_mapping(record: RecordRef, *, include_source: bool) -> dict[str, object]:
+    result: dict[str, object] = {
+        "external_id": record.external_id,
+        "external_version": record.external_version,
+    }
+    if include_source:
+        result["source"] = _source_ref_mapping(record.source)
+    return result
+
+
+def relation_to_mapping(relation: Relation) -> dict[str, object]:
+    return {
+        "relation_id": relation.relation_id,
+        "relation_version": relation.relation_version,
+        "relation_type": relation.relation_type,
+        "source": _record_ref_mapping(relation.source, include_source=False),
+        "target": _record_ref_mapping(
+            relation.target,
+            include_source=relation.target.source != relation.source.source,
+        ),
+        "scope": _scope_mapping(relation.scope),
+        "observed_at": relation.observed_at.isoformat(),
+        "occurred_at": relation.occurred_at.isoformat() if relation.occurred_at else None,
+        "confidence": relation.confidence,
+        "metadata": _plain_json(relation.metadata),
+    }
+
+
+def tombstone_to_mapping(tombstone: Tombstone) -> dict[str, object]:
+    return {
+        "external_id": tombstone.record.external_id,
+        "tombstone_version": tombstone.tombstone_version,
+        "observed_at": tombstone.observed_at.isoformat(),
+        "reason": tombstone.reason,
+    }
+
+
+def sync_batch_to_mapping(batch: SyncBatch) -> dict[str, object]:
+    return {
+        "batch_id": batch.batch_id,
+        "sequence": batch.sequence,
+        "run": sync_run_to_mapping(batch.run),
+        "records": [record_to_mapping(record) for record in batch.records],
+        "relations": [relation_to_mapping(relation) for relation in batch.relations],
+        "tombstones": [tombstone_to_mapping(item) for item in batch.tombstones],
+    }
+
+
 def _strings(value: object, name: str) -> tuple[str, ...]:
     values = _sequence(value, name)
     if any(not isinstance(item, str) for item in values):

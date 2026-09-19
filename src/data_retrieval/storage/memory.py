@@ -6,6 +6,21 @@ from collections.abc import Iterator
 from datetime import datetime
 from threading import RLock
 
+from data_retrieval.connectors.contracts import (
+    Record,
+    RecordRef,
+    Relation,
+    Source,
+    SourceRef,
+    SyncBatch,
+    SyncBatchAcknowledgement,
+    SyncCommitAcknowledgement,
+    SyncItemFailure,
+    SyncItemType,
+    SyncMode,
+    SyncRun,
+    Tombstone,
+)
 from data_retrieval.core.weight_events import (
     calibration_transition_events,
     edge_coordinates,
@@ -51,6 +66,22 @@ class InMemoryRepository:
         self._feedback_events: dict[str, dict[str, object]] = {}
         self._calibration_signals: dict[str, CalibrationSignal] = {}
         self._weight_events: dict[str, WeightEvent] = {}
+        self._connector_sources: dict[tuple[str, str], Source] = {}
+        self._connector_runs: dict[str, SyncRun] = {}
+        self._connector_batches: dict[
+            tuple[str, str, int], tuple[str, SyncBatchAcknowledgement]
+        ] = {}
+        self._connector_records: dict[tuple[str, str, str, str], Record] = {}
+        self._connector_record_predecessors: dict[
+            tuple[str, str, str, str], RecordRef | None
+        ] = {}
+        self._connector_current_records: dict[tuple[str, str, str], str] = {}
+        self._connector_relations: dict[tuple[str, str, str, str], Relation] = {}
+        self._connector_tombstones: dict[tuple[str, str, str, str], Tombstone] = {}
+        self._connector_current_tombstones: dict[tuple[str, str, str], Tombstone] = {}
+        self._connector_cursors: dict[tuple[str, str], str] = {}
+        self._connector_commits: dict[str, SyncCommitAcknowledgement] = {}
+        self._connector_committed_runs: dict[str, str] = {}
         self._lock = RLock()
 
     def get_document(self, document_id: str) -> Document | None:
@@ -736,6 +767,252 @@ class InMemoryRepository:
             self._atom_tags = atom_tags
             self._tag_candidates = tag_candidates
             self._weight_events = weight_events
+
+    def register_connector_source(self, source: Source) -> Source:
+        with self._lock:
+            existing = self._connector_sources.get(source.source.key)
+            if existing is not None and existing != source:
+                raise ValueError("connector source registration conflicts with existing source")
+            self._connector_sources[source.source.key] = source
+            return source
+
+    def get_connector_source(self, source: SourceRef) -> Source | None:
+        with self._lock:
+            return self._connector_sources.get(source.key)
+
+    def apply_connector_sync_batch(
+        self,
+        *,
+        batch: SyncBatch,
+        fingerprint: str,
+        acknowledged_at: datetime,
+    ) -> SyncBatchAcknowledgement:
+        with self._lock:
+            if batch.run.source.key not in self._connector_sources:
+                raise ValueError("connector source is not registered")
+            existing_run = self._connector_runs.get(batch.run.request_id)
+            if existing_run is not None and existing_run != batch.run:
+                raise ValueError("sync request identity conflicts with existing run")
+            if existing_run is None:
+                current_cursor = self._connector_cursors.get(batch.run.source.key)
+                if (
+                    batch.run.mode is SyncMode.INCREMENTAL
+                    and batch.run.previous_cursor != current_cursor
+                ):
+                    raise ValueError("sync previous_cursor does not match committed cursor")
+
+            batch_key = (batch.run.request_id, batch.batch_id, batch.sequence)
+            existing_batch = self._connector_batches.get(batch_key)
+            if existing_batch is not None:
+                existing_fingerprint, acknowledgement = existing_batch
+                if existing_fingerprint != fingerprint:
+                    raise ValueError("sync batch identity conflicts with different payload")
+                return acknowledgement
+
+            records = dict(self._connector_records)
+            predecessors = dict(self._connector_record_predecessors)
+            current_records = dict(self._connector_current_records)
+            relations = dict(self._connector_relations)
+            tombstones = dict(self._connector_tombstones)
+            current_tombstones = dict(self._connector_current_tombstones)
+            failures: list[SyncItemFailure] = []
+            accepted_records = 0
+            accepted_relations = 0
+            accepted_tombstones = 0
+
+            for record in batch.records:
+                key = record.ref.version_key
+                existing = records.get(key)
+                if existing is not None and existing != record:
+                    failures.append(
+                        SyncItemFailure(
+                            item_type=SyncItemType.RECORD,
+                            item_id=record.ref.external_id,
+                            item_version=record.ref.external_version or "",
+                            code="version_conflict",
+                            message="record version already exists with different content",
+                            retryable=False,
+                        )
+                    )
+                    continue
+                if existing is None:
+                    object_key = record.ref.object_key
+                    current_version = current_records.get(object_key)
+                    current = (
+                        records.get((*object_key, current_version))
+                        if current_version is not None
+                        else None
+                    )
+                    becomes_current = current is None or record.observed_at >= current.observed_at
+                    predecessor = current.ref if becomes_current and current is not None else None
+                    records[key] = record
+                    predecessors[key] = predecessor
+                    if becomes_current:
+                        current_records[object_key] = record.ref.external_version or ""
+                accepted_records += 1
+
+            for relation in batch.relations:
+                key = relation.version_key
+                existing = relations.get(key)
+                if existing is not None and existing != relation:
+                    failures.append(
+                        SyncItemFailure(
+                            item_type=SyncItemType.RELATION,
+                            item_id=relation.relation_id,
+                            item_version=relation.relation_version,
+                            code="version_conflict",
+                            message="relation version already exists with different content",
+                            retryable=False,
+                        )
+                    )
+                    continue
+                missing = [
+                    endpoint
+                    for endpoint in (relation.source, relation.target)
+                    if endpoint.external_version is None
+                    or endpoint.version_key not in records
+                ]
+                if missing:
+                    failures.append(
+                        SyncItemFailure(
+                            item_type=SyncItemType.RELATION,
+                            item_id=relation.relation_id,
+                            item_version=relation.relation_version,
+                            code="missing_endpoint",
+                            message="relation endpoint record version is not durable",
+                            retryable=True,
+                        )
+                    )
+                    continue
+                if existing is None:
+                    relations[key] = relation
+                accepted_relations += 1
+
+            for tombstone in batch.tombstones:
+                key = tombstone.version_key
+                existing = tombstones.get(key)
+                if existing is not None and existing != tombstone:
+                    failures.append(
+                        SyncItemFailure(
+                            item_type=SyncItemType.TOMBSTONE,
+                            item_id=tombstone.record.external_id,
+                            item_version=tombstone.tombstone_version,
+                            code="version_conflict",
+                            message="tombstone version already exists with different content",
+                            retryable=False,
+                        )
+                    )
+                    continue
+                if existing is None:
+                    tombstones[key] = tombstone
+                    current = current_tombstones.get(tombstone.record.object_key)
+                    if current is None or tombstone.observed_at >= current.observed_at:
+                        current_tombstones[tombstone.record.object_key] = tombstone
+                accepted_tombstones += 1
+
+            acknowledgement = SyncBatchAcknowledgement(
+                run_request_id=batch.run.request_id,
+                batch_id=batch.batch_id,
+                sequence=batch.sequence,
+                acknowledged_at=acknowledged_at,
+                accepted_records=accepted_records,
+                accepted_relations=accepted_relations,
+                accepted_tombstones=accepted_tombstones,
+                failures=tuple(failures),
+            )
+            self._connector_runs[batch.run.request_id] = batch.run
+            self._connector_batches[batch_key] = (fingerprint, acknowledgement)
+            self._connector_records = records
+            self._connector_record_predecessors = predecessors
+            self._connector_current_records = current_records
+            self._connector_relations = relations
+            self._connector_tombstones = tombstones
+            self._connector_current_tombstones = current_tombstones
+            return acknowledgement
+
+    def commit_connector_sync(
+        self,
+        *,
+        request_id: str,
+        run_request_id: str,
+        committed_at: datetime,
+    ) -> SyncCommitAcknowledgement:
+        with self._lock:
+            existing = self._connector_commits.get(request_id)
+            if existing is not None:
+                if existing.run_request_id != run_request_id:
+                    raise ValueError("sync commit request identity conflicts with existing commit")
+                return existing
+            prior_request = self._connector_committed_runs.get(run_request_id)
+            if prior_request is not None:
+                raise ValueError("sync run was already committed by a different request")
+            run = self._connector_runs.get(run_request_id)
+            if run is None:
+                raise ValueError("sync run does not exist")
+            run_batches = [
+                acknowledgement
+                for (stored_run, _, _), (_, acknowledgement) in self._connector_batches.items()
+                if stored_run == run_request_id
+            ]
+            if not run_batches:
+                raise ValueError("sync run has no durable batches")
+            if any(not acknowledgement.complete for acknowledgement in run_batches):
+                raise ValueError("sync run has item failures and cannot commit its cursor")
+            if run.proposed_cursor is None:
+                raise ValueError("sync run requires proposed_cursor before commit")
+            acknowledgement = SyncCommitAcknowledgement(
+                request_id=request_id,
+                run_request_id=run_request_id,
+                source=run.source,
+                committed_cursor=run.proposed_cursor,
+                committed_at=committed_at,
+            )
+            self._connector_cursors[run.source.key] = run.proposed_cursor
+            self._connector_commits[request_id] = acknowledgement
+            self._connector_committed_runs[run_request_id] = request_id
+            return acknowledgement
+
+    def get_connector_sync_run(self, request_id: str) -> SyncRun | None:
+        with self._lock:
+            return self._connector_runs.get(request_id)
+
+    def get_connector_record(self, record: RecordRef) -> Record | None:
+        if record.external_version is None:
+            raise ValueError("connector record lookup requires external_version")
+        with self._lock:
+            return self._connector_records.get(record.version_key)
+
+    def get_current_connector_record(
+        self, *, source: SourceRef, external_id: str
+    ) -> Record | None:
+        object_key = (*source.key, external_id)
+        with self._lock:
+            version = self._connector_current_records.get(object_key)
+            if version is None:
+                return None
+            record = self._connector_records[(*object_key, version)]
+            tombstone = self._connector_current_tombstones.get(object_key)
+            if tombstone is not None and tombstone.observed_at >= record.observed_at:
+                return None
+            return record
+
+    def get_connector_record_predecessor(self, record: RecordRef) -> RecordRef | None:
+        if record.external_version is None:
+            raise ValueError("connector predecessor lookup requires external_version")
+        with self._lock:
+            return self._connector_record_predecessors.get(record.version_key)
+
+    def get_connector_relation(
+        self, *, source: SourceRef, relation_id: str, relation_version: str
+    ) -> Relation | None:
+        with self._lock:
+            return self._connector_relations.get(
+                (*source.key, relation_id, relation_version)
+            )
+
+    def get_connector_cursor(self, source: SourceRef) -> str | None:
+        with self._lock:
+            return self._connector_cursors.get(source.key)
 
     @property
     def document_count(self) -> int:
