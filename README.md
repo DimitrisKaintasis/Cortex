@@ -410,13 +410,13 @@ scripts/             # diagnostic and benchmark utilities
   [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md). SQLite persists `user_version`
   and creates a recoverable sibling backup before upgrading a non-empty legacy database;
   PostgreSQL persists `schema_metadata`. The verified live PostgreSQL upgrade rehearsal passed on
-  an isolated restore; the canonical corpus was deliberately left unchanged. Connector lifecycle
-  persistence may now proceed through the same versioned framework.
+  an isolated restore; connector lifecycle schema v2 and runtime behavior also passed against an
+  isolated database. The canonical corpus was deliberately left unchanged.
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
-  contract models and DevUI/Slack fixtures are implemented; stable external-record persistence,
-  the connector SDK, reference connectors, and MCP adapter remain planned work. The current API is
-  still loopback-only.
+  contract models, DevUI/Slack fixtures, and replay-safe external-record lifecycle persistence now
+  have memory, SQLite, and PostgreSQL parity. The Python SDK, retrieval projection, reference
+  connectors, and MCP adapter remain planned work. The current API is still loopback-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.

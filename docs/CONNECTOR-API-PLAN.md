@@ -1,7 +1,7 @@
 # Cortex connector and agent API plan
 
-- Status: C1 contract fixtures and ADR-0019 migration gate passed; C2 is next
-- Date: 2026-09-18
+- Status: C2 external record lifecycle passed; C3 Python SDK is next
+- Date: 2026-09-19
 - Governing decision: [ADR-0020](decisions/0020-external-connector-and-agent-boundary.md)
 - Current transport: [loopback-only local API](LOCAL-API.md)
 
@@ -309,17 +309,25 @@ cross-scope metrics or ordinary operational logs.
 |---|---|---|---|
 | C0. Freeze boundary | passed | ADR-0020 and this plan | Architecture, vocabulary, non-goals, and order are reviewed and committed |
 | C1. Contract fixtures | passed | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
-| C2. External record lifecycle | not started | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
+| C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | not started | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | not started | Stdio/loopback read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
 | C5. DevUI reference connector | not started | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
 
-C1 passed under the current local deployment. C2's schema prerequisite also passed: the ADR-0019
-migration mechanism is implemented and upgrade recovery was rehearsed against an isolated restore
-of the legacy PostgreSQL corpus. C7 must not be un-deferred merely to demonstrate Slack; a
-temporary tunnel is a demo shortcut, not the supported security architecture.
+C1 passed under the current local deployment. C2 passed on 2026-09-19. The same lifecycle behavior
+suite now runs against memory, SQLite, and PostgreSQL and covers exact replay, changed versions and
+predecessor lineage, relations, tombstones, partial failures, scope checks, and cursor commits.
+SQLite reopen and migration behavior and live PostgreSQL schema/runtime behavior are automated.
+The branch-wide acceptance run passed 246 tests and 5 subtests with PostgreSQL enabled against an
+isolated database; the canonical corpus was not opened or upgraded.
+
+C2 stores canonical external-record lifecycle state. Projection of those records into Cortex's
+retrieval atoms and transport-level access are not silently included in this milestone: they are
+proved through the SDK and reference-connector round trips in C3, C5, and C6. C7 must not be
+un-deferred merely to demonstrate Slack; a temporary tunnel is a demo shortcut, not the supported
+security architecture.
 
 ## Reference connector sequence
 
