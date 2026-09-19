@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 
-from cortex import CortexApiError, CortexClient
+from cortex import (
+    CortexApiError,
+    CortexClient,
+    validate_connector_fixture,
+    validate_source_sync,
+)
 from data_retrieval.connectors import sync_batch_from_mapping
 from data_retrieval.connectors.codec import (
     source_from_mapping,
@@ -118,6 +124,34 @@ class CortexClientTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 429)
         self.assertTrue(raised.exception.retryable)
         self.assertEqual(raised.exception.retry_after, "5")
+
+
+class ConnectorContractTestKitTests(unittest.TestCase):
+    def setUp(self) -> None:
+        fixture_root = Path(__file__).parents[1] / "evals"
+        self.fixtures = tuple(
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (
+                fixture_root / "connector_contract_devui_v1.json",
+                fixture_root / "connector_contract_slack_v1.json",
+            )
+        )
+
+    def test_reference_fixtures_validate_without_cortex_internals(self) -> None:
+        reports = tuple(validate_connector_fixture(fixture) for fixture in self.fixtures)
+
+        self.assertEqual([report.batch_count for report in reports], [1, 1])
+        self.assertGreater(sum(report.record_count for report in reports), 0)
+        self.assertGreater(sum(report.relation_count for report in reports), 0)
+        self.assertGreater(sum(report.tombstone_count for report in reports), 0)
+
+    def test_non_contiguous_batch_sequences_are_rejected(self) -> None:
+        fixture = self.fixtures[0]
+        source = source_from_mapping(fixture["registration"])
+        batch = sync_batch_from_mapping(fixture["sync_batch"])
+
+        with self.assertRaisesRegex(ValueError, "contiguous from zero"):
+            validate_source_sync(source, (replace(batch, sequence=1),))
 
 
 if __name__ == "__main__":
