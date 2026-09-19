@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from data_retrieval.connectors.codec import (
     source_from_mapping,
@@ -20,7 +20,14 @@ from data_retrieval.connectors.codec import (
     sync_commit_acknowledgement_to_mapping,
     sync_run_to_mapping,
 )
-from data_retrieval.connectors.contracts import SourceRef
+from data_retrieval.connectors.contracts import (
+    Source,
+    SourceRef,
+    SyncBatch,
+    SyncBatchAcknowledgement,
+    SyncCommitAcknowledgement,
+    SyncRun,
+)
 from data_retrieval.domain.models import TagCandidate, TagCandidateState
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import OllamaEmbedder
@@ -35,6 +42,34 @@ from data_retrieval.tagging.ollama import OllamaTagProposer
 
 API_VERSION = "v1"
 MAX_INGEST_CHARS = 2_000_000
+
+
+def _contract_operation(
+    *,
+    request: type[object] | None = None,
+    response: type[object] | None = None,
+    response_status: int = 200,
+) -> dict[str, object]:
+    operation: dict[str, object] = {}
+    if request is not None:
+        operation["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {"schema": TypeAdapter(request).json_schema()}
+            },
+        }
+    if response is not None:
+        operation["responses"] = {
+            str(response_status): {
+                "description": "Successful response",
+                "content": {
+                    "application/json": {
+                        "schema": TypeAdapter(response).json_schema()
+                    }
+                },
+            }
+        }
+    return operation
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,14 +194,23 @@ def create_app(config: LocalApiConfig | None = None) -> FastAPI:
             namespaces = repository.list_namespaces(prefix=prefix)
         return {"count": len(namespaces), "namespaces": namespaces}
 
-    @app.post("/v1/sources", status_code=201)
+    @app.post(
+        "/v1/sources",
+        status_code=201,
+        openapi_extra=_contract_operation(
+            request=Source, response=Source, response_status=201
+        ),
+    )
     def register_source(request: dict[str, Any]) -> dict[str, object]:
         source = source_from_mapping(request)
         with settings.open_repository() as repository:
             registered = ConnectorSyncService(repository).register_source(source)
         return source_to_mapping(registered)
 
-    @app.get("/v1/sources/{source_system}/{source_instance:path}")
+    @app.get(
+        "/v1/sources/{source_system}/{source_instance:path}",
+        openapi_extra=_contract_operation(response=Source),
+    )
     def get_source(source_system: str, source_instance: str) -> dict[str, object]:
         with settings.open_repository() as repository:
             source = ConnectorSyncService(repository).get_source(
@@ -176,7 +220,12 @@ def create_app(config: LocalApiConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="connector source was not found")
         return source_to_mapping(source)
 
-    @app.post("/v1/sync-runs/{run_request_id}/batches")
+    @app.post(
+        "/v1/sync-runs/{run_request_id}/batches",
+        openapi_extra=_contract_operation(
+            request=SyncBatch, response=SyncBatchAcknowledgement
+        ),
+    )
     def submit_sync_batch(
         run_request_id: str, request: dict[str, Any]
     ) -> dict[str, object]:
@@ -187,7 +236,10 @@ def create_app(config: LocalApiConfig | None = None) -> FastAPI:
             acknowledgement = ConnectorSyncService(repository).submit_batch(batch)
         return sync_batch_acknowledgement_to_mapping(acknowledgement)
 
-    @app.post("/v1/sync-runs/{run_request_id}:commit")
+    @app.post(
+        "/v1/sync-runs/{run_request_id}:commit",
+        openapi_extra=_contract_operation(response=SyncCommitAcknowledgement),
+    )
     def commit_sync(
         run_request_id: str, request: SyncCommitCreate
     ) -> dict[str, object]:
@@ -198,7 +250,10 @@ def create_app(config: LocalApiConfig | None = None) -> FastAPI:
             )
         return sync_commit_acknowledgement_to_mapping(acknowledgement)
 
-    @app.get("/v1/sync-runs/{run_request_id}")
+    @app.get(
+        "/v1/sync-runs/{run_request_id}",
+        openapi_extra=_contract_operation(response=SyncRun),
+    )
     def get_sync_run(run_request_id: str) -> dict[str, object]:
         with settings.open_repository() as repository:
             run = ConnectorSyncService(repository).get_run(run_request_id)

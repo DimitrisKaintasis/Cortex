@@ -31,6 +31,28 @@ class StubTagProposer:
 
 
 class LocalApiTests(unittest.TestCase):
+    def test_connector_openapi_exposes_contract_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(LocalApiConfig(database_path=Path(directory) / "data.sqlite3"))
+            with TestClient(app) as client:
+                document = client.get("/openapi.json").json()
+
+        source_operation = document["paths"]["/v1/sources"]["post"]
+        source_schema = source_operation["requestBody"]["content"]["application/json"][
+            "schema"
+        ]
+        batch_operation = document["paths"]["/v1/sync-runs/{run_request_id}/batches"][
+            "post"
+        ]
+        batch_schema = batch_operation["requestBody"]["content"]["application/json"][
+            "schema"
+        ]
+
+        self.assertIn("source", source_schema["properties"])
+        self.assertIn("owner_scope", source_schema["properties"])
+        self.assertIn("batch_id", batch_schema["properties"])
+        self.assertIn("records", batch_schema["properties"])
+
     def test_connector_source_batch_replay_and_commit_flow(self) -> None:
         fixture_path = (
             Path(__file__).parents[1] / "evals" / "connector_contract_devui_v1.json"
