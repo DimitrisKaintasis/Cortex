@@ -1,6 +1,6 @@
 # Cortex connector and agent API plan
 
-- Status: C2 external record lifecycle passed; C3 Python SDK is next
+- Status: C2 passed; C3 source-sync REST, Python SDK, and contract kit implemented; retrieval and outcomes pending
 - Date: 2026-09-19
 - Governing decision: [ADR-0020](decisions/0020-external-connector-and-agent-boundary.md)
 - Current transport: [loopback-only local API](LOCAL-API.md)
@@ -172,10 +172,7 @@ GET    /v1/sources/{source_id}
 GET    /v1/sources/{source_id}/status
 
 SYNCHRONIZATION
-POST   /v1/sync-runs
-POST   /v1/sync-runs/{sync_id}/records:batch-upsert
-POST   /v1/sync-runs/{sync_id}/relations:batch-upsert
-POST   /v1/sync-runs/{sync_id}/records:tombstone
+POST   /v1/sync-runs/{sync_id}/batches
 POST   /v1/sync-runs/{sync_id}:commit
 GET    /v1/sync-runs/{sync_id}
 
@@ -310,7 +307,7 @@ cross-scope metrics or ordinary operational logs.
 | C0. Freeze boundary | passed | ADR-0020 and this plan | Architecture, vocabulary, non-goals, and order are reviewed and committed |
 | C1. Contract fixtures | passed | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
 | C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
-| C3. Python SDK | not started | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
+| C3. Python SDK | in progress | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | not started | Stdio/loopback read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
 | C5. DevUI reference connector | not started | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
@@ -329,6 +326,15 @@ retrieval atoms and transport-level access are not silently included in this mil
 proved through the SDK and reference-connector round trips in C3, C5, and C6. C7 must not be
 un-deferred merely to demonstrate Slack; a temporary tunnel is a demo shortcut, not the supported
 security architecture.
+
+C3 currently exposes source registration, consolidated sync batches, run inspection, and explicit
+cursor commit through the loopback REST API and the typed `cortex` Python package. The SDK has
+structured errors, timeout configuration, explicit close/context-manager behavior, no automatic
+retry, and a session helper that never commits on context exit. Its standalone contract-test kit
+validates source/batch mappings and full query/context/outcome fixture linkage without importing a
+repository. The remaining C3 query and outcome methods are gated on the explicit generic
+record-to-retrieval projection and scope-routing decision; they must not smuggle namespace or atom
+identities into the connector contract.
 
 ## Reference connector sequence
 
@@ -413,6 +419,9 @@ The following are intentionally left for their implementation gates rather than 
 5. The compatibility/versioning policy for REST schemas and the Python SDK.
 6. Hosted identity provider and OAuth profile.
 7. Webhook signing, retry schedule, retention, and dead-letter ownership.
+8. How durable external record versions project into retrievable atoms, how superseded or
+   tombstoned versions leave normal serving, and how scope selects an internal routing partition
+   without becoming authorization.
 
 Each decision must preserve ADR-0020 and receive repository, migration, authorization, and
 contract tests proportional to its risk.

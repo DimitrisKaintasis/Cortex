@@ -415,8 +415,10 @@ scripts/             # diagnostic and benchmark utilities
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
   contract models, DevUI/Slack fixtures, and replay-safe external-record lifecycle persistence now
-  have memory, SQLite, and PostgreSQL parity. The Python SDK, retrieval projection, reference
-  connectors, and MCP adapter remain planned work. The current API is still loopback-only.
+  have memory, SQLite, and PostgreSQL parity. Source sync is available through the loopback REST
+  API, typed Python SDK, and standalone connector contract-test kit. Retrieval projection, SDK
+  query/outcome methods, reference connectors, and the MCP adapter remain planned work. See the
+  [connector SDK quickstart](docs/CONNECTOR-SDK.md). The current API is still loopback-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.

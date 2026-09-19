@@ -18,6 +18,11 @@ without duplicating domain logic. It exposes:
 | `POST /v1/feedback` | Attributable positive or negative learning for returned atoms |
 | `GET /v1/tag-candidates` | Quarantined candidate review with source evidence |
 | `POST /v1/tag-candidates/{id}/resolution` | Promote, merge, or reject a candidate |
+| `POST /v1/sources` | Register or exactly replay one connector source |
+| `GET /v1/sources/{system}/{instance}` | Inspect one registered connector source |
+| `POST /v1/sync-runs/{run_id}/batches` | Durably submit one replay-safe records/relations/tombstones batch |
+| `GET /v1/sync-runs/{run_id}` | Inspect the accepted sync-run contract |
+| `POST /v1/sync-runs/{run_id}:commit` | Advance the opaque connector cursor after durable batches |
 
 This is not a public API. It has no accounts, authentication, authorization, rate limiting, or
 cross-origin browser access. The CLI fixes the listener to laptop loopback, `127.0.0.1`, and does
@@ -49,6 +54,13 @@ python -m data_retrieval serve-api --port 8765
 
 Open `http://127.0.0.1:8765/docs` for the generated interactive OpenAPI interface. The server
 runs in the foreground and stops with `Ctrl+C`; it does not yet survive laptop shutdown or login.
+The connector routes publish the transport-independent Source and SyncBatch shapes in that
+OpenAPI document. They remain local-user-trust endpoints, not remotely authorized routes.
+
+Install `.[sdk]` in the connector process to use the typed `cortex.CortexClient`. See the
+[connector SDK quickstart](CONNECTOR-SDK.md). The SDK never retries or commits a sync implicitly;
+the connector owns repair policy and advances its upstream cursor only after a commit
+acknowledgement.
 
 ## Optional laptop-local inference
 
