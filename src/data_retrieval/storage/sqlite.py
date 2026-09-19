@@ -1820,7 +1820,13 @@ class SQLiteRepository:
                 )
                 for row in receipts
             )
-            if any(not acknowledgement.complete for acknowledgement in acknowledgements):
+            unresolved_failures = tuple(
+                failure
+                for acknowledgement in acknowledgements
+                for failure in acknowledgement.failures
+                if not self._connector_failure_is_resolved(run_request_id, failure)
+            )
+            if unresolved_failures:
                 raise ValueError("sync run has item failures and cannot commit its cursor")
             run = sync_run_from_mapping(self._object(str(run_row["payload_json"])))
             if run.proposed_cursor is None:
@@ -1852,6 +1858,25 @@ class SQLiteRepository:
                 ),
             )
             return acknowledgement
+
+    def _connector_failure_is_resolved(
+        self, run_request_id: str, failure: SyncItemFailure
+    ) -> bool:
+        if not failure.retryable or failure.item_type is not SyncItemType.RELATION:
+            return False
+        row = self._connection.execute(
+            """
+            SELECT 1
+            FROM connector_relations AS relations
+            JOIN connector_sync_runs AS runs
+              ON runs.source_system = relations.source_system
+             AND runs.source_instance = relations.source_instance
+            WHERE runs.request_id = ? AND relations.relation_id = ?
+              AND relations.relation_version = ?
+            """,
+            (run_request_id, failure.item_id, failure.item_version),
+        ).fetchone()
+        return row is not None
 
     def get_connector_sync_run(self, request_id: str) -> SyncRun | None:
         with self._lock:

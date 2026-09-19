@@ -189,6 +189,26 @@ class _ConnectorLifecycleBehavior:
                 run_request_id=batch.run.request_id,
             )
 
+        source_record = next(
+            record for record in original.records if record.ref == relation.source
+        )
+        target_record = replace(source_record, ref=missing_target)
+        repair = SyncBatch(
+            batch_id=self._request_id("missing-relation:repair:1"),
+            sequence=1,
+            run=batch.run,
+            records=(source_record, target_record),
+            relations=(relation,),
+        )
+        repaired = self.service.submit_batch(repair)
+        committed = self.service.commit(
+            request_id=self._request_id("missing-relation:commit"),
+            run_request_id=batch.run.request_id,
+        )
+
+        self.assertTrue(repaired.complete)
+        self.assertEqual(committed.committed_cursor, "missing-relation:cursor")
+
     def test_incremental_run_requires_the_committed_previous_cursor(self) -> None:
         source = source_from_mapping(self.slack["registration"])
         batch = sync_batch_from_mapping(self.slack["sync_batch"])
@@ -196,6 +216,33 @@ class _ConnectorLifecycleBehavior:
 
         with self.assertRaisesRegex(ValueError, "previous_cursor"):
             self.service.submit_batch(batch)
+
+    def test_non_retryable_version_conflict_keeps_cursor_blocked(self) -> None:
+        source = source_from_mapping(self.devui["registration"])
+        batch = sync_batch_from_mapping(self.devui["sync_batch"])
+        self.service.register_source(source)
+        self.service.submit_batch(batch)
+        changed_record = replace(
+            batch.records[0],
+            payload=RecordPayload(inline="conflicting content for a durable version"),
+        )
+        conflicting = replace(
+            batch,
+            batch_id=self._request_id("version-conflict:batch:1"),
+            sequence=1,
+            records=(changed_record,),
+            relations=(),
+        )
+
+        acknowledgement = self.service.submit_batch(conflicting)
+
+        self.assertFalse(acknowledgement.complete)
+        self.assertFalse(acknowledgement.failures[0].retryable)
+        with self.assertRaisesRegex(ValueError, "item failures"):
+            self.service.commit(
+                request_id=self._request_id("version-conflict:commit"),
+                run_request_id=batch.run.request_id,
+            )
 
     def test_item_scope_cannot_escape_registered_owner(self) -> None:
         source = source_from_mapping(self.devui["registration"])

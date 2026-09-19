@@ -956,7 +956,13 @@ class InMemoryRepository:
             ]
             if not run_batches:
                 raise ValueError("sync run has no durable batches")
-            if any(not acknowledgement.complete for acknowledgement in run_batches):
+            unresolved_failures = tuple(
+                failure
+                for acknowledgement in run_batches
+                for failure in acknowledgement.failures
+                if not self._connector_failure_is_resolved(run.source, failure)
+            )
+            if unresolved_failures:
                 raise ValueError("sync run has item failures and cannot commit its cursor")
             if run.proposed_cursor is None:
                 raise ValueError("sync run requires proposed_cursor before commit")
@@ -971,6 +977,16 @@ class InMemoryRepository:
             self._connector_commits[request_id] = acknowledgement
             self._connector_committed_runs[run_request_id] = request_id
             return acknowledgement
+
+    def _connector_failure_is_resolved(
+        self, source: SourceRef, failure: SyncItemFailure
+    ) -> bool:
+        return (
+            failure.retryable
+            and failure.item_type is SyncItemType.RELATION
+            and (*source.key, failure.item_id, failure.item_version)
+            in self._connector_relations
+        )
 
     def get_connector_sync_run(self, request_id: str) -> SyncRun | None:
         with self._lock:
