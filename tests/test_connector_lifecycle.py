@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
+from uuid import uuid4
 
 from data_retrieval.connectors import (
     RecordPayload,
@@ -17,6 +20,7 @@ from data_retrieval.connectors import (
 from data_retrieval.connectors.codec import source_from_mapping
 from data_retrieval.services.connector_sync import ConnectorSyncService
 from data_retrieval.storage.memory import InMemoryRepository
+from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.repository import ConnectorLifecycleRepository
 from data_retrieval.storage.sqlite import SQLiteRepository
 
@@ -34,8 +38,15 @@ class _Clock:
 class _ConnectorLifecycleBehavior:
     def setUp(self) -> None:
         fixture_root = Path(__file__).parents[1] / "evals"
-        self.devui = self._load(fixture_root / "connector_contract_devui_v1.json")
-        self.slack = self._load(fixture_root / "connector_contract_slack_v1.json")
+        self._identity_suffix = uuid4().hex
+        self.devui = cast(
+            dict[str, object],
+            self._isolate(self._load(fixture_root / "connector_contract_devui_v1.json")),
+        )
+        self.slack = cast(
+            dict[str, object],
+            self._isolate(self._load(fixture_root / "connector_contract_slack_v1.json")),
+        )
         self.repository = self.make_repository()
         self.service = ConnectorSyncService(self.repository, clock=_Clock())
 
@@ -47,6 +58,24 @@ class _ConnectorLifecycleBehavior:
         value = json.loads(path.read_text(encoding="utf-8"))
         assert isinstance(value, dict)
         return value
+
+    def _isolate(self, value: object) -> object:
+        if isinstance(value, dict):
+            return {
+                key: (
+                    f"{item}:{self._identity_suffix}"
+                    if key in {"source_instance", "request_id", "batch_id"}
+                    and isinstance(item, str)
+                    else self._isolate(item)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._isolate(item) for item in value]
+        return value
+
+    def _request_id(self, value: str) -> str:
+        return f"{value}:{self._identity_suffix}"
 
     def test_batch_mapping_is_canonical_and_round_trips(self) -> None:
         batch = sync_batch_from_mapping(self.slack["sync_batch"])
@@ -92,11 +121,11 @@ class _ConnectorLifecycleBehavior:
         )
 
         committed = self.service.commit(
-            request_id="slack-sync:event-page-18:commit",
+            request_id=self._request_id("slack-sync:event-page-18:commit"),
             run_request_id=batch.run.request_id,
         )
         committed_replay = self.service.commit(
-            request_id="slack-sync:event-page-18:commit",
+            request_id=self._request_id("slack-sync:event-page-18:commit"),
             run_request_id=batch.run.request_id,
         )
         self.assertEqual(committed, committed_replay)
@@ -119,12 +148,12 @@ class _ConnectorLifecycleBehavior:
             self.service.submit_batch(conflicting)
 
         self.service.commit(
-            request_id="devui-sync:scan-42:commit",
+            request_id=self._request_id("devui-sync:scan-42:commit"),
             run_request_id=batch.run.request_id,
         )
         with self.assertRaisesRegex(ValueError, "already committed"):
             self.service.commit(
-                request_id="devui-sync:scan-42:second-commit",
+                request_id=self._request_id("devui-sync:scan-42:second-commit"),
                 run_request_id=batch.run.request_id,
             )
 
@@ -139,11 +168,11 @@ class _ConnectorLifecycleBehavior:
         )
         relation = replace(original.relations[0], target=missing_target)
         batch = SyncBatch(
-            batch_id="missing-relation:batch:0",
+            batch_id=self._request_id("missing-relation:batch:0"),
             sequence=0,
             run=replace(
                 original.run,
-                request_id="missing-relation:run",
+                request_id=self._request_id("missing-relation:run"),
                 proposed_cursor="missing-relation:cursor",
             ),
             relations=(relation,),
@@ -156,7 +185,7 @@ class _ConnectorLifecycleBehavior:
         self.assertTrue(acknowledgement.failures[0].retryable)
         with self.assertRaisesRegex(ValueError, "item failures"):
             self.service.commit(
-                request_id="missing-relation:commit",
+                request_id=self._request_id("missing-relation:commit"),
                 run_request_id=batch.run.request_id,
             )
 
@@ -235,10 +264,23 @@ class SQLiteConnectorLifecycleTests(_ConnectorLifecycleBehavior, unittest.TestCa
             batch.records[0],
         )
         committed = self.service.commit(
-            request_id="devui-sync:scan-42:commit",
+            request_id=self._request_id("devui-sync:scan-42:commit"),
             run_request_id=batch.run.request_id,
         )
         self.assertEqual(committed.committed_cursor, "scan:42")
+
+
+@unittest.skipUnless(
+    os.getenv("DATA_RETRIEVAL_TEST_POSTGRES_DSN"),
+    "DATA_RETRIEVAL_TEST_POSTGRES_DSN is not configured",
+)
+class PostgreSQLConnectorLifecycleTests(_ConnectorLifecycleBehavior, unittest.TestCase):
+    def make_repository(self) -> ConnectorLifecycleRepository:
+        return PostgreSQLRepository(os.environ["DATA_RETRIEVAL_TEST_POSTGRES_DSN"])
+
+    def tearDown(self) -> None:
+        assert isinstance(self.repository, PostgreSQLRepository)
+        self.repository.close()
 
 
 if __name__ == "__main__":
