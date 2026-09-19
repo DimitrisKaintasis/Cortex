@@ -124,6 +124,187 @@ def _metadata(data: Mapping[str, Any]) -> dict[str, Any]:
     return dict(_mapping(value, "metadata"))
 
 
+def _plain_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _plain_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_plain_json(item) for item in value]
+    return value
+
+
+def _source_ref_mapping(source: SourceRef) -> dict[str, object]:
+    return {
+        "source_system": source.source_system,
+        "source_instance": source.source_instance,
+    }
+
+
+def _scope_mapping(scope: Scope) -> dict[str, object]:
+    return {
+        "organization_id": scope.organization_id,
+        "project_id": scope.project_id,
+        "user_id": scope.user_id,
+        "device_id": scope.device_id,
+        "visibility": scope.visibility.value,
+        "contribution_policy": scope.contribution_policy.value,
+    }
+
+
+def source_to_mapping(source: Source) -> dict[str, object]:
+    return {
+        "source": _source_ref_mapping(source.source),
+        "connector_id": source.connector_id,
+        "connector_version": source.connector_version,
+        "owner_scope": _scope_mapping(source.owner_scope),
+        "capabilities": [capability.value for capability in source.capabilities],
+        "metadata": _plain_json(source.metadata),
+    }
+
+
+def sync_run_to_mapping(run: SyncRun) -> dict[str, object]:
+    return {
+        "request_id": run.request_id,
+        "source": _source_ref_mapping(run.source),
+        "mode": run.mode.value,
+        "started_at": run.started_at.isoformat(),
+        "previous_cursor": run.previous_cursor,
+        "proposed_cursor": run.proposed_cursor,
+    }
+
+
+def record_to_mapping(record: Record, *, include_source: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "inline": record.payload.inline,
+        "reference_uri": record.payload.reference_uri,
+        "content_hash": record.payload.content_hash,
+        "media_type": record.payload.media_type,
+    }
+    result: dict[str, object] = {
+        "external_id": record.ref.external_id,
+        "external_version": record.ref.external_version,
+        "modality": record.modality.value,
+        "payload": payload,
+        "scope": _scope_mapping(record.scope),
+        "observed_at": record.observed_at.isoformat(),
+        "occurred_at": record.occurred_at.isoformat() if record.occurred_at else None,
+        "explicit_tags": list(record.explicit_tags),
+        "metadata": _plain_json(record.metadata),
+    }
+    if include_source:
+        result["source"] = _source_ref_mapping(record.ref.source)
+    return result
+
+
+def _record_ref_mapping(record: RecordRef, *, include_source: bool) -> dict[str, object]:
+    result: dict[str, object] = {
+        "external_id": record.external_id,
+        "external_version": record.external_version,
+    }
+    if include_source:
+        result["source"] = _source_ref_mapping(record.source)
+    return result
+
+
+def relation_to_mapping(relation: Relation) -> dict[str, object]:
+    return {
+        "relation_id": relation.relation_id,
+        "relation_version": relation.relation_version,
+        "relation_type": relation.relation_type,
+        "source": _record_ref_mapping(relation.source, include_source=False),
+        "target": _record_ref_mapping(
+            relation.target,
+            include_source=relation.target.source != relation.source.source,
+        ),
+        "scope": _scope_mapping(relation.scope),
+        "observed_at": relation.observed_at.isoformat(),
+        "occurred_at": relation.occurred_at.isoformat() if relation.occurred_at else None,
+        "confidence": relation.confidence,
+        "metadata": _plain_json(relation.metadata),
+    }
+
+
+def tombstone_to_mapping(tombstone: Tombstone) -> dict[str, object]:
+    return {
+        "external_id": tombstone.record.external_id,
+        "tombstone_version": tombstone.tombstone_version,
+        "observed_at": tombstone.observed_at.isoformat(),
+        "reason": tombstone.reason,
+    }
+
+
+def sync_batch_to_mapping(batch: SyncBatch) -> dict[str, object]:
+    return {
+        "batch_id": batch.batch_id,
+        "sequence": batch.sequence,
+        "run": sync_run_to_mapping(batch.run),
+        "records": [record_to_mapping(record) for record in batch.records],
+        "relations": [relation_to_mapping(relation) for relation in batch.relations],
+        "tombstones": [tombstone_to_mapping(item) for item in batch.tombstones],
+    }
+
+
+def record_from_mapping(value: object, source: SourceRef) -> Record:
+    return _record(_mapping(value, "record"), source)
+
+
+def relation_from_mapping(value: object, source: SourceRef) -> Relation:
+    return _relation(_mapping(value, "relation"), source)
+
+
+def tombstone_from_mapping(value: object, source: SourceRef) -> Tombstone:
+    return _tombstone(_mapping(value, "tombstone"), source)
+
+
+def sync_run_from_mapping(value: object) -> SyncRun:
+    data = _mapping(value, "sync run")
+    wrapped = {
+        "batch_id": "decoder",
+        "sequence": 0,
+        "run": data,
+        "records": [],
+        "relations": [],
+        "tombstones": [],
+    }
+    return sync_batch_from_mapping(wrapped).run
+
+
+def sync_batch_acknowledgement_to_mapping(
+    acknowledgement: SyncBatchAcknowledgement,
+) -> dict[str, object]:
+    return {
+        "run_request_id": acknowledgement.run_request_id,
+        "batch_id": acknowledgement.batch_id,
+        "sequence": acknowledgement.sequence,
+        "acknowledged_at": acknowledgement.acknowledged_at.isoformat(),
+        "accepted_records": acknowledgement.accepted_records,
+        "accepted_relations": acknowledgement.accepted_relations,
+        "accepted_tombstones": acknowledgement.accepted_tombstones,
+        "failures": [
+            {
+                "item_type": failure.item_type.value,
+                "item_id": failure.item_id,
+                "item_version": failure.item_version,
+                "code": failure.code,
+                "message": failure.message,
+                "retryable": failure.retryable,
+            }
+            for failure in acknowledgement.failures
+        ],
+    }
+
+
+def sync_commit_acknowledgement_to_mapping(
+    acknowledgement: SyncCommitAcknowledgement,
+) -> dict[str, object]:
+    return {
+        "request_id": acknowledgement.request_id,
+        "run_request_id": acknowledgement.run_request_id,
+        "source": _source_ref_mapping(acknowledgement.source),
+        "committed_cursor": acknowledgement.committed_cursor,
+        "committed_at": acknowledgement.committed_at.isoformat(),
+    }
+
+
 def _strings(value: object, name: str) -> tuple[str, ...]:
     values = _sequence(value, name)
     if any(not isinstance(item, str) for item in values):
@@ -396,6 +577,23 @@ def query_from_mapping(value: object) -> Query:
     )
 
 
+def query_to_mapping(query: Query) -> dict[str, object]:
+    return {
+        "request_id": query.request_id,
+        "query": query.query,
+        "scope": _scope_mapping(query.scope),
+        "top_k": query.top_k,
+        "budget_tokens": query.budget_tokens,
+        "timeline_id": query.timeline_id,
+        "temporal_mode": query.temporal_mode.value,
+        "as_of": query.as_of.isoformat() if query.as_of else None,
+        "range_start": query.range_start.isoformat() if query.range_start else None,
+        "range_end": query.range_end.isoformat() if query.range_end else None,
+        "reference_time": (
+            query.reference_time.isoformat() if query.reference_time else None
+        ),
+        "metadata": _plain_json(query.metadata),
+    }
 def context_pack_from_mapping(value: object) -> ContextPack:
     data = _mapping(value, "context pack")
     _reject_unknown(
@@ -426,6 +624,29 @@ def context_pack_from_mapping(value: object) -> ContextPack:
     )
 
 
+def context_pack_to_mapping(context: ContextPack) -> dict[str, object]:
+    return {
+        "retrieval_id": context.retrieval_id,
+        "query_request_id": context.query_request_id,
+        "items": [
+            {
+                "evidence_id": item.evidence_id,
+                "record": _record_ref_mapping(item.record, include_source=True),
+                "modality": item.modality.value,
+                "content": item.content,
+                "scope": _scope_mapping(item.scope),
+                "score": item.score,
+                "score_evidence": list(item.score_evidence),
+                "lineage_evidence_ids": list(item.lineage_evidence_ids),
+                "metadata": _plain_json(item.metadata),
+            }
+            for item in context.items
+        ],
+        "low_confidence": context.low_confidence,
+        "budget_tokens": context.budget_tokens,
+        "used_tokens": context.used_tokens,
+        "abstention_reason": context.abstention_reason,
+    }
 def _evidence_result(data: Mapping[str, Any]) -> EvidenceResult:
     _reject_unknown(
         data,
@@ -480,6 +701,17 @@ def outcome_from_mapping(value: object) -> Outcome:
         occurred_at=_required_datetime(data, "occurred_at"),
         reason=_optional_string(data, "reason") or "",
     )
+
+
+def outcome_to_mapping(outcome: Outcome) -> dict[str, object]:
+    return {
+        "request_id": outcome.request_id,
+        "retrieval_id": outcome.retrieval_id,
+        "used_evidence_ids": list(outcome.used_evidence_ids),
+        "outcome": outcome.outcome.value,
+        "occurred_at": outcome.occurred_at.isoformat(),
+        "reason": outcome.reason,
+    }
 
 
 def sync_batch_acknowledgement_from_mapping(value: object) -> SyncBatchAcknowledgement:

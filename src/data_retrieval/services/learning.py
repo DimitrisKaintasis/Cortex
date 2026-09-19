@@ -209,6 +209,9 @@ class LearningService:
             "namespace": namespace,
             "outcome": request.outcome,
             "reason": request.reason,
+            "occurred_at": (
+                request.occurred_at.isoformat() if request.occurred_at else None
+            ),
             "selected_atom_ids": sorted(selected_ids),
             "credited_atom_ids": sorted(credit),
             "used_mem0": request.used_mem0,

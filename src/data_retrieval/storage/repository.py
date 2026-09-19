@@ -4,6 +4,21 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from data_retrieval.connectors.contracts import (
+    ContextPack,
+    Outcome,
+    Record,
+    RecordRef,
+    Relation,
+    Source,
+    SourceRef,
+    SyncBatch,
+    SyncBatchAcknowledgement,
+    SyncCommitAcknowledgement,
+    SyncRun,
+    Tombstone,
+)
+from data_retrieval.connectors.projection import ConnectorRecordProjection
 from data_retrieval.domain.models import (
     Atom,
     AtomKind,
@@ -178,6 +193,8 @@ class Repository(Protocol):
 
     def get_retrieval_event(self, retrieval_id: str) -> dict[str, object] | None: ...
 
+    def get_feedback_event(self, feedback_id: str) -> dict[str, object] | None: ...
+
     def get_calibration_signal_ids(self, signal_ids: tuple[str, ...]) -> frozenset[str]: ...
 
     def list_weight_events(
@@ -221,6 +238,106 @@ class Repository(Protocol):
     def persist_ingestion(self, bundle: IngestionBundle) -> None:
         """Persist a complete ingestion bundle atomically."""
         ...
+
+    def get_suppressed_connector_atom_ids(
+        self, atom_ids: tuple[str, ...]
+    ) -> frozenset[str]:
+        """Return connector-projected atoms excluded from normal serving."""
+        ...
+
+
+@runtime_checkable
+class ConnectorLifecycleRepository(Protocol):
+    """Persistence boundary for replay-safe external connector state."""
+
+    def register_connector_source(self, source: Source) -> Source: ...
+
+    def get_connector_source(self, source: SourceRef) -> Source | None: ...
+
+    def apply_connector_sync_batch(
+        self,
+        *,
+        batch: SyncBatch,
+        fingerprint: str,
+        acknowledged_at: datetime,
+    ) -> SyncBatchAcknowledgement: ...
+
+    def commit_connector_sync(
+        self,
+        *,
+        request_id: str,
+        run_request_id: str,
+        committed_at: datetime,
+    ) -> SyncCommitAcknowledgement: ...
+
+    def get_connector_sync_run(self, request_id: str) -> SyncRun | None: ...
+
+    def get_connector_record(self, record: RecordRef) -> Record | None: ...
+
+    def get_current_connector_record(
+        self, *, source: SourceRef, external_id: str
+    ) -> Record | None: ...
+
+    def get_connector_record_predecessor(self, record: RecordRef) -> RecordRef | None: ...
+
+    def get_connector_relation(
+        self, *, source: SourceRef, relation_id: str, relation_version: str
+    ) -> Relation | None: ...
+
+    def get_connector_cursor(self, source: SourceRef) -> str | None: ...
+
+
+@runtime_checkable
+class ConnectorProjectionRepository(Protocol):
+    """Persistence boundary for Cortex-owned serving projections."""
+
+    def store_connector_record_projection(
+        self, projection: ConnectorRecordProjection
+    ) -> ConnectorRecordProjection: ...
+
+    def get_connector_record_projection(
+        self, record: RecordRef
+    ) -> ConnectorRecordProjection | None: ...
+
+    def apply_connector_tombstone_projection(
+        self, *, tombstone: Tombstone, applied_at: datetime
+    ) -> None: ...
+
+    def get_suppressed_connector_atom_ids(
+        self, atom_ids: tuple[str, ...]
+    ) -> frozenset[str]: ...
+
+    def connector_run_projection_complete(self, run_request_id: str) -> bool: ...
+
+    def get_connector_projection_by_atom(
+        self, atom_id: str
+    ) -> ConnectorRecordProjection | None: ...
+
+    def get_connector_atom_id(self, evidence_id: str) -> str | None: ...
+
+    def get_connector_query_receipt(
+        self, request_id: str
+    ) -> tuple[str, ContextPack] | None: ...
+
+    def get_connector_context(self, retrieval_id: str) -> ContextPack | None: ...
+
+    def store_connector_query_receipt(
+        self, *, fingerprint: str, context: ContextPack
+    ) -> ContextPack: ...
+
+    def get_connector_outcome_receipt(
+        self, request_id: str
+    ) -> tuple[str, Outcome] | None: ...
+
+    def store_connector_outcome_receipt(
+        self, *, fingerprint: str, outcome: Outcome
+    ) -> Outcome: ...
+
+
+class CortexRepository(
+    Repository, ConnectorLifecycleRepository, ConnectorProjectionRepository, Protocol
+):
+    """Combined local application boundary implemented by every storage adapter."""
 
 
 @runtime_checkable

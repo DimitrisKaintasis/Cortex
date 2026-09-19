@@ -287,6 +287,12 @@ python -m ruff check src tests scripts/smoke_minimal_install.py
 python -m pyright
 ```
 
+Development uses short-lived feature branches. Run the focused tests for the changed behavior
+before each commit; before pushing, run the complete test suite plus Ruff and Pyright. A change
+that depends on PostgreSQL or another optional live service must also pass its live integration
+tests before the branch is merged. CI repeats these gates independently--it does not replace the
+local pre-push check.
+
 GitHub Actions runs three independent checks on every push and pull request: a dependency-free
 SQLite smoke test, the lint, typed-core and Python test suite, and the PostgreSQL adapter tests
 against a real pgvector service container. This keeps the simple setup and scale adapter
@@ -403,13 +409,16 @@ scripts/             # diagnostic and benchmark utilities
 - Schema compatibility is handled by the adapter-owned versioned migration framework accepted in
   [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md). SQLite persists `user_version`
   and creates a recoverable sibling backup before upgrading a non-empty legacy database;
-  PostgreSQL persists `schema_metadata`. A verified live PostgreSQL upgrade rehearsal remains
-  required before adding the connector persistence schema.
+  PostgreSQL persists `schema_metadata`. The verified live PostgreSQL upgrade rehearsal passed on
+  an isolated restore; connector lifecycle schema v2 and runtime behavior also passed against an
+  isolated database. The canonical corpus was deliberately left unchanged.
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
-  contract models and DevUI/Slack fixtures are implemented; stable external-record persistence,
-  the connector SDK, reference connectors, and MCP adapter remain planned work. The current API is
-  still loopback-only.
+  contract models, DevUI/Slack fixtures, and replay-safe external-record lifecycle persistence now
+  have memory, SQLite, and PostgreSQL parity. Source sync is available through the loopback REST
+  API, typed Python SDK, and standalone connector contract-test kit. Retrieval projection, SDK
+  query/outcome methods, reference connectors, and the MCP adapter remain planned work. See the
+  [connector SDK quickstart](docs/CONNECTOR-SDK.md). The current API is still loopback-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.

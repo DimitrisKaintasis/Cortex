@@ -1,6 +1,6 @@
 # ADR-0019: Versioned, adapter-owned schema migrations
 
-- Status: Accepted for the next schema-changing release
+- Status: Accepted; live PostgreSQL recovery rehearsal passed
 - Date: 2026-09-17
 - Refines: ADR-0003 and ADR-0007
 
@@ -50,8 +50,19 @@ baseline and version update in one transaction, validates its schema, and reject
 
 Automated tests cover fresh SQLite creation, version-0 upgrade, current-version no-op startup,
 future-version rejection, invariant failure, and interrupted-migration rollback. PostgreSQL has
-the same migration identity and a conditional integration assertion, but its live backup/restore
-upgrade rehearsal remains an operational gate before the next connector schema change.
+the same migration identity and live integration assertions.
+
+The PostgreSQL operational gate passed on 2026-09-19. The verified legacy archive with SHA-256
+`cab1296a09f3089935878406f354e25aff5f732a03994cae8d76f3b5fd89cbaf` was restored into an
+isolated database, upgraded from version 0 to version 1 through normal repository startup, and
+opened a second time as a no-op with an unchanged migration timestamp. The migration preserved
+26,300 documents, 272,209 atoms, 14,435 embeddings, and 57,893 atom links. It quarantined 62,883
+unreviewed atom-tag edges as candidates, preserved 19 explicitly evidenced edges as canonical,
+and created 57,914 baseline weight events--one for every surviving atom-tag, atom-link, and
+tag-relation edge. Thirty-six pre/post lexical comparisons matched, and retrieval-field and
+embedding fingerprints were unchanged across the three largest namespaces. All 222 tests then
+passed with live PostgreSQL enabled. The disposable databases were removed; the canonical corpus
+was not opened or upgraded.
 
 ## Consequences
 

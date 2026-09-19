@@ -2,11 +2,16 @@
 
 from data_retrieval.connectors.codec import (
     context_pack_from_mapping,
+    context_pack_to_mapping,
     outcome_from_mapping,
+    outcome_to_mapping,
     query_from_mapping,
+    query_to_mapping,
     source_from_mapping,
+    source_to_mapping,
     sync_batch_acknowledgement_from_mapping,
     sync_batch_from_mapping,
+    sync_batch_to_mapping,
     sync_commit_acknowledgement_from_mapping,
 )
 from data_retrieval.connectors.contracts import (
@@ -16,6 +21,7 @@ from data_retrieval.connectors.contracts import (
     EvidenceResult,
     Outcome,
     OutcomeValue,
+    Query,
     Record,
     RecordModality,
     RecordPayload,
@@ -43,6 +49,7 @@ __all__ = [
     "EvidenceResult",
     "Outcome",
     "OutcomeValue",
+    "Query",
     "RecordModality",
     "RecordPayload",
     "RecordRef",
@@ -62,10 +69,15 @@ __all__ = [
     "Tombstone",
     "Visibility",
     "context_pack_from_mapping",
+    "context_pack_to_mapping",
     "outcome_from_mapping",
+    "outcome_to_mapping",
     "query_from_mapping",
+    "query_to_mapping",
     "source_from_mapping",
+    "source_to_mapping",
     "sync_batch_acknowledgement_from_mapping",
     "sync_batch_from_mapping",
+    "sync_batch_to_mapping",
     "sync_commit_acknowledgement_from_mapping",
 ]
