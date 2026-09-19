@@ -159,6 +159,17 @@ class WeightLedgerTests(unittest.TestCase):
 
             connection = sqlite3.connect(path)
             connection.execute("DELETE FROM weight_events")
+            connection.executescript(
+                """
+                DROP TABLE connector_sync_batches;
+                DROP TABLE connector_sync_runs;
+                DROP TABLE connector_relations;
+                DROP TABLE connector_tombstones;
+                DROP TABLE connector_records;
+                DROP TABLE connector_record_objects;
+                DROP TABLE connector_sources;
+                """
+            )
             connection.execute("PRAGMA user_version = 0")
             connection.commit()
             connection.close()
