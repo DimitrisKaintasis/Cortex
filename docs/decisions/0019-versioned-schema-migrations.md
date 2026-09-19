@@ -42,10 +42,16 @@ A migration mechanism must preserve that distinction without allowing the schema
 
 ## Implementation boundary
 
-This ADR defines the required contract before the next schema-changing release. The current
-adapters still contain inline compatibility operations; extracting and versioning those operations
-is intentionally separate implementation work. Until that extraction is complete, schema changes
-must not be described as production-safe automated migrations.
+The shared ordered migration registry and baseline migration are implemented. SQLite records the
+version with `PRAGMA user_version`, validates the resulting schema, rejects future versions, and
+creates an atomic sibling backup before upgrading a non-empty legacy database. PostgreSQL records
+the matching logical version and migration name in `data_retrieval.schema_metadata`, applies the
+baseline and version update in one transaction, validates its schema, and rejects future versions.
+
+Automated tests cover fresh SQLite creation, version-0 upgrade, current-version no-op startup,
+future-version rejection, invariant failure, and interrupted-migration rollback. PostgreSQL has
+the same migration identity and a conditional integration assertion, but its live backup/restore
+upgrade rehearsal remains an operational gate before the next connector schema change.
 
 ## Consequences
 

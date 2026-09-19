@@ -16,6 +16,7 @@ from data_retrieval.mem0 import (
 from data_retrieval.retrieval.models import AtomEmbedding
 from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.large_ingestion import LargeFileIngestService
+from data_retrieval.storage.migrations import CURRENT_SCHEMA_VERSION
 from data_retrieval.storage.postgresql import PostgreSQLRepository
 
 
@@ -48,6 +49,10 @@ class _PostgreSQLFakeMem0Processor:
     "DATA_RETRIEVAL_TEST_POSTGRES_DSN is not configured",
 )
 class PostgreSQLRepositoryIntegrationTests(unittest.TestCase):
+    def test_schema_version_is_recorded(self) -> None:
+        with PostgreSQLRepository(os.environ["DATA_RETRIEVAL_TEST_POSTGRES_DSN"]) as repository:
+            self.assertEqual(repository.schema_version, CURRENT_SCHEMA_VERSION)
+
     def test_mem0_bootstrap_lineage_and_resume(self) -> None:
         namespace = f"integration-mem0-{uuid4()}"
         with PostgreSQLRepository(os.environ["DATA_RETRIEVAL_TEST_POSTGRES_DSN"]) as repository:

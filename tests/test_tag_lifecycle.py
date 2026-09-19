@@ -189,6 +189,7 @@ class TagLifecycleTests(unittest.TestCase):
                     "2026-09-02T00:00:00+00:00",
                 ),
             )
+            connection.execute("PRAGMA user_version = 0")
             connection.commit()
             connection.close()
 

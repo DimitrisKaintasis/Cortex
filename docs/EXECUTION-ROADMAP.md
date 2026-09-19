@@ -2,7 +2,7 @@
 
 Status: active
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 Active research next step: development-only query-sensitive routing/fusion experiment (step C in
 [the learning/retrieval math audit](LEARNING-RETRIEVAL-MATH-AUDIT.md)). The local LoCoMo pilot
@@ -21,9 +21,10 @@ The authorized 1x/3x/10x similarity-prior strength follow-up is also complete: n
 one rank regression at 10x. End strength-only sweeps; next isolate route selectivity and the
 score transformation with controlled examples. The report includes manually reviewed traces.
 
-Current delivery step: D3a passed — rehearse the legacy corpus upgrade before current-runtime use
+Current delivery step: ADR-0019 migration gate in progress — rehearse the versioned PostgreSQL
+upgrade on a verified restored copy
 
-Connector delivery step: C1 in progress — review and commit validated contract fixtures
+Connector delivery step: C1 passed — complete the migration gate before C2 persistence
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -97,7 +98,7 @@ does not make the loopback API public or un-defer hosted storage. ADR-0020 and
 | Step | Status | Outcome |
 |---|---|---|
 | C0. Freeze connector boundary | passed | Public concepts, four capability profiles, transport ownership, security boundary, and ordered plan are reviewed and committed |
-| C1. Contract fixtures | in progress | DevUI-like structured and Slack-like mutable data validate against transport-independent request/response models |
+| C1. Contract fixtures | passed | DevUI-like structured and Slack-like mutable data validate against transport-independent request/response models |
 | C2. External record lifecycle | not started | Source identity, versions, relations, sync runs, cursors, and tombstones are replay-safe across repositories |
 | C3. Python SDK | not started | A connector performs sync, retrieval, and outcomes without Cortex-internal knowledge |
 | C4. Local MCP adapter | not started | IDE agents use read/outcome tools with REST-equivalent policy and results |
@@ -105,8 +106,10 @@ does not make the loopback API public or un-defer hosted storage. ADR-0020 and
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, and access metadata use the same core contract |
 | C7. Hosted remote REST/MCP | deferred | Authenticated remote agents connect only after D3b and the full authorization/operations gate |
 
-C1 is the next implementation step and does not require persistent schema changes. C2 depends on
-ADR-0019's versioned migration mechanism and a rehearsed upgrade path. C7 remains deferred until
+C1 is committed and passed. C2 depends on ADR-0019's versioned migration mechanism and a rehearsed
+PostgreSQL upgrade path. The shared migration registry, SQLite `PRAGMA user_version`, PostgreSQL
+`schema_metadata`, future-version rejection, schema invariants, and transactional SQLite recovery
+tests are implemented. The live PostgreSQL upgrade rehearsal remains before C2. C7 remains deferred until
 identity, scope authorization, TLS, rate limiting, audit, retention/deletion, backup/recovery, and
 incident behavior are accepted and tested.
 
@@ -376,3 +379,4 @@ Append one short entry after every work session.
 | 2026-09-05 | D3a | Completed live storage acceptance after Docker restart; made restore verification inspect legacy schemas and require pgvector/core tables | 176 tests passed with PostgreSQL enabled; original 193 MiB archive restored with all ten table counts matching, including 272,209 atoms; current-schema fixture restored with weight events; real PostgreSQL API health passed; temporary databases cleaned up | Rehearse corpus migration and compare retrieval on a restored copy before upgrading canonical data |
 | 2026-09-18 | C0 | Documented the external connector and agent boundary plus its phased API/SDK/MCP delivery plan | ADR-0020, connector plan, architecture, context ledger, README, and roadmap agree; local links and `git diff --check` passed | Review and commit C0, then build transport-independent DevUI-like and Slack-like contract fixtures |
 | 2026-09-18 | C1 | Added transport-independent source, record, relation, sync, scope, query, evidence, context, and outcome contracts plus strict mapping codecs and DevUI/Slack fixtures | 210 tests passed, 2 optional PostgreSQL tests skipped, 5 subtests passed; maintained Ruff and Pyright surfaces passed | Review and commit C1, then implement ADR-0019 migrations before C2 persistence |
+| 2026-09-19 | ADR-0019 | Added a shared ordered migration registry, transactional adapter-owned baseline migrations, durable schema versions, invariant-before-version checks, future-version rejection, and automatic pre-upgrade SQLite backups | 219 tests passed, 3 optional PostgreSQL tests skipped, 5 subtests passed; Ruff, Pyright, and diff checks passed; live PostgreSQL execution unavailable without a test DSN or Docker server | Rehearse the version-0 PostgreSQL upgrade on a verified restored copy, then mark the migration gate passed and begin C2 |

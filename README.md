@@ -400,9 +400,11 @@ scripts/             # diagnostic and benchmark utilities
 - The nine-case regression corpus is intentionally small. LongMemEval adds broader external
   evidence-retrieval coverage, while the LoCoMo pilot remains a three-history learning experiment
   rather than a generalizable quality claim.
-- Schema compatibility is currently handled inside the adapters. A versioned migration policy is
-  accepted in [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md), but extracting the
-  existing compatibility steps into ordered migrations remains implementation work.
+- Schema compatibility is handled by the adapter-owned versioned migration framework accepted in
+  [ADR-0019](docs/decisions/0019-versioned-schema-migrations.md). SQLite persists `user_version`
+  and creates a recoverable sibling backup before upgrading a non-empty legacy database;
+  PostgreSQL persists `schema_metadata`. A verified live PostgreSQL upgrade rehearsal remains
+  required before adding the connector persistence schema.
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
   contract models and DevUI/Slack fixtures are implemented; stable external-record persistence,

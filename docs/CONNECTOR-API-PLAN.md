@@ -1,6 +1,6 @@
 # Cortex connector and agent API plan
 
-- Status: implementation in progress (C1 contract fixtures)
+- Status: C1 contract fixtures passed; ADR-0019 migration gate in progress before C2
 - Date: 2026-09-18
 - Governing decision: [ADR-0020](decisions/0020-external-connector-and-agent-boundary.md)
 - Current transport: [loopback-only local API](LOCAL-API.md)
@@ -308,7 +308,7 @@ cross-scope metrics or ordinary operational logs.
 | Phase | Status | Deliverable | Exit gate |
 |---|---|---|---|
 | C0. Freeze boundary | passed | ADR-0020 and this plan | Architecture, vocabulary, non-goals, and order are reviewed and committed |
-| C1. Contract fixtures | in progress | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
+| C1. Contract fixtures | passed | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
 | C2. External record lifecycle | not started | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | not started | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | not started | Stdio/loopback read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |

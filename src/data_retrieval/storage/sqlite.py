@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 from collections.abc import Iterable, Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any
+from uuid import uuid4
 
 from data_retrieval.core.weight_events import (
     EdgeCoordinates,
@@ -40,6 +42,12 @@ from data_retrieval.domain.models import (
 )
 from data_retrieval.retrieval.embedding import cosine_similarity
 from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
+from data_retrieval.storage.migrations import (
+    BASELINE_SCHEMA,
+    CANONICAL_TABLES,
+    CURRENT_SCHEMA_VERSION,
+    pending_migrations,
+)
 
 TOKEN_PATTERN = re.compile(r"[^\W_]{2,}", re.UNICODE)
 
@@ -53,11 +61,55 @@ class SQLiteRepository:
         self._connection = sqlite3.connect(path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = RLock()
+        self.last_migration_backup: Path | None = None
+        self._connection.execute("PRAGMA foreign_keys = ON")
+        self._connection.execute("PRAGMA journal_mode = WAL")
+        try:
+            self._migrate_schema()
+        except Exception:
+            self._connection.close()
+            raise
+
+    def _migrate_schema(self) -> None:
+        current_version = self.schema_version
+        for migration in pending_migrations(current_version):
+            if migration != BASELINE_SCHEMA:
+                raise RuntimeError(f"missing SQLite migration implementation: {migration.name}")
+            self.last_migration_backup = self._preserve_pre_migration_backup(current_version)
+            self._apply_baseline_schema()
+            current_version = migration.version
+        self._validate_schema()
+
+    def _preserve_pre_migration_backup(self, current_version: int) -> Path | None:
+        has_user_tables = self._connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1"
+        ).fetchone()
+        if has_user_tables is None:
+            return None
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        backup_path = self.path.with_name(
+            f"{self.path.name}.pre-migration-v{current_version}-{timestamp}-{uuid4().hex}.bak"
+        )
+        partial_path = backup_path.with_suffix(f"{backup_path.suffix}.partial")
+        try:
+            backup_connection = sqlite3.connect(partial_path)
+            try:
+                self._connection.backup(backup_connection)
+            finally:
+                backup_connection.close()
+            with partial_path.open("r+b") as backup_file:
+                os.fsync(backup_file.fileno())
+            partial_path.replace(backup_path)
+        finally:
+            partial_path.unlink(missing_ok=True)
+        return backup_path
+
+    def _apply_baseline_schema(self) -> None:
         with self._connection:
-            self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("PRAGMA journal_mode = WAL")
             self._connection.executescript(
                 """
+                BEGIN IMMEDIATE;
+
                 CREATE TABLE IF NOT EXISTS documents (
                     document_id TEXT PRIMARY KEY,
                     namespace TEXT NOT NULL,
@@ -265,8 +317,7 @@ class SQLiteRepository:
                 """
             )
             self._connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_atoms_namespace_role "
-                "ON atoms(namespace, role)"
+                "CREATE INDEX IF NOT EXISTS idx_atoms_namespace_role ON atoms(namespace, role)"
             )
             self._connection.execute(
                 "UPDATE atom_tags SET updated_at = created_at WHERE updated_at IS NULL"
@@ -276,6 +327,52 @@ class SQLiteRepository:
             )
             self._migrate_legacy_proposed_tags()
             self._seed_weight_event_baselines()
+            self._validate_schema_structure()
+            self._connection.execute(f"PRAGMA user_version = {BASELINE_SCHEMA.version}")
+
+    @property
+    def schema_version(self) -> int:
+        row = self._connection.execute("PRAGMA user_version").fetchone()
+        if row is None:
+            raise RuntimeError("SQLite did not return a schema version")
+        return int(row[0])
+
+    def _validate_schema(self) -> None:
+        self._validate_schema_structure()
+        if self.schema_version != CURRENT_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"SQLite schema version is {self.schema_version}, expected {CURRENT_SCHEMA_VERSION}"
+            )
+
+    def _validate_schema_structure(self) -> None:
+        rows = self._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        actual_tables = {str(row["name"]) for row in rows}
+        missing_tables = sorted(CANONICAL_TABLES - actual_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "SQLite schema invariant failed; missing tables: " + ", ".join(missing_tables)
+            )
+        required_columns = {
+            "atoms": {"role", "modality"},
+            "atom_tags": {"updated_at"},
+            "atom_links": {
+                "weight_raw",
+                "confidence",
+                "evidence_sources_json",
+                "updated_at",
+            },
+        }
+        for table, expected_columns in required_columns.items():
+            column_rows = self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+            actual_columns = {str(row["name"]) for row in column_rows}
+            missing_columns = sorted(expected_columns - actual_columns)
+            if missing_columns:
+                raise RuntimeError(
+                    f"SQLite schema invariant failed; {table} is missing columns: "
+                    + ", ".join(missing_columns)
+                )
 
     def get_document(self, document_id: str) -> Document | None:
         with self._lock:
@@ -310,9 +407,7 @@ class SQLiteRepository:
                     f"SELECT * FROM documents WHERE document_id IN ({placeholders})", batch
                 ).fetchall()
                 found.update((row["document_id"], self._document(row)) for row in rows)
-        return tuple(
-            found[document_id] for document_id in document_ids if document_id in found
-        )
+        return tuple(found[document_id] for document_id in document_ids if document_id in found)
 
     def find_documents_by_content_hash(
         self, *, namespace: str, content_hash: str
@@ -452,9 +547,7 @@ class SQLiteRepository:
                 found.update((row["atom_id"], self._atom(row)) for row in rows)
         return tuple(found[atom_id] for atom_id in atom_ids if atom_id in found)
 
-    def find_atoms_by_content_hash(
-        self, *, namespace: str, content_hash: str
-    ) -> tuple[Atom, ...]:
+    def find_atoms_by_content_hash(self, *, namespace: str, content_hash: str) -> tuple[Atom, ...]:
         with self._lock:
             rows = self._connection.execute(
                 """
@@ -566,8 +659,7 @@ class SQLiteRepository:
             for batch in self._batches(tag_ids):
                 placeholders = ",".join("?" for _ in batch)
                 rows = self._connection.execute(
-                    f"SELECT * FROM tags WHERE state = 'canonical' "
-                    f"AND tag_id IN ({placeholders})",
+                    f"SELECT * FROM tags WHERE state = 'canonical' AND tag_id IN ({placeholders})",
                     batch,
                 ).fetchall()
                 found.update((row["tag_id"], self._tag(row)) for row in rows)
@@ -784,9 +876,7 @@ class SQLiteRepository:
             clauses.append("julianday(occurred_at) < julianday(?)")
             parameters.append(occurred_to.isoformat())
         query = (
-            "SELECT * FROM atoms WHERE "
-            + " AND ".join(clauses)
-            + " ORDER BY document_id, position"
+            "SELECT * FROM atoms WHERE " + " AND ".join(clauses) + " ORDER BY document_id, position"
         )
         with self._lock:
             cursor = self._connection.execute(query, parameters)
@@ -836,7 +926,7 @@ class SQLiteRepository:
         query_terms = set(TOKEN_PATTERN.findall(query.casefold()))
         if not query_terms or limit <= 0:
             return ()
-        
+
         # Fast SQL LIKE candidate pre-filtering in C engine
         like_clauses = []
         params: list[Any] = [namespace]
@@ -855,9 +945,7 @@ class SQLiteRepository:
         hits: list[SearchHit] = []
         for row in rows:
             content_lower = str(row["content"]).casefold()
-            matches = sorted(
-                query_terms.intersection(TOKEN_PATTERN.findall(content_lower))
-            )
+            matches = sorted(query_terms.intersection(TOKEN_PATTERN.findall(content_lower)))
             if matches:
                 hits.append(
                     SearchHit(
@@ -1139,9 +1227,7 @@ class SQLiteRepository:
                 namespace=str(feedback_event["namespace"]),
                 source_type=WeightEventSource.FEEDBACK,
                 source_id=str(feedback_event["feedback_id"]),
-                policy_version=str(
-                    feedback_event.get("policy_version", "bounded-feedback-v1")
-                ),
+                policy_version=str(feedback_event.get("policy_version", "bounded-feedback-v1")),
                 metadata={
                     "retrieval_id": str(feedback_event["retrieval_id"]),
                     "outcome": str(feedback_event["outcome"]),
@@ -1452,7 +1538,9 @@ class SQLiteRepository:
                     for edge in edges
                     if isinstance(edge, AtomTag | AtomLink)
                     for value in (
-                        (edge.atom_id,) if isinstance(edge, AtomTag) else (
+                        (edge.atom_id,)
+                        if isinstance(edge, AtomTag)
+                        else (
                             edge.from_atom_id,
                             edge.to_atom_id,
                         )
@@ -1475,9 +1563,7 @@ class SQLiteRepository:
             *self.get_atom_links_touching(atom_ids=atom_ids),
             *self.get_tag_relations_touching(tag_ids=tag_ids),
         )
-        previous_weights = {
-            edge_coordinates(edge): edge.weight_raw for edge in previous_edges
-        }
+        previous_weights = {edge_coordinates(edge): edge.weight_raw for edge in previous_edges}
         return previous_weights
 
     def _upsert_atom_links(self, atom_links: Iterable[AtomLink]) -> None:

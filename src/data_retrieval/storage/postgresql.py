@@ -43,6 +43,12 @@ from data_retrieval.domain.models import (
     WeightEventSource,
 )
 from data_retrieval.retrieval.models import AtomEmbedding, SearchHit
+from data_retrieval.storage.migrations import (
+    BASELINE_SCHEMA,
+    CANONICAL_TABLES,
+    CURRENT_SCHEMA_VERSION,
+    pending_migrations,
+)
 
 SCHEMA = "data_retrieval"
 HNSW_MAX_VECTOR_DIMENSIONS = 2_000
@@ -63,7 +69,100 @@ class PostgreSQLRepository:
             register_vector(self._connection)
 
     def initialize_schema(self) -> None:
-        with self._lock, self._connection.transaction():
+        with self._lock:
+            self._ensure_schema_metadata()
+            current_version = self.schema_version
+            for migration in pending_migrations(current_version):
+                if migration != BASELINE_SCHEMA:
+                    raise RuntimeError(
+                        f"missing PostgreSQL migration implementation: {migration.name}"
+                    )
+                self._apply_baseline_schema()
+                current_version = migration.version
+            self._validate_schema()
+        register_vector(self._connection)
+
+    def _ensure_schema_metadata(self) -> None:
+        with self._connection.transaction():
+            self._connection.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+            self._connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {SCHEMA}.schema_metadata (
+                    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK(singleton),
+                    version INTEGER NOT NULL CHECK(version >= 0),
+                    migration_name TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                INSERT INTO {SCHEMA}.schema_metadata (
+                    singleton, version, migration_name
+                ) VALUES (TRUE, 0, 'unversioned')
+                ON CONFLICT(singleton) DO NOTHING
+                """
+            )
+
+    @property
+    def schema_version(self) -> int:
+        row = self._connection.execute(
+            f"SELECT version FROM {SCHEMA}.schema_metadata WHERE singleton = TRUE"
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("PostgreSQL schema metadata row is missing")
+        return int(row["version"])
+
+    def _record_schema_version(self) -> None:
+        self._connection.execute(
+            f"""
+            UPDATE {SCHEMA}.schema_metadata
+            SET version = %s, migration_name = %s, updated_at = NOW()
+            WHERE singleton = TRUE
+            """,
+            (BASELINE_SCHEMA.version, BASELINE_SCHEMA.name),
+        )
+
+    def _validate_schema(self) -> None:
+        self._validate_schema_structure()
+        if self.schema_version != CURRENT_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"PostgreSQL schema version is {self.schema_version}, expected "
+                f"{CURRENT_SCHEMA_VERSION}"
+            )
+
+    def _validate_schema_structure(self) -> None:
+        rows = self._connection.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
+            (SCHEMA,),
+        ).fetchall()
+        actual_tables = {str(row["table_name"]) for row in rows}
+        missing_tables = sorted((CANONICAL_TABLES | {"schema_metadata"}) - actual_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "PostgreSQL schema invariant failed; missing tables: " + ", ".join(missing_tables)
+            )
+        required_columns = {
+            "documents": {"ingestion_status", "atom_count"},
+            "atoms": {"role", "modality"},
+            "schema_metadata": {"version", "migration_name", "updated_at"},
+        }
+        for table, expected_columns in required_columns.items():
+            column_rows = self._connection.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s",
+                (SCHEMA, table),
+            ).fetchall()
+            actual_columns = {str(row["column_name"]) for row in column_rows}
+            missing_columns = sorted(expected_columns - actual_columns)
+            if missing_columns:
+                raise RuntimeError(
+                    f"PostgreSQL schema invariant failed; {table} is missing columns: "
+                    + ", ".join(missing_columns)
+                )
+
+    def _apply_baseline_schema(self) -> None:
+        with self._connection.transaction():
             self._connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
             self._connection.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
             self._connection.execute(
@@ -277,6 +376,24 @@ class PostgreSQLRepository:
                 """
             )
             self._connection.execute(
+                f"ALTER TABLE {SCHEMA}.documents ADD COLUMN IF NOT EXISTS "
+                "ingestion_status TEXT NOT NULL DEFAULT 'complete' "
+                "CHECK (ingestion_status IN ('staging', 'complete'))"
+            )
+            self._connection.execute(
+                f"ALTER TABLE {SCHEMA}.documents ADD COLUMN IF NOT EXISTS "
+                "atom_count BIGINT NOT NULL DEFAULT 0 CHECK (atom_count >= 0)"
+            )
+            self._connection.execute(
+                f"""
+                UPDATE {SCHEMA}.documents AS documents
+                SET atom_count = (
+                    SELECT COUNT(*) FROM {SCHEMA}.atoms AS atoms
+                    WHERE atoms.document_id = documents.document_id
+                )
+                """
+            )
+            self._connection.execute(
                 f"ALTER TABLE {SCHEMA}.atoms ADD COLUMN IF NOT EXISTS role TEXT"
             )
             self._connection.execute(
@@ -348,7 +465,8 @@ class PostgreSQLRepository:
                 self._connection.execute(statement)
             self._migrate_legacy_proposed_tags()
             self._seed_weight_event_baselines()
-        register_vector(self._connection)
+            self._validate_schema_structure()
+            self._record_schema_version()
 
     def get_document(self, document_id: str) -> Document | None:
         row = self._fetchone(
@@ -382,9 +500,7 @@ class PostgreSQLRepository:
             (list(document_ids),),
         )
         found = {row["document_id"]: self._document(row) for row in rows}
-        return tuple(
-            found[document_id] for document_id in document_ids if document_id in found
-        )
+        return tuple(found[document_id] for document_id in document_ids if document_id in found)
 
     def find_documents_by_content_hash(
         self, *, namespace: str, content_hash: str
@@ -519,9 +635,7 @@ class PostgreSQLRepository:
         found = {row["atom_id"]: self._atom(row) for row in rows}
         return tuple(found[atom_id] for atom_id in atom_ids if atom_id in found)
 
-    def find_atoms_by_content_hash(
-        self, *, namespace: str, content_hash: str
-    ) -> tuple[Atom, ...]:
+    def find_atoms_by_content_hash(self, *, namespace: str, content_hash: str) -> tuple[Atom, ...]:
         rows = self._fetchall(
             f"""
             SELECT atoms.* FROM {SCHEMA}.atoms AS atoms
@@ -555,7 +669,7 @@ class PostgreSQLRepository:
             SELECT links.* FROM {SCHEMA}.atom_links AS links
             JOIN {SCHEMA}.atoms AS source_atom ON source_atom.atom_id = links.from_atom_id
             JOIN {SCHEMA}.documents AS documents USING(document_id)
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY links.relation, links.from_atom_id, links.to_atom_id
             """,
             parameters,
@@ -602,8 +716,7 @@ class PostgreSQLRepository:
         if not atom_ids:
             return ()
         rows = self._fetchall(
-            f"SELECT * FROM {SCHEMA}.atom_tags WHERE atom_id = ANY(%s) "
-            "ORDER BY atom_id, tag_id",
+            f"SELECT * FROM {SCHEMA}.atom_tags WHERE atom_id = ANY(%s) ORDER BY atom_id, tag_id",
             (list(atom_ids),),
         )
         return tuple(self._atom_tag(row) for row in rows)
@@ -658,7 +771,7 @@ class PostgreSQLRepository:
         query = f"""
             SELECT atoms.* FROM {SCHEMA}.atoms AS atoms
             JOIN {SCHEMA}.documents AS documents USING(document_id)
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY atoms.document_id, atoms.position
         """
         with self._lock, self._connection.transaction():
@@ -746,8 +859,7 @@ class PostgreSQLRepository:
         with self._lock, self._connection.transaction():
             self._lock_weight_namespace(candidate.namespace)
             row = self._connection.execute(
-                f"SELECT state FROM {SCHEMA}.tag_candidates "
-                "WHERE candidate_id = %s FOR UPDATE",
+                f"SELECT state FROM {SCHEMA}.tag_candidates WHERE candidate_id = %s FOR UPDATE",
                 (candidate.candidate_id,),
             ).fetchone()
             if row is None:
@@ -784,7 +896,7 @@ class PostgreSQLRepository:
             SELECT relations.* FROM {SCHEMA}.tag_relations AS relations
             JOIN {SCHEMA}.tags AS source_tag
               ON source_tag.tag_id = relations.source_tag_id
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY relations.relation_type, relations.source_tag_id,
                      relations.target_tag_id
             """,
@@ -1025,8 +1137,7 @@ class PostgreSQLRepository:
         if not signal_ids:
             return frozenset()
         rows = self._fetchall(
-            f"SELECT signal_id FROM {SCHEMA}.calibration_signals "
-            "WHERE signal_id = ANY(%s)",
+            f"SELECT signal_id FROM {SCHEMA}.calibration_signals WHERE signal_id = ANY(%s)",
             (list(signal_ids),),
         )
         return frozenset(str(row["signal_id"]) for row in rows)
@@ -1126,9 +1237,7 @@ class PostgreSQLRepository:
                 namespace=str(feedback_event["namespace"]),
                 source_type=WeightEventSource.FEEDBACK,
                 source_id=str(feedback_event["feedback_id"]),
-                policy_version=str(
-                    feedback_event.get("policy_version", "bounded-feedback-v1")
-                ),
+                policy_version=str(feedback_event.get("policy_version", "bounded-feedback-v1")),
                 metadata={
                     "retrieval_id": str(feedback_event["retrieval_id"]),
                     "outcome": str(feedback_event["outcome"]),
@@ -1182,9 +1291,7 @@ class PostgreSQLRepository:
             self._upsert_tag_candidates(bundle.tag_candidates)
             self._upsert_weight_events(events)
 
-    def begin_staged_ingestion(
-        self, *, document: Document, tags: tuple[Tag, ...]
-    ) -> bool:
+    def begin_staged_ingestion(self, *, document: Document, tags: tuple[Tag, ...]) -> bool:
         row = self._fetchone(
             f"SELECT ingestion_status FROM {SCHEMA}.documents WHERE document_id = %s",
             (document.document_id,),
@@ -1497,7 +1604,9 @@ class PostgreSQLRepository:
                     for edge in edges
                     if isinstance(edge, AtomTag | AtomLink)
                     for value in (
-                        (edge.atom_id,) if isinstance(edge, AtomTag) else (
+                        (edge.atom_id,)
+                        if isinstance(edge, AtomTag)
+                        else (
                             edge.from_atom_id,
                             edge.to_atom_id,
                         )
@@ -1520,9 +1629,7 @@ class PostgreSQLRepository:
             *self.get_atom_links_touching(atom_ids=atom_ids),
             *self.get_tag_relations_touching(tag_ids=tag_ids),
         )
-        previous_weights = {
-            edge_coordinates(edge): edge.weight_raw for edge in previous_edges
-        }
+        previous_weights = {edge_coordinates(edge): edge.weight_raw for edge in previous_edges}
         return previous_weights
 
     def _upsert_atom_links(self, atom_links: Iterable[AtomLink]) -> None:
@@ -1646,9 +1753,7 @@ class PostgreSQLRepository:
             "WHERE tags.state = 'proposed_new' AND "
             "(relations.source_tag_id = tags.tag_id OR relations.target_tag_id = tags.tag_id)"
         )
-        self._connection.execute(
-            f"DELETE FROM {SCHEMA}.tags WHERE state = 'proposed_new'"
-        )
+        self._connection.execute(f"DELETE FROM {SCHEMA}.tags WHERE state = 'proposed_new'")
 
     def _seed_weight_event_baselines(self) -> None:
         """Create honest starting snapshots for edges written before the ledger existed."""

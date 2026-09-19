@@ -7,10 +7,118 @@ from pathlib import Path
 
 from data_retrieval.domain.models import AtomLink, AtomLinkRelation, IngestionBundle
 from data_retrieval.services.ingestion import IngestService
+from data_retrieval.storage.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    UnsupportedSchemaVersion,
+)
 from data_retrieval.storage.sqlite import SQLiteRepository
 
 
+class _InterruptedMigrationRepository(SQLiteRepository):
+    def _seed_weight_event_baselines(self) -> None:
+        super()._seed_weight_event_baselines()
+        raise RuntimeError("simulated migration interruption")
+
+
+class _FailedInvariantRepository(SQLiteRepository):
+    def _validate_schema_structure(self) -> None:
+        raise RuntimeError("simulated invariant failure")
+
+
 class SQLiteMigrationTests(unittest.TestCase):
+    def test_fresh_database_is_built_by_the_versioned_baseline_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fresh.sqlite3"
+
+            with SQLiteRepository(path) as repository:
+                self.assertEqual(repository.schema_version, CURRENT_SCHEMA_VERSION)
+
+            connection = sqlite3.connect(path)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            connection.close()
+
+            self.assertEqual(version, CURRENT_SCHEMA_VERSION)
+            self.assertIn("documents", tables)
+            self.assertIn("weight_events", tables)
+
+    def test_current_database_startup_is_a_schema_no_op(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "current.sqlite3"
+            with SQLiteRepository(path):
+                pass
+
+            connection = sqlite3.connect(path)
+            before = int(connection.execute("PRAGMA schema_version").fetchone()[0])
+            connection.close()
+
+            with SQLiteRepository(path) as repository:
+                self.assertEqual(repository.schema_version, CURRENT_SCHEMA_VERSION)
+
+            connection = sqlite3.connect(path)
+            after = int(connection.execute("PRAGMA schema_version").fetchone()[0])
+            connection.close()
+            self.assertEqual(after, before)
+
+    def test_future_database_version_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "future.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION + 1}")
+            connection.close()
+
+            with self.assertRaisesRegex(UnsupportedSchemaVersion, "newer than supported"):
+                SQLiteRepository(path)
+
+    def test_current_version_with_missing_schema_fails_invariant_check(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+            connection.close()
+
+            with self.assertRaisesRegex(RuntimeError, "missing tables"):
+                SQLiteRepository(path)
+
+    def test_interrupted_migration_rolls_back_schema_and_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "interrupted.sqlite3"
+
+            with self.assertRaisesRegex(RuntimeError, "simulated migration interruption"):
+                _InterruptedMigrationRepository(path)
+
+            connection = sqlite3.connect(path)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            tables = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+            connection.close()
+
+            self.assertEqual(version, 0)
+            self.assertEqual(tables, [])
+
+    def test_failed_invariant_does_not_record_the_new_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "failed-invariant.sqlite3"
+
+            with self.assertRaisesRegex(RuntimeError, "simulated invariant failure"):
+                _FailedInvariantRepository(path)
+
+            connection = sqlite3.connect(path)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            tables = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+            connection.close()
+
+            self.assertEqual(version, 0)
+            self.assertEqual(tables, [])
+
     def test_pre_retrieval_schema_is_upgraded_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "old.sqlite3"
@@ -40,6 +148,11 @@ class SQLiteMigrationTests(unittest.TestCase):
             connection.close()
 
             with SQLiteRepository(path) as repository:
+                self.assertEqual(repository.schema_version, CURRENT_SCHEMA_VERSION)
+                backup_path = repository.last_migration_backup
+                self.assertIsNotNone(backup_path)
+                assert backup_path is not None
+                self.assertTrue(backup_path.is_file())
                 first = IngestService(repository).ingest_text(
                     namespace="migration",
                     source="first",
@@ -73,6 +186,18 @@ class SQLiteMigrationTests(unittest.TestCase):
                 tag_edge = repository.atom_tags_for(first.atom_ids[0])[0]
                 learned_link = repository.get_atom_links(second.atom_ids[0])[0]
 
+            backup_connection = sqlite3.connect(backup_path)
+            backup_version = int(backup_connection.execute("PRAGMA user_version").fetchone()[0])
+            backup_tables = {
+                str(row[0])
+                for row in backup_connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            backup_connection.close()
+
+            self.assertEqual(backup_version, 0)
+            self.assertEqual(backup_tables, {"atom_tags", "atom_links"})
             self.assertIsNotNone(tag_edge.updated_at)
             self.assertEqual(learned_link.weight_raw, 0.2)
             self.assertIsNotNone(learned_link.updated_at)
