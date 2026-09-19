@@ -318,9 +318,10 @@ cross-scope metrics or ordinary operational logs.
 
 C1 passed under the current local deployment. C2 passed on 2026-09-19. The same lifecycle behavior
 suite now runs against memory, SQLite, and PostgreSQL and covers exact replay, changed versions and
-predecessor lineage, relations, tombstones, partial failures, scope checks, and cursor commits.
+predecessor lineage, relations, tombstones, repairable and terminal partial failures, scope checks,
+and cursor commits.
 SQLite reopen and migration behavior and live PostgreSQL schema/runtime behavior are automated.
-The branch-wide acceptance run passed 246 tests and 5 subtests with PostgreSQL enabled against an
+The branch-wide acceptance run passed 249 tests and 5 subtests with PostgreSQL enabled against an
 isolated database; the canonical corpus was not opened or upgraded.
 
 C2 stores canonical external-record lifecycle state. Projection of those records into Cortex's
