@@ -146,8 +146,8 @@ python -m pytest tests/test_devui_connector.py tests/test_cortex_sdk.py `
 | Retrieved identities must reopen source entities | Preserve typed external IDs plus file/line navigation metadata | DevUI owns the final UI routing action |
 | Referenced payload fetching is not accepted yet | Submit inline searchable content | Revisit immutable payload references at the hosted security gate |
 | The DevUI application repository is not present in this workspace | Define and test a strict source-native JSON handoff | Wire the real DevUI exporter without changing Cortex core contracts |
-| Only one reference connector exists so far | Keep DevUI orchestration source-specific and small | Extract shared scaffolding only after C6 Slack reveals actual repetition |
+| DevUI and Slack repeated safe submit/commit orchestration | Extracted only the public `sync_source_batches` helper | Keep source models and mapping separate |
 
-The final two rows are intentional boundaries, not hidden completion claims. C5 proves the
+The final rows are intentional boundaries, not hidden completion claims. C5 proves the
 connector and round trip. Deployment into the separate DevUI application still requires that
 application to emit the documented snapshot shape.

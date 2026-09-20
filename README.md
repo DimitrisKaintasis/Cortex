@@ -103,6 +103,10 @@ or Temporal History. Add only the capabilities you intend to run:
 | Capability | Install command |
 |---|---|
 | Local API | `python -m pip install -e ".[api]"` |
+| Python connector SDK | `python -m pip install -e ".[sdk]"` |
+| Local MCP adapter | `python -m pip install -e ".[mcp]"` |
+| DevUI reference connector | `python -m pip install -e ".[devui]"` |
+| Slack reference connector | `python -m pip install -e ".[slack]"` |
 | PostgreSQL/pgvector | `python -m pip install -e ".[postgres]"` |
 | Temporal History | `python -m pip install -e ".[temporal]"` |
 | LongMemEval benchmarks | `python -m pip install -e ".[benchmarks]"` |
@@ -393,6 +397,7 @@ src/data_retrieval/
 └── cli.py            # command dispatch and handlers
 
 src/cortex_devui/     # public-SDK-only DevUI reference connector
+src/cortex_slack/     # public-SDK-only Slack reference connector
 
 evals/               # versioned evaluation fixtures
 tests/               # unit, contract, integration, and adapter tests
@@ -424,7 +429,8 @@ scripts/             # diagnostic and benchmark utilities
   adapter exposes retrieval and outcomes to agent hosts without exposing source administration or
   internal atom identity. The DevUI reference connector now maps files, functions, modules,
   proposals, and relations through only that public SDK and maps retrieved evidence back to DevUI
-  navigation pointers; the Slack reference connector remains planned. See the
+  navigation pointers. The Slack reference connector uses the same contract for incremental
+  cursors, edits, threads, tombstones, and explicit channel/project routing. See the
   [connector SDK quickstart](docs/CONNECTOR-SDK.md),
   [DevUI connector runbook](docs/DEVUI-CONNECTOR.md), and
   [local MCP runbook](docs/LOCAL-MCP.md). The current REST and MCP transports remain local-only.
@@ -466,6 +472,7 @@ intended to remain a substantial, independently useful system rather than a nonf
 - [Local API runbook](docs/LOCAL-API.md)
 - [Local MCP runbook](docs/LOCAL-MCP.md)
 - [DevUI reference connector](docs/DEVUI-CONNECTOR.md)
+- [Slack reference connector](docs/SLACK-CONNECTOR.md)
 - [Laptop PostgreSQL and recovery runbook](docs/LAPTOP-POSTGRES.md)
 - [Mem0 bootstrap runbook](docs/MEM0-BOOTSTRAP.md)
 
