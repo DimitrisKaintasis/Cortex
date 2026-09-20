@@ -56,7 +56,7 @@ recorded in an immutable event ledger.
   PostgreSQL/pgvector for indexed, bounded-candidate retrieval and resumable large-file
   ingestion. A deployment uses one, not both.
 - **Local application API** — FastAPI endpoints for ingestion, retrieval, feedback, namespace
-  inspection, and tag-candidate review, bound to laptop loopback only.
+  inspection, and tag-candidate review, bound to local loopback only.
 - **Operational safety** — checkpointed processing, idempotent retries, weight audits, and
   checksummed PostgreSQL backup/restore verification.
 
@@ -247,7 +247,7 @@ For component ownership, invariants, and processor contracts, read the
 | Canonical ingestion and SQLite | Implemented | Deterministic identities, provenance, transactions, hydration, and idempotent replay are covered by tests. |
 | Explainable hybrid retrieval | Implemented | Lexical, tag, semantic, relationship, and temporal channels produce traceable scores; model-backed channels are optional. |
 | Feedback learning | Implemented | Attributable, bounded updates and immutable weight events are active in the local workflow. |
-| PostgreSQL/pgvector | Implemented, laptop deployment | Indexed candidates, staged large-file ingestion, backup, and verified restore are available; this is not a hosted service. |
+| PostgreSQL/pgvector | Implemented, local deployment | Indexed candidates, staged large-file ingestion, backup, and verified restore are available; this is not a hosted service. |
 | Tags, Temporal History, and Mem0 adapters | Implemented, still being evaluated | Processor boundaries and provenance are present; real-model quality varies by model and dataset. |
 | Loopback API | Implemented, local only | Useful for local apps and scripts; public authentication and internet deployment are intentionally absent. |
 | Collective learning | Shadow experiment | Cross-user transfer and review policies run in deterministic isolation and cannot mutate normal serving state. |
@@ -295,11 +295,12 @@ that depends on PostgreSQL or another optional live service must also pass its l
 tests before the branch is merged. CI repeats these gates independently--it does not replace the
 local pre-push check.
 
-GitHub Actions runs three independent checks on every push and pull request: a dependency-free
-SQLite smoke test, the lint, typed-core and Python test suite, and the PostgreSQL adapter tests
-against a real pgvector service container. This keeps the simple setup and scale adapter
-verifiable separately. Pyright currently gates the domain, repository contracts, ingestion, and
-core retrieval path; dynamic provider and persistence implementations will be added incrementally.
+GitHub Actions independently runs a dependency audit, a dependency-free SQLite smoke test,
+quality checks on Ubuntu and Windows, and PostgreSQL adapter tests against a real pgvector service
+container. Both operating systems exercise every optional dependency, while the separate minimal
+smoke keeps the dependency-free SQLite path honest. Pyright currently gates the domain,
+repository contracts, ingestion, and core retrieval path; dynamic provider and persistence
+implementations will be added incrementally.
 
 ## PostgreSQL scale mode
 
@@ -318,10 +319,10 @@ $env:DATA_RETRIEVAL_POSTGRES_DSN = `
   "postgresql://data_retrieval:$($env:DATA_RETRIEVAL_POSTGRES_PASSWORD)@127.0.0.1:5432/data_retrieval"
 ```
 
-In the accepted deployment, the container runs on the laptop, binds PostgreSQL to laptop
-localhost, and persists data in a Docker volume. The CLI still runs in the foreground on the
-laptop. Model inference is optional and may run through laptop-local Ollama. Secrets are supplied
-through the process environment and are never returned in CLI output.
+In the accepted deployment, the container runs on the local host, binds PostgreSQL to loopback,
+and persists data in a Docker volume. The CLI runs as a foreground process on that host. Model
+inference is optional and may use a local Ollama service. Secrets are supplied through the process
+environment and are never returned in CLI output.
 
 Before large ingestion or upgrades, create a checksummed logical backup and prove that it can be
 restored into an isolated temporary database:
@@ -353,7 +354,7 @@ python -m data_retrieval process-file .\notes.txt `
 Each stage writes durable completion markers to a report under `data/runs/`. Repeating the command
 reuses completed work. New model-proposed tags are quarantined until a person promotes, merges,
 or rejects them. The [local MVP runbook](docs/LOCAL-MVP-RUNBOOK.md) covers Temporal and Mem0 stages,
-failure handling, and the exact laptop responsibilities.
+failure handling, and the exact local-host responsibilities.
 
 ## Technology
 
@@ -418,20 +419,19 @@ scripts/             # diagnostic and benchmark utilities
   isolated database. The canonical corpus was deliberately left unchanged.
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
-  contract models, DevUI/Slack fixtures, and replay-safe external-record lifecycle persistence now
+  structured-project and mutable-conversation fixtures, plus replay-safe external-record lifecycle persistence, now
   have memory, SQLite, and PostgreSQL parity. Source sync, scoped retrieval, and attributable
   outcomes are available through the loopback REST API and typed Python SDK. A local stdio MCP
   adapter exposes retrieval and outcomes to agent hosts without exposing source administration or
-  internal atom identity. DevUI-like structured and Slack-like mutable fixtures validate that the
-  same contract handles stable identity, relations, cursors, edits, threads, and tombstones.
-  Operational source mappers and credentials belong in source-owned connector repositories, not
-  the Cortex distribution. See the [connector SDK quickstart](docs/CONNECTOR-SDK.md),
-  [reference connector conformance](docs/REFERENCE-CONNECTOR-CONFORMANCE.md), and
+  internal atom identity. Operational connectors are source-owned rather than bundled with
+  Cortex, as recorded in [ADR-0021](docs/decisions/0021-source-owned-connector-packaging.md). See
+  the [connector SDK quickstart](docs/CONNECTOR-SDK.md),
+  [connector contract conformance](docs/REFERENCE-CONNECTOR-CONFORMANCE.md), and
   [local MCP runbook](docs/LOCAL-MCP.md). The current REST and MCP transports remain local-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.
-- The current accepted deployment is laptop-only; background workers and remote inference
+- The current accepted deployment is local-only; background workers and remote inference
   ownership are deferred.
 
 The dependency-ordered plan and progress log live in the
@@ -465,8 +465,8 @@ intended to remain a substantial, independently useful system rather than a nonf
 - [Local MVP runbook](docs/LOCAL-MVP-RUNBOOK.md)
 - [Local API runbook](docs/LOCAL-API.md)
 - [Local MCP runbook](docs/LOCAL-MCP.md)
-- [Reference connector conformance](docs/REFERENCE-CONNECTOR-CONFORMANCE.md)
-- [Laptop PostgreSQL and recovery runbook](docs/LAPTOP-POSTGRES.md)
+- [Connector contract conformance](docs/REFERENCE-CONNECTOR-CONFORMANCE.md)
+- [Local PostgreSQL and recovery runbook](docs/LAPTOP-POSTGRES.md)
 - [Mem0 bootstrap runbook](docs/MEM0-BOOTSTRAP.md)
 
 ### Evaluate it

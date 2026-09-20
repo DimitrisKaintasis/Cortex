@@ -15,8 +15,8 @@ The public promise is:
 > If an integrator can map application data into records, relations, scopes, and outcomes, they
 > can use Cortex through a stable contract without knowing how Cortex stores or ranks evidence.
 
-The first proof is not the number of supported products. It is whether two deliberately different
-connectors--DevUI and Slack--can use the same contract without source-specific changes to the core.
+The first proof is not the number of supported products. It is whether deliberately different
+source shapes can use the same contract without source-specific changes to the core.
 
 ## Product boundary
 
@@ -309,8 +309,8 @@ cross-scope metrics or ordinary operational logs.
 | C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | passed | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | passed | Stdio read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
-| C5. DevUI conformance probe | passed | Structured code/architecture fixture and contract validation | Generic records preserve source identity and explicit relations without core special cases |
-| C6. Slack conformance probe | passed | Mutable conversation fixture and lifecycle validation | Same contract represents threads, edits, deletions, timestamps, cursors, and scope metadata |
+| C5. Bundled DevUI connector | superseded | Structured fixture remains as generic conformance evidence | Operational mapping belongs in the source-owned repository under ADR-0021 |
+| C6. Bundled Slack connector | superseded | Mutable fixture remains as generic conformance evidence | Operational mapping belongs in a separate connector repository under ADR-0021 |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
 
 C1 passed under the current local deployment. C2 passed on 2026-09-19. The same lifecycle behavior
@@ -322,10 +322,9 @@ The branch-wide acceptance run passed 249 tests and 5 subtests with PostgreSQL e
 isolated database; the canonical corpus was not opened or upgraded.
 
 C2 stores canonical external-record lifecycle state. Projection of those records into Cortex's
-retrieval atoms and transport-level access are not silently included in this milestone: they are
-proved through the SDK and reference-connector round trips in C3, C5, and C6. C7 must not be
-un-deferred merely to demonstrate Slack; a temporary tunnel is a demo shortcut, not the supported
-security architecture.
+retrieval atoms and transport-level access are proved through the SDK, transport, and conformance
+suites rather than bundled source-specific connectors. C7 must not be un-deferred merely for a
+demo; a temporary tunnel is a shortcut, not the supported security architecture.
 
 C3 exposes source registration, consolidated sync batches, run inspection, explicit cursor
 commit, scoped queries, context packs, and attributable outcomes through the loopback REST API and
@@ -346,31 +345,31 @@ administration, and network transport are not exposed. In-process protocol tests
 REST, and a subprocess test verifies that stdout remains protocol-clean. The adapter also passed
 the query/outcome flow against live PostgreSQL in an isolated database.
 
-## Reference connector conformance sequence
+## External connector conformance
 
-### DevUI
+### Structured project data
 
-DevUI-like fixtures test stable structured identity, explicit relations, and mapping retrieval back
-to source-owned identities. The operational mapper belongs in the DevUI repository.
+The structured fixture tests stable identity, explicit relations, and mapping retrieval back to
+source-owned entities. Its operational mapper belongs in the source application's repository.
 
 ```text
 files/functions/modules/proposals
-    -> DevUI mapping
+    -> source-owned mapping
         -> generic records and relations
             -> Cortex retrieval
                 -> external IDs
-                    -> highlight/open DevUI entity
+                    -> highlight/open source entity
 ```
 
-### Slack
+### Mutable conversation data
 
-Slack-like fixtures test continuous ingestion, thread relationships, mutable records, deletion,
-source timestamps, cursors, and scope metadata. OAuth, polling, rate limits, and operational
-mapping belong in a separate Slack connector repository.
+The mutable fixture tests thread relationships, changed versions, tombstones, timestamps,
+incremental cursors, and scope metadata. Authentication, polling, rate limits, and operational
+mapping belong in a separate connector repository.
 
 ```text
 messages/threads/edits/deletions
-    -> Slack mapping
+    -> source-owned mapping
         -> the same records, relations, sync runs, and scopes
 ```
 
@@ -379,10 +378,10 @@ submits caller-ordered batches, withholds cursor commit after incomplete accepta
 source mapping or retries. The evidence does not justify a base class, generator, or
 `cortex connector init` scaffolding command.
 
-C5 and C6 are conformance milestones, not built-in integration claims. Source-specific runtime
-packages and commands were removed from the Cortex distribution in accordance with ADR-0021.
-The generic fixtures, lifecycle tests, SDK helper, and compatibility conclusions remain. See
-[reference connector conformance](REFERENCE-CONNECTOR-CONFORMANCE.md).
+C5 and C6 were superseded as bundled integration milestones. Source-specific runtime packages and
+commands were removed from the Cortex distribution under ADR-0021. Generic fixtures, lifecycle
+tests, the SDK helper, and compatibility conclusions remain. See
+[connector contract conformance](REFERENCE-CONNECTOR-CONFORMANCE.md).
 
 ## Acceptance matrix
 
@@ -400,7 +399,7 @@ The connector API is not ready until these behaviors are automated:
 | Learning | Outcome can credit only evidence returned by its retrieval |
 | Degradation | Cortex remains usable when optional processors are unavailable |
 | Transport parity | REST, SDK, and MCP enforce the same retrieval and outcome rules |
-| Connector independence | DevUI and Slack require mapping code, not source-specific Cortex core branches |
+| Connector independence | Unlike sources require external mapping code, not source-specific Cortex branches |
 | Operations | Request IDs, safe logs, status, retry guidance, backup, and migration behavior are documented |
 
 ## Failure model

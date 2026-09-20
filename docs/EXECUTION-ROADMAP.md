@@ -2,7 +2,7 @@
 
 Status: active
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 
 Active research next step: development-only query-sensitive routing/fusion experiment (step C in
 [the learning/retrieval math audit](LEARNING-RETRIEVAL-MATH-AUDIT.md)). The local LoCoMo pilot
@@ -21,9 +21,10 @@ The authorized 1x/3x/10x similarity-prior strength follow-up is also complete: n
 one rank regression at 10x. End strength-only sweeps; next isolate route selectivity and the
 score transformation with controlled examples. The report includes manually reviewed traces.
 
-Current delivery step: C2 — implement the replay-safe external record lifecycle
+Current delivery step: connector platform hardening — integrate the source-owned connector boundary
 
-Connector delivery step: C1 and the ADR-0019 migration gate passed — C2 persistence is next
+Connector delivery state: C0 through C4 passed; bundled C5/C6 connectors were superseded by the
+source-owned packaging decision in ADR-0021; C7 remains deferred
 
 Collective research step: 4 — deferred until a larger, more representative dataset exists
 
@@ -44,7 +45,8 @@ track is therefore deliberately deferred, not rejected. A separate local-product
 the already proven ingestion and retrieval foundations usable without committing to the global
 graph architecture.
 
-Status values are `not started`, `in progress`, `blocked`, `passed`, `failed`, and `deferred`.
+Status values are `not started`, `in progress`, `blocked`, `passed`, `failed`, `deferred`, and
+`superseded`.
 A step is `passed` only when its evidence is checked into the repository or linked below.
 
 ## Milestone map
@@ -61,7 +63,7 @@ A step is `passed` only when its evidence is checked into the repository or link
 | 7. Repair canonical contracts | not started | Scope, visibility, payload, and contribution are explicit | Real multi-scope runtime |
 | 8. Validate with real models and data | not started | Gains survive realistic noise and model differences | Product evidence |
 | 9. Add production collective storage | not started | Events, projections, snapshots, and rollback are durable | Hosted collective service |
-| 10. Make the Mac autonomous | not started | Remote jobs continue while the laptop is offline | Continuous enrichment/evaluation |
+| 10. Add an autonomous inference worker | not started | Remote jobs continue while the local client is offline | Continuous enrichment/evaluation |
 | 11. Add procedures | deferred | Validated ordered guidance improves small models | Small-model enhancement layer |
 
 ## Local product track
@@ -73,9 +75,9 @@ change the privacy boundary.
 |---|---|---|
 | D1. Checkpointed document pipeline | passed | One command runs canonical ingestion, configured processors, and a ledger audit with restart evidence |
 | D2. Local application boundary | passed | Retrieval, explanations, candidate review, and attributable feedback are usable without raw CLI choreography |
-| D3a. Recoverable laptop PostgreSQL | passed | Both legacy corpus and current-schema backups restored successfully; live adapter and API checks passed |
-| D3b. Always-reachable canonical storage | deferred | A later trusted/hosted database is reachable without the laptop |
-| D4. Autonomous Mac worker | deferred | Leased jobs continue after the laptop disconnects |
+| D3a. Recoverable local PostgreSQL | passed | Both legacy corpus and current-schema backups restored successfully; live adapter and API checks passed |
+| D3b. Always-reachable canonical storage | deferred | A later trusted/hosted database is reachable without the local client |
+| D4. Autonomous inference worker | deferred | Leased jobs continue after the local client disconnects |
 
 D1 is documented in `LOCAL-MVP-RUNBOOK.md`; D2 and its loopback-only boundary are documented in
 `LOCAL-API.md`. SQLite is explicitly the small/medium local mode, while PostgreSQL remains the
@@ -103,8 +105,8 @@ does not make the loopback API public or un-defer hosted storage. ADR-0020 and
 | C2. External record lifecycle | passed | Source identity, versions, relations, sync runs, cursors, and tombstones are replay-safe across repositories |
 | C3. Python SDK | passed | A connector performs sync, retrieval, and outcomes without Cortex-internal knowledge |
 | C4. Local MCP adapter | passed | IDE agents use read/outcome tools with REST-equivalent policy and results |
-| C5. DevUI conformance probe | passed | Structured project fixtures validate source identity and relations through the generic contract |
-| C6. Slack conformance probe | passed | Mutable conversation fixtures validate edits, threads, tombstones, cursors, and scope metadata |
+| C5. Bundled DevUI connector | superseded | Structured conformance remains in Cortex; operational mapping belongs in its source-owned repository |
+| C6. Bundled Slack connector | superseded | Mutable conformance remains in Cortex; operational mapping belongs in a separate connector repository |
 | C7. Hosted remote REST/MCP | deferred | Authenticated remote agents connect only after D3b and the full authorization/operations gate |
 
 C1 is committed and passed. C2's prerequisite is also passed: ADR-0019's shared migration registry,
@@ -331,8 +333,8 @@ Step 9 adds PostgreSQL observation events, aggregate projections, versioned snap
 promotion, rollback, audit, and partitioning. It does not introduce Neo4j, MongoDB, Pinecone, or
 a second canonical store without measured necessity.
 
-Step 10 adds a leased PostgreSQL job queue and a small Mac worker only after canonical storage is
-hosted and reachable while the laptop is off. The Mac runs inference/enrichment; it does not
+Step 10 adds a leased PostgreSQL job queue and a small inference worker only after canonical
+storage is hosted and independently reachable. The worker runs inference/enrichment; it does not
 become the only copy of user data. Deployment must state how the worker starts, stays running,
 receives secrets, connects over TLS, logs failures, retries work, and updates safely.
 

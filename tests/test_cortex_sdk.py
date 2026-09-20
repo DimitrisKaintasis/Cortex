@@ -210,7 +210,7 @@ class CortexClientTests(unittest.TestCase):
                 client,
                 source=self.source,
                 batches=(self.batch,),
-                commit_request_id="devui-sync:scan-42:helper-commit",
+                commit_request_id="structured-source:scan-42:helper-commit",
             )
 
         self.assertEqual(committed.committed_cursor, "scan:42")

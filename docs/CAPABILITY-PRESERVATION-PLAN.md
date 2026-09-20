@@ -138,7 +138,7 @@ Source adapters
 ```
 
 SQLite remains the deterministic local/test adapter. PostgreSQL remains the scale and online
-target. Temporal History and Mem0 remain replaceable processors. The Mac remains an inference
+target. Temporal History and Mem0 remain replaceable processors. A remote worker remains an inference
 and worker host, not canonical storage.
 
 ## Core model decisions to make first
@@ -193,7 +193,7 @@ procedure structure remains free to represent ordered steps later.
 ### 4. Preserve Cortex controls at the boundary where they become necessary
 
 **Recommendation:** keep the library/CLI while behavior is evolving, then add a small service
-and durable PostgreSQL job queue when the Mac or Codex needs remote access. At that boundary,
+and durable PostgreSQL job queue when a worker or client needs remote access. At that boundary,
 activate scoped authentication, concurrency/rate limits, hard time budgets, health, redacted
 traces, audit events, retries, and recovery procedures together.
 
@@ -233,7 +233,7 @@ in-process scheduler or local JSONL queue part of canonical state.
 | Adaptive channel profiles | Learn retrieval mixes without unsafe global mutation | snapshots, guards, rollback shell | static channel rule | Build offline/shadow optimizer; promote versioned profiles after gates |
 | Mem0 bootstrap | Distill and initially calibrate useful memory | import, dedupe, batch lineage, boost | private tagless entity atoms, exact support lineage, typed relations, replay guards, and a live quality gate | Retain Mem0 as a proposal teacher, not serving DB; require selective semantic review before weight influence |
 | First-class interactions | Capture the evidence-to-outcome loop | interaction DTO, atom, queue | operational interaction atoms and evidence lineage | Keep; add durable event schema and completion semantics |
-| Durable work scheduling | Let Mac continue when laptop is off | APScheduler, pending queue, backfills | synchronous CLI only | PostgreSQL jobs/leases after hosted DB; Mac runs worker process |
+| Durable work scheduling | Let inference continue when the client is offline | APScheduler, pending queue, backfills | synchronous CLI only | PostgreSQL jobs/leases after hosted DB; a separate worker process runs inference |
 | Service/API boundary | Integrate host apps and eventually Codex | versioned HTTP API and error contracts | library/CLI | Add minimal API after jobs and hosted database are ready |
 | Auth/limits/privacy | Safely expose memory operations | scopes, anomaly hook, rate/concurrency limits, redaction | local-only operational model | Required in same milestone as any network service |
 | Audit/traceability | Explain results, mutations, and operations | trace IDs, audit JSONL, events | retrieval/feedback/calibration records | Unify trace IDs and immutable events; define redaction |
@@ -385,16 +385,16 @@ Exit gate: B improves through A's outcome observations without receiving A's pri
 privacy leakage remains below the accepted threshold, and one contributor cannot materially
 poison shared serving behavior.
 
-### Phase 6 — Make the Mac an autonomous worker and expose safe integrations
+### Phase 6 — Add an autonomous inference worker and expose safe integrations
 
-Goal: run enrichment while the laptop is off without moving canonical data onto the Mac.
+Goal: run enrichment while the local client is offline without moving canonical data onto the worker.
 
 Prerequisite: hosted PostgreSQL or another always-reachable canonical database with TLS,
 network restrictions, backups, and tested restoration.
 
 1. Add a PostgreSQL-backed job table with leases, heartbeats, attempts, backoff, cancellation,
    and idempotent completion markers.
-2. Run one small worker process on the Mac for tag, embedding, Mem0, Temporal, and later
+2. Run one small worker process on a replaceable inference host for tag, embedding, Mem0, Temporal, and later
    evaluation jobs. Concurrency and model selection remain configuration.
 3. Add health and structured logs showing queue depth, active job, model, duration, and failure
    stage without logging sensitive content.
@@ -405,7 +405,7 @@ network restrictions, backups, and tested restoration.
    the actual hosted topology.
 7. Add webhook/DLQ delivery only when there is a real operational receiver.
 
-Exit gate: a job submitted from the laptop can complete on the Mac after the laptop disconnects,
+Exit gate: a job submitted from a client can complete on the worker after the client disconnects,
 with canonical results, progress, retry history, and logs visible when it reconnects.
 
 ### Phase 7 — Add the procedure and small-model enhancement layer
