@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -15,12 +16,20 @@ from data_retrieval.api import LocalApiConfig, create_app
 from data_retrieval.connectors.codec import source_from_mapping, sync_batch_from_mapping
 from data_retrieval.mcp_server import LocalMcpConfig, create_mcp_server
 from data_retrieval.services.connector_sync import ConnectorSyncService
+from data_retrieval.storage.postgresql import PostgreSQLRepository
 from data_retrieval.storage.sqlite import SQLiteRepository
+
+
+def _fixture() -> dict[str, object]:
+    path = Path(__file__).parents[1] / "evals" / "connector_contract_devui_v1.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(value, dict)
+    return value
 
 
 class LocalMcpServerTests(unittest.TestCase):
     def test_mcp_tools_match_rest_policy_and_hide_internal_identity(self) -> None:
-        fixture = self._fixture()
+        fixture = _fixture()
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "cortex.sqlite3"
             with SQLiteRepository(database) as repository:
@@ -174,12 +183,62 @@ class LocalMcpServerTests(unittest.TestCase):
 
             asyncio.run(exercise())
 
-    @staticmethod
-    def _fixture() -> dict[str, object]:
-        path = Path(__file__).parents[1] / "evals" / "connector_contract_devui_v1.json"
-        value = json.loads(path.read_text(encoding="utf-8"))
-        assert isinstance(value, dict)
-        return value
+
+@unittest.skipUnless(
+    os.getenv("DATA_RETRIEVAL_TEST_POSTGRES_DSN"),
+    "DATA_RETRIEVAL_TEST_POSTGRES_DSN is not configured",
+)
+class PostgreSQLMcpServerTests(unittest.TestCase):
+    def test_query_and_outcome_round_trip_through_mcp(self) -> None:
+        fixture = _fixture()
+        dsn = os.environ["DATA_RETRIEVAL_TEST_POSTGRES_DSN"]
+        with PostgreSQLRepository(dsn) as repository:
+            sync = ConnectorSyncService(repository)
+            sync.register_source(source_from_mapping(fixture["registration"]))
+            sync.submit_batch(sync_batch_from_mapping(fixture["sync_batch"]))
+
+        async def exercise() -> None:
+            server = create_mcp_server(LocalMcpConfig(postgres_dsn=dsn))
+            async with Client(server) as client:
+                query = cast(dict[str, Any], fixture["query"])
+                built = await client.call_tool(
+                    "cortex_build_context",
+                    {
+                        "request_id": "query:mcp-postgres",
+                        # Keep this assertion about transport/storage parity. PostgreSQL's
+                        # web-search parser is intentionally stricter than SQLite's lexical
+                        # channel for the fixture's full natural-language question.
+                        "query": "login",
+                        "scope": query["scope"],
+                        "top_k": query["top_k"],
+                        "budget_tokens": query["budget_tokens"],
+                        "temporal_mode": query["temporal_mode"],
+                        "reference_time": query["reference_time"],
+                    },
+                )
+                self.assertFalse(built.is_error)
+                context = cast(dict[str, Any], built.structured_content)
+                self.assertTrue(context["items"])
+                first = context["items"][0]
+                self.assertNotIn("atom_id", first)
+
+                outcome = await client.call_tool(
+                    "cortex_record_outcome",
+                    {
+                        "request_id": "outcome:mcp-postgres",
+                        "retrieval_id": context["retrieval_id"],
+                        "used_evidence_ids": [first["evidence_id"]],
+                        "outcome": "positive",
+                        "occurred_at": "2026-09-20T12:31:00+03:00",
+                        "reason": "Live PostgreSQL MCP transport parity.",
+                    },
+                )
+                self.assertFalse(outcome.is_error)
+                self.assertEqual(
+                    outcome.structured_content["retrieval_id"], context["retrieval_id"]
+                )
+
+        asyncio.run(exercise())
 
 
 if __name__ == "__main__":

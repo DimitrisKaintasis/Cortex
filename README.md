@@ -361,6 +361,7 @@ failure handling, and the exact laptop responsibilities.
 | Local/test storage | SQLite |
 | Scale storage | PostgreSQL with pgvector |
 | Local API | FastAPI and Uvicorn |
+| Local agent transport | Model Context Protocol over stdio |
 | Local inference | Ollama, behind provider adapters |
 | Optional memory processor | Mem0 |
 | Optional temporal processor | Temporal History |
@@ -387,6 +388,7 @@ src/data_retrieval/
 ├── collective/      # isolated collective-learning research
 ├── benchmarks/      # evaluation runners
 ├── api.py            # loopback-only FastAPI transport
+├── mcp_server.py     # local stdio agent tools
 ├── cli_parser.py     # command and argument schema
 └── cli.py            # command dispatch and handlers
 
@@ -415,10 +417,12 @@ scripts/             # diagnostic and benchmark utilities
 - A generic external connector and agent boundary is accepted in
   [ADR-0020](docs/decisions/0020-external-connector-and-agent-boundary.md). Transport-independent
   contract models, DevUI/Slack fixtures, and replay-safe external-record lifecycle persistence now
-  have memory, SQLite, and PostgreSQL parity. Source sync is available through the loopback REST
-  API, typed Python SDK, and standalone connector contract-test kit. Retrieval projection, SDK
-  query/outcome methods, reference connectors, and the MCP adapter remain planned work. See the
-  [connector SDK quickstart](docs/CONNECTOR-SDK.md). The current API is still loopback-only.
+  have memory, SQLite, and PostgreSQL parity. Source sync, scoped retrieval, and attributable
+  outcomes are available through the loopback REST API and typed Python SDK. A local stdio MCP
+  adapter exposes retrieval and outcomes to agent hosts without exposing source administration or
+  internal atom identity. Reference connectors remain planned. See the
+  [connector SDK quickstart](docs/CONNECTOR-SDK.md) and [local MCP runbook](docs/LOCAL-MCP.md).
+  The current REST and MCP transports remain local-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
   poisoning, held-out quality, and rollback gates are satisfied.
@@ -455,6 +459,7 @@ intended to remain a substantial, independently useful system rather than a nonf
 
 - [Local MVP runbook](docs/LOCAL-MVP-RUNBOOK.md)
 - [Local API runbook](docs/LOCAL-API.md)
+- [Local MCP runbook](docs/LOCAL-MCP.md)
 - [Laptop PostgreSQL and recovery runbook](docs/LAPTOP-POSTGRES.md)
 - [Mem0 bootstrap runbook](docs/MEM0-BOOTSTRAP.md)
 

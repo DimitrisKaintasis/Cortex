@@ -308,7 +308,7 @@ cross-scope metrics or ordinary operational logs.
 | C1. Contract fixtures | passed | Transport-independent request/response models and fixtures | DevUI-like and Slack-like fixtures validate without core-specific input fields |
 | C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | passed | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
-| C4. Local MCP adapter | not started | Stdio/loopback read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
+| C4. Local MCP adapter | passed | Stdio read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
 | C5. DevUI reference connector | not started | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
@@ -337,6 +337,14 @@ repository. The generic projection derives deterministic internal routing from `
 external record envelopes canonical, creates version lineage, suppresses tombstoned projections,
 and exposes only opaque evidence IDs. Cursor commit is blocked until accepted records and
 tombstones are projected. Outcome learning accepts only evidence returned by the named retrieval.
+
+C4 implements a local stdio MCP server over that same access service. Its five tools cover scoped
+search, bounded context construction, retrieval-bound evidence hydration, caller-safe retrieval
+explanation, and attributable outcome reporting. Tool annotations distinguish read operations
+from the non-destructive outcome write. Internal atom identity, bulk sync, connector
+administration, and network transport are not exposed. In-process protocol tests compare MCP with
+REST, and a subprocess test verifies that stdout remains protocol-clean. The adapter also passed
+the query/outcome flow against live PostgreSQL in an isolated database.
 
 ## Reference connector sequence
 
