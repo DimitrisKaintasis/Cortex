@@ -74,12 +74,12 @@ change ranking behavior rather than restore a missing prerequisite.
   supersession, tombstones, source provenance, and result round-tripping are required connector
   semantics.
 - Namespace remains distinct from scope and authorization. Local stdio/loopback integration may
-  proceed under the laptop trust boundary; remote REST/MCP stays gated on hosted storage,
+  proceed under the local-user trust boundary; remote REST/MCP stays gated on hosted storage,
   identity, authorization, deletion, audit, rate limits, migrations, backup, and recovery.
-- DevUI is the first structured reference connector and Slack is the first mutable conversational
-  reference connector. Their mapping logic remains outside the Cortex core.
-- `CONNECTOR-API-PLAN.md` is the executable product plan. A generic connector framework or
-  scaffolding tool is extracted only after both reference connectors expose real repetition.
+- Structured-project and mutable-conversation fixtures are conformance probes, not bundled
+  integrations. Operational mapping and credentials stay in source-owned connector repositories.
+- `CONNECTOR-API-PLAN.md` is the executable product plan. Shared SDK behavior is extracted only
+  after unlike external integrations expose the same source-neutral responsibility.
 
 ## Recovered repair dependencies — accepted 2026-09-02
 

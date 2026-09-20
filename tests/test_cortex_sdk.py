@@ -9,8 +9,10 @@ from pathlib import Path
 import httpx
 
 from cortex import (
+    ConnectorSyncRejected,
     CortexApiError,
     CortexClient,
+    sync_source_batches,
     validate_connector_fixture,
     validate_source_sync,
 )
@@ -161,6 +163,109 @@ class CortexClientTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 429)
         self.assertTrue(raised.exception.retryable)
         self.assertEqual(raised.exception.retry_after, "5")
+
+    def test_shared_sync_helper_commits_only_after_complete_batches(self) -> None:
+        paths: list[str] = []
+        acknowledged_at = datetime(2026, 9, 20, 14, 0, tzinfo=UTC)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            paths.append(request.url.path)
+            if request.url.path == "/v1/sources":
+                return httpx.Response(201, json=json.loads(request.content))
+            if request.url.path.endswith("/batches"):
+                payload = json.loads(request.content)
+                acknowledgement = SyncBatchAcknowledgement(
+                    run_request_id=payload["run"]["request_id"],
+                    batch_id=payload["batch_id"],
+                    sequence=payload["sequence"],
+                    acknowledged_at=acknowledged_at,
+                    accepted_records=len(payload["records"]),
+                    accepted_relations=len(payload["relations"]),
+                    accepted_tombstones=len(payload["tombstones"]),
+                )
+                return httpx.Response(
+                    200,
+                    json=sync_batch_acknowledgement_to_mapping(acknowledgement),
+                )
+            if request.url.path.endswith(":commit"):
+                payload = json.loads(request.content)
+                acknowledgement = SyncCommitAcknowledgement(
+                    request_id=payload["request_id"],
+                    run_request_id=self.batch.run.request_id,
+                    source=self.batch.run.source,
+                    committed_cursor=self.batch.run.proposed_cursor or "",
+                    committed_at=acknowledged_at,
+                )
+                return httpx.Response(
+                    200,
+                    json=sync_commit_acknowledgement_to_mapping(acknowledgement),
+                )
+            return httpx.Response(404, json={"detail": "not found"})
+
+        with CortexClient(
+            base_url="http://cortex.test",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            committed = sync_source_batches(
+                client,
+                source=self.source,
+                batches=(self.batch,),
+                commit_request_id="structured-source:scan-42:helper-commit",
+            )
+
+        self.assertEqual(committed.committed_cursor, "scan:42")
+        self.assertEqual(len(paths), 3)
+        self.assertTrue(paths[-1].endswith(":commit"))
+
+    def test_shared_sync_helper_withholds_commit_after_rejection(self) -> None:
+        paths: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            paths.append(request.url.path)
+            if request.url.path == "/v1/sources":
+                return httpx.Response(201, json=json.loads(request.content))
+            if request.url.path.endswith("/batches"):
+                payload = json.loads(request.content)
+                return httpx.Response(
+                    200,
+                    json={
+                        "run_request_id": payload["run"]["request_id"],
+                        "batch_id": payload["batch_id"],
+                        "sequence": payload["sequence"],
+                        "acknowledged_at": "2026-09-20T14:00:00+00:00",
+                        "accepted_records": 0,
+                        "accepted_relations": 0,
+                        "accepted_tombstones": 0,
+                        "failures": [
+                            {
+                                "item_type": "record",
+                                "item_id": self.batch.records[0].ref.external_id,
+                                "item_version": (
+                                    self.batch.records[0].ref.external_version
+                                ),
+                                "code": "temporary_failure",
+                                "message": "simulated rejection",
+                                "retryable": True,
+                            }
+                        ],
+                    },
+                )
+            return httpx.Response(500, json={"detail": "commit must not be called"})
+
+        with CortexClient(
+            base_url="http://cortex.test",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            with self.assertRaises(ConnectorSyncRejected):
+                sync_source_batches(
+                    client,
+                    source=self.source,
+                    batches=(self.batch,),
+                    commit_request_id="must-not-commit",
+                )
+
+        self.assertEqual(len(paths), 2)
+        self.assertFalse(any(path.endswith(":commit") for path in paths))
 
 
 class ConnectorContractTestKitTests(unittest.TestCase):

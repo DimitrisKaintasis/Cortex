@@ -214,7 +214,7 @@ half-lives, penalties, maturity rules, and robust-reference choices require abla
 - structured process/skill atoms with preconditions, steps, branches, checks, tools,
   counterexamples, environment/version validity, and source lineage;
 - a skill-consumer add-on that gives small models concrete state-aware procedures;
-- an autonomous Mac worker only after an always-reachable protected canonical database exists.
+- an autonomous inference worker only after an always-reachable protected canonical database exists.
 
 ## Ordered repair plan
 
@@ -253,16 +253,8 @@ half-lives, penalties, maturity rules, and robust-reference choices require abla
 - Do not hard-wire one model, embedding profile, storage engine, or orchestration framework into
   domain semantics.
 
-## Source authorities
+## Design authorities
 
-- [`archive/ARCHITECTURE-INTENT-HANDOFF.md`](archive/ARCHITECTURE-INTENT-HANDOFF.md) — historical
-  architecture context packet; current decisions are governed by `ARCHITECTURE.md` and the ADRs
-- `docs/CONTEXT_LEDGER.md`
-- `docs/CAPABILITY-PRESERVATION-PLAN.md`
-- Original Tags `chunker.py`, `retrieve.py`, `db_operations.py`, and design extracts
-- DebUI `subprojects/data-memory/docs/VISION.md`
-- DebUI `subprojects/data-memory/docs/LEGACY_TO_CORTEX_MAPPING.md`
-- Cortex tag generation, tag relation/group, retrieval math, learning math, graph schema, and
-  evaluation specifications
-- DebUI `Perfecting Graph Memory Retrieval.md`, treated as conceptual history rather than
-  current normative law
+`ARCHITECTURE.md` and accepted ADRs govern current behavior. `CONTEXT_LEDGER.md` and
+`CAPABILITY-PRESERVATION-PLAN.md` retain earlier rationale and deferred capabilities. Historical
+experiments are evidence and conceptual context, not normative requirements.

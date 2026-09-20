@@ -125,7 +125,7 @@ in a later batch, and call `commit` only after every required item is durable.
 `CortexApiError` exposes `status_code`, `retryable`, and `retry_after`. These are guidance for the
 connector's explicit retry policy; the SDK does not automatically retry writes.
 
-After the DevUI and Slack reference connectors proved the same orchestration, the SDK added the
+After unlike structured and mutable conformance cases proved the same orchestration, the SDK added the
 narrow `sync_source_batches` helper. It validates that batches form one contiguous run, registers
 the source, submits in caller-defined order, raises `ConnectorSyncRejected` on any incomplete
 acknowledgement, and commits only after all batches succeed. Mapping, batching, retry, source API,

@@ -23,8 +23,8 @@ dist/
 .env.*
 !.env.example
 /data/
-mac-remote-llmserver-ed25519
-mac-remote-llmserver-ed25519.pub
+*-remote-llmserver-ed25519
+*-remote-llmserver-ed25519.pub
 *.sqlite
 *.sqlite3
 *.sqlite3-*

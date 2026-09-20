@@ -70,7 +70,7 @@ source adapters
 ```
 
 SQLite is the deterministic local and test adapter. PostgreSQL is the scale and online target.
-The Mac is a replaceable inference worker and never the canonical data owner.
+Any remote inference worker is replaceable and never the canonical data owner.
 
 ## External integration boundary
 
@@ -261,7 +261,7 @@ may propagate through factual lineage to supporting source atoms at a reduced, e
 
 ## Failure model
 
-- Raw ingestion succeeds without Mem0, Temporal History, embeddings, or the Mac.
+- Raw ingestion succeeds without Mem0, Temporal History, embeddings, or a remote inference worker.
 - A processor failure leaves canonical evidence unchanged and a retryable job state.
 - One unavailable retrieval channel degrades explicitly and appears in diagnostics.
 - No result is silently treated as successful feedback.

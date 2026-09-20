@@ -3,6 +3,7 @@
 - Status: Accepted for implementation planning
 - Date: 2026-09-18
 - Refines: ADR-0005, ADR-0009, ADR-0017, ADR-0018, and ADR-0019
+- Packaging clarified by: ADR-0021
 
 ## Context
 
@@ -68,8 +69,9 @@ core.
     loopback API may operate under the local-user trust boundary. Remote HTTP/MCP remains gated on
     authenticated identity, authorization, TLS, rate limits, audit, retention/deletion,
     migrations, backups, and an accepted always-reachable deployment.
-12. DevUI is the first structured reference connector and Slack is the first mutable conversational
-    reference connector. Connector-specific mapping stays outside the Cortex core.
+12. Structured-project and mutable-conversation fixtures are the first conformance probes.
+    Connector-specific mapping and operational packaging stay outside the Cortex core and are
+    owned by the source application or a separate connector repository.
 
 ## Boundary between connectors and processors
 
@@ -98,7 +100,8 @@ summaries, and relationships.
 - REST, SDK, and MCP calls converge on the same services and policy checks.
 - External identity and lifecycle state become canonical schema concerns and therefore depend on
   the versioned migration work in ADR-0019.
-- DevUI and Slack expose contract weaknesses before a generic connector framework is extracted.
+- Unlike source-shaped fixtures expose contract weaknesses without making their operational
+  integrations Cortex runtime responsibilities.
 - A hosted MCP server is not a transport-only feature; it depends on the multi-scope security and
   operational boundary.
 - The current `/v1/documents`, `/v1/retrievals`, and `/v1/feedback` endpoints remain valid local
@@ -124,9 +127,9 @@ into the core and prevent the data-agnostic claim from being tested.
 
 ### Design a complete connector framework before real connectors
 
-This risks encoding hypothetical abstractions. Cortex will first expose the smallest stable
-contract and SDK, implement two unlike reference connectors, record integration friction, and only
-then extract scaffolding or a connector framework.
+This risks encoding hypothetical abstractions. Cortex first exposes the smallest stable contract
+and SDK, exercises unlike source-shaped conformance cases, and extracts only proven
+source-neutral helpers. Operational integrations remain source-owned under ADR-0021.
 
 ## Implementation boundary
 
