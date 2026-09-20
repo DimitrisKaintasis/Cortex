@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -38,6 +35,7 @@ from data_retrieval.connectors.contracts import (
     Query as ConnectorQuery,
 )
 from data_retrieval.domain.models import TagCandidate, TagCandidateState
+from data_retrieval.local_runtime import LocalStorageConfig
 from data_retrieval.retrieval.models import FeedbackRequest, QueryPlan, TemporalMode
 from data_retrieval.retrieval.ollama import OllamaEmbedder
 from data_retrieval.services.connector_access import ConnectorAccessService
@@ -46,8 +44,7 @@ from data_retrieval.services.ingestion import IngestService
 from data_retrieval.services.learning import LearningService
 from data_retrieval.services.retrieval import RetrievalService
 from data_retrieval.services.tag_lifecycle import TagLifecycleService
-from data_retrieval.storage.repository import CortexRepository, Repository
-from data_retrieval.storage.sqlite import SQLiteRepository
+from data_retrieval.storage.repository import Repository
 from data_retrieval.tagging.ollama import OllamaTagProposer
 
 API_VERSION = "v1"
@@ -83,44 +80,14 @@ def _contract_operation(
 
 
 @dataclass(frozen=True, slots=True)
-class LocalApiConfig:
+class LocalApiConfig(LocalStorageConfig):
     """Process-local configuration; secrets are never included in API responses."""
 
-    database_path: Path = Path("data.sqlite3")
-    postgres_dsn: str | None = field(default=None, repr=False)
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = 120.0
     tag_model: str | None = None
     embedding_model: str | None = None
     embedding_profile: str = "symmetric"
-
-    @property
-    def storage_kind(self) -> str:
-        return "postgresql" if self.postgres_dsn else "sqlite"
-
-    @contextmanager
-    def open_repository(self) -> Iterator[CortexRepository]:
-        if self.postgres_dsn:
-            try:
-                from data_retrieval.storage.postgresql import PostgreSQLRepository
-            except ModuleNotFoundError as error:
-                if (error.name or "").split(".", maxsplit=1)[0] not in {
-                    "pgvector",
-                    "psycopg",
-                }:
-                    raise
-                raise RuntimeError(
-                    "PostgreSQL dependencies are not installed; install them with "
-                    "'python -m pip install -e \".[postgres]\"'"
-                ) from error
-            repository: CortexRepository = PostgreSQLRepository(self.postgres_dsn)
-        else:
-            repository = SQLiteRepository(self.database_path)
-        try:
-            yield repository
-        finally:
-            repository.close()  # type: ignore[attr-defined]
-
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -23,6 +23,8 @@ without duplicating domain logic. It exposes:
 | `POST /v1/sync-runs/{run_id}/batches` | Durably submit one replay-safe records/relations/tombstones batch |
 | `GET /v1/sync-runs/{run_id}` | Inspect the accepted sync-run contract |
 | `POST /v1/sync-runs/{run_id}:commit` | Advance the opaque connector cursor after durable batches |
+| `POST /v1/queries` | Build a scoped source-aware context pack with opaque evidence IDs |
+| `POST /v1/outcomes` | Record an attributable outcome for evidence returned by a retrieval |
 
 This is not a public API. It has no accounts, authentication, authorization, rate limiting, or
 cross-origin browser access. The CLI fixes the listener to laptop loopback, `127.0.0.1`, and does
@@ -61,6 +63,9 @@ Install `.[sdk]` in the connector process to use the typed `cortex.CortexClient`
 [connector SDK quickstart](CONNECTOR-SDK.md). The SDK never retries or commits a sync implicitly;
 the connector owns repair policy and advances its upstream cursor only after a commit
 acknowledgement.
+
+Local agent hosts can use the policy-equivalent stdio surface described in the
+[local MCP runbook](LOCAL-MCP.md). MCP does not expose the source-sync administration routes.
 
 ## Optional laptop-local inference
 

@@ -144,6 +144,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="info",
     )
 
+    serve_mcp = commands.add_parser(
+        "serve-mcp",
+        help="serve local-only Cortex query and outcome tools over stdio MCP",
+    )
+    _add_storage_options(serve_mcp)
+
     longmemeval = commands.add_parser(
         "ingest-longmemeval",
         help="stream an official LongMemEval JSON dataset into isolated question namespaces",

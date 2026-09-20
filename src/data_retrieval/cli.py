@@ -62,6 +62,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = _process_file(args, parser)
         elif args.command == "serve-api":
             output = _serve_api(args)
+        elif args.command == "serve-mcp":
+            _serve_mcp(args)
+            return 0
         elif args.command == "ingest-longmemeval":
             output = _ingest_longmemeval(args, parser)
         elif args.command == "run-longmemeval":
@@ -398,6 +401,27 @@ def _serve_api(args: argparse.Namespace) -> dict[str, object]:
         "port": args.port,
         "database": _database_label(args),
     }
+
+
+def _serve_mcp(args: argparse.Namespace) -> None:
+    try:
+        from data_retrieval.mcp_server import LocalMcpConfig, run_stdio_server
+    except ImportError as error:
+        raise ValueError(
+            "MCP dependencies are not installed; install them with "
+            "'python -m pip install -e \".[mcp]\"'"
+        ) from error
+    print(
+        "Cortex local MCP server starting on stdio; logs use stderr.",
+        file=sys.stderr,
+        flush=True,
+    )
+    run_stdio_server(
+        LocalMcpConfig(
+            database_path=args.db,
+            postgres_dsn=args.postgres_dsn,
+        )
+    )
 
 
 def _ingest_longmemeval(
