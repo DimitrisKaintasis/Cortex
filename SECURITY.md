@@ -9,6 +9,13 @@ Keep credentials in environment variables and keep private source data, runtime
 stores, and backups outside version control. Model providers receive the text
 sent to them when their optional enrichment features are enabled.
 
+CI scans Git history for committed credentials on every push and pull request. It
+uses GitHub's short-lived automatic workflow token for read-only repository access;
+Cortex does not require a saved GitHub Actions secret. If a real credential is ever
+committed, revoke or rotate it immediately. Removing the text in a later commit is
+not sufficient because the earlier value remains in Git history; rewrite history
+only after rotation and coordinate the resulting force-push with every clone owner.
+
 Use a fresh virtual environment for installations and upgrades. CI audits the
 installed optional dependencies with `pip-audit`; Dependabot checks for updates
 weekly. The vendored Temporal History runtime is scanned as Cortex source, while
