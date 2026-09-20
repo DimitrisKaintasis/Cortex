@@ -3,6 +3,7 @@
 from data_retrieval.connectors.codec import (
     context_pack_from_mapping,
     context_pack_to_mapping,
+    evidence_result_to_mapping,
     outcome_from_mapping,
     outcome_to_mapping,
     query_from_mapping,
@@ -70,6 +71,7 @@ __all__ = [
     "Visibility",
     "context_pack_from_mapping",
     "context_pack_to_mapping",
+    "evidence_result_to_mapping",
     "outcome_from_mapping",
     "outcome_to_mapping",
     "query_from_mapping",

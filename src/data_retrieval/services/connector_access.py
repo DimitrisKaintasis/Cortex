@@ -149,6 +149,43 @@ class ConnectorAccessService:
             fingerprint=fingerprint, outcome=outcome
         )
 
+    def get_evidence(self, *, retrieval_id: str, evidence_id: str) -> EvidenceResult:
+        context = self.repository.get_connector_context(retrieval_id)
+        if context is None:
+            raise ValueError(f"unknown connector retrieval_id: {retrieval_id}")
+        evidence = next(
+            (item for item in context.items if item.evidence_id == evidence_id), None
+        )
+        if evidence is None:
+            raise ValueError("evidence was not returned by this retrieval")
+        return evidence
+
+    def explain_retrieval(self, retrieval_id: str) -> dict[str, object]:
+        context = self.repository.get_connector_context(retrieval_id)
+        if context is None:
+            raise ValueError(f"unknown connector retrieval_id: {retrieval_id}")
+        return {
+            "retrieval_id": context.retrieval_id,
+            "query_request_id": context.query_request_id,
+            "low_confidence": context.low_confidence,
+            "abstention_reason": context.abstention_reason,
+            "items": [
+                {
+                    "evidence_id": item.evidence_id,
+                    "record": {
+                        "source_system": item.record.source.source_system,
+                        "source_instance": item.record.source.source_instance,
+                        "external_id": item.record.external_id,
+                        "external_version": item.record.external_version,
+                    },
+                    "score": item.score,
+                    "score_evidence": list(item.score_evidence),
+                    "lineage_evidence_ids": list(item.lineage_evidence_ids),
+                }
+                for item in context.items
+            ],
+        }
+
     def _evidence_for_atom(self, atom_id: str) -> str | None:
         projection = self.repository.get_connector_projection_by_atom(atom_id)
         if projection is None:

@@ -628,24 +628,25 @@ def context_pack_to_mapping(context: ContextPack) -> dict[str, object]:
     return {
         "retrieval_id": context.retrieval_id,
         "query_request_id": context.query_request_id,
-        "items": [
-            {
-                "evidence_id": item.evidence_id,
-                "record": _record_ref_mapping(item.record, include_source=True),
-                "modality": item.modality.value,
-                "content": item.content,
-                "scope": _scope_mapping(item.scope),
-                "score": item.score,
-                "score_evidence": list(item.score_evidence),
-                "lineage_evidence_ids": list(item.lineage_evidence_ids),
-                "metadata": _plain_json(item.metadata),
-            }
-            for item in context.items
-        ],
+        "items": [evidence_result_to_mapping(item) for item in context.items],
         "low_confidence": context.low_confidence,
         "budget_tokens": context.budget_tokens,
         "used_tokens": context.used_tokens,
         "abstention_reason": context.abstention_reason,
+    }
+
+
+def evidence_result_to_mapping(item: EvidenceResult) -> dict[str, object]:
+    return {
+        "evidence_id": item.evidence_id,
+        "record": _record_ref_mapping(item.record, include_source=True),
+        "modality": item.modality.value,
+        "content": item.content,
+        "scope": _scope_mapping(item.scope),
+        "score": item.score,
+        "score_evidence": list(item.score_evidence),
+        "lineage_evidence_ids": list(item.lineage_evidence_ids),
+        "metadata": _plain_json(item.metadata),
     }
 def _evidence_result(data: Mapping[str, Any]) -> EvidenceResult:
     _reject_unknown(
