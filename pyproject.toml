@@ -14,6 +14,7 @@ dependencies = []
 [project.scripts]
 data-retrieval = "data_retrieval.cli:main"
 cortex-devui = "cortex_devui.cli:main"
+cortex-slack = "cortex_slack.cli:main"
 
 [project.optional-dependencies]
 api = [
@@ -33,6 +34,9 @@ sdk = [
     "httpx>=0.28,<1",
 ]
 devui = [
+    "httpx>=0.28,<1",
+]
+slack = [
     "httpx>=0.28,<1",
 ]
 mcp = [
@@ -102,6 +106,7 @@ select = ["E", "F", "I", "B", "UP"]
 include = [
     "src/cortex",
     "src/cortex_devui",
+    "src/cortex_slack",
     "src/data_retrieval/api.py",
     "src/data_retrieval/core",
     "src/data_retrieval/connectors",

@@ -310,7 +310,7 @@ cross-scope metrics or ordinary operational logs.
 | C3. Python SDK | passed | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | passed | Stdio read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
 | C5. DevUI reference connector | passed | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
-| C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
+| C6. Slack reference connector | passed | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
 
 C1 passed under the current local deployment. C2 passed on 2026-09-19. The same lifecycle behavior
@@ -373,8 +373,9 @@ messages/threads/edits/deletions
         -> the same records, relations, sync runs, and scopes
 ```
 
-Only after both connectors exist should repeated mapping and lifecycle code be extracted into a
-connector base class, generator, or `cortex connector init` scaffolding command.
+With both connectors implemented, only their identical safe batch orchestration was extracted as
+`sync_source_batches`. Their mapping and lifecycle semantics remain separate; the evidence still
+does not justify a base class, generator, or `cortex connector init` scaffolding command.
 
 C5 implements `cortex_devui` as a source-specific package that imports only the public `cortex`
 SDK. A strict source-native snapshot maps files, functions, modules, proposals, and exact-version
@@ -383,6 +384,14 @@ Retrieved evidence maps back to validated DevUI entity, file, and line pointers.
 passes through the real SDK and REST API on SQLite and PostgreSQL. The friction log is recorded in
 the [DevUI connector runbook](DEVUI-CONNECTOR.md); real DevUI exporter wiring remains in the
 separate source application and requires no Cortex-core branch.
+
+C6 implements `cortex_slack` over the same public SDK. Contiguous event pages map stable message
+identity, edit versions, exact-version reply relations, deletion tombstones, timestamps, and
+channel-derived project scope into ordered incremental batches. Unknown channels fail closed;
+partial batches never commit a cursor. Current edits, deletion suppression, navigation identity,
+outcomes, replay, and SQLite/PostgreSQL transport pass end to end. Comparing C5 and C6 justified
+one narrow shared SDK primitive, `sync_source_batches`; source models and mapping remain separate.
+The [Slack connector runbook](SLACK-CONNECTOR.md) records the integration boundary and friction.
 
 ## Acceptance matrix
 
