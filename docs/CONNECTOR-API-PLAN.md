@@ -309,7 +309,7 @@ cross-scope metrics or ordinary operational logs.
 | C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | passed | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | passed | Stdio read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
-| C5. DevUI reference connector | not started | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
+| C5. DevUI reference connector | passed | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
 | C6. Slack reference connector | not started | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
 
@@ -375,6 +375,14 @@ messages/threads/edits/deletions
 
 Only after both connectors exist should repeated mapping and lifecycle code be extracted into a
 connector base class, generator, or `cortex connector init` scaffolding command.
+
+C5 implements `cortex_devui` as a source-specific package that imports only the public `cortex`
+SDK. A strict source-native snapshot maps files, functions, modules, proposals, and exact-version
+relations into deterministic bounded batches; an incomplete batch cannot commit the cursor.
+Retrieved evidence maps back to validated DevUI entity, file, and line pointers. The round trip
+passes through the real SDK and REST API on SQLite and PostgreSQL. The friction log is recorded in
+the [DevUI connector runbook](DEVUI-CONNECTOR.md); real DevUI exporter wiring remains in the
+separate source application and requires no Cortex-core branch.
 
 ## Acceptance matrix
 
