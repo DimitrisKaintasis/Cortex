@@ -309,8 +309,8 @@ cross-scope metrics or ordinary operational logs.
 | C2. External record lifecycle | passed | Source registry, stable external identity, versions, relations, sync runs, tombstones | Memory/SQLite/PostgreSQL parity; replay/update/delete tests pass |
 | C3. Python SDK | passed | Typed client, batch sync helper, retrieval, outcomes, contract-test kit | A connector uses only the SDK and its own mapping code |
 | C4. Local MCP adapter | passed | Stdio read and outcome tools | REST and MCP return policy-equivalent results for fixed fixtures |
-| C5. DevUI reference connector | passed | Structured code/architecture mapping and round trip | Retrieved results map back to DevUI entities; friction log reviewed |
-| C6. Slack reference connector | passed | Threads, edits, deletions, timestamps, incremental cursor, access metadata | Same core contract handles mutable conversation data and cross-source retrieval |
+| C5. DevUI conformance probe | passed | Structured code/architecture fixture and contract validation | Generic records preserve source identity and explicit relations without core special cases |
+| C6. Slack conformance probe | passed | Mutable conversation fixture and lifecycle validation | Same contract represents threads, edits, deletions, timestamps, cursors, and scope metadata |
 | C7. Hosted remote integration | deferred | Authenticated HTTPS REST and Streamable HTTP MCP | D3b, scope/authorization, migration, deletion, backup, audit, rate-limit, and incident gates pass |
 
 C1 passed under the current local deployment. C2 passed on 2026-09-19. The same lifecycle behavior
@@ -346,12 +346,12 @@ administration, and network transport are not exposed. In-process protocol tests
 REST, and a subprocess test verifies that stdout remains protocol-clean. The adapter also passed
 the query/outcome flow against live PostgreSQL in an isolated database.
 
-## Reference connector sequence
+## Reference connector conformance sequence
 
 ### DevUI
 
-DevUI tests stable structured identity, explicit relations, large batches, and mapping retrieval
-back to source entities.
+DevUI-like fixtures test stable structured identity, explicit relations, and mapping retrieval back
+to source-owned identities. The operational mapper belongs in the DevUI repository.
 
 ```text
 files/functions/modules/proposals
@@ -364,8 +364,9 @@ files/functions/modules/proposals
 
 ### Slack
 
-Slack tests continuous ingestion, thread relationships, mutable records, deletion, rate limits,
-source timestamps, and access metadata.
+Slack-like fixtures test continuous ingestion, thread relationships, mutable records, deletion,
+source timestamps, cursors, and scope metadata. OAuth, polling, rate limits, and operational
+mapping belong in a separate Slack connector repository.
 
 ```text
 messages/threads/edits/deletions
@@ -373,25 +374,15 @@ messages/threads/edits/deletions
         -> the same records, relations, sync runs, and scopes
 ```
 
-With both connectors implemented, only their identical safe batch orchestration was extracted as
-`sync_source_batches`. Their mapping and lifecycle semantics remain separate; the evidence still
-does not justify a base class, generator, or `cortex connector init` scaffolding command.
+The two probes justified only one shared SDK abstraction: `sync_source_batches` validates one run,
+submits caller-ordered batches, withholds cursor commit after incomplete acceptance, and never owns
+source mapping or retries. The evidence does not justify a base class, generator, or
+`cortex connector init` scaffolding command.
 
-C5 implements `cortex_devui` as a source-specific package that imports only the public `cortex`
-SDK. A strict source-native snapshot maps files, functions, modules, proposals, and exact-version
-relations into deterministic bounded batches; an incomplete batch cannot commit the cursor.
-Retrieved evidence maps back to validated DevUI entity, file, and line pointers. The round trip
-passes through the real SDK and REST API on SQLite and PostgreSQL. The friction log is recorded in
-the [DevUI connector runbook](DEVUI-CONNECTOR.md); real DevUI exporter wiring remains in the
-separate source application and requires no Cortex-core branch.
-
-C6 implements `cortex_slack` over the same public SDK. Contiguous event pages map stable message
-identity, edit versions, exact-version reply relations, deletion tombstones, timestamps, and
-channel-derived project scope into ordered incremental batches. Unknown channels fail closed;
-partial batches never commit a cursor. Current edits, deletion suppression, navigation identity,
-outcomes, replay, and SQLite/PostgreSQL transport pass end to end. Comparing C5 and C6 justified
-one narrow shared SDK primitive, `sync_source_batches`; source models and mapping remain separate.
-The [Slack connector runbook](SLACK-CONNECTOR.md) records the integration boundary and friction.
+C5 and C6 are conformance milestones, not built-in integration claims. Source-specific runtime
+packages and commands were removed from the Cortex distribution in accordance with ADR-0021.
+The generic fixtures, lifecycle tests, SDK helper, and compatibility conclusions remain. See
+[reference connector conformance](REFERENCE-CONNECTOR-CONFORMANCE.md).
 
 ## Acceptance matrix
 
@@ -433,7 +424,7 @@ The connector API is not ready until these behaviors are automated:
 - exactly-once distributed delivery claims;
 - remote hosting before the accepted security and recovery prerequisites;
 - realtime collaborative state synchronization through Cortex; and
-- a large connector framework before two reference connectors expose real repetition.
+- a large connector framework before external connector repositories expose real repetition.
 
 ## Decisions required during implementation
 

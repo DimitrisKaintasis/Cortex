@@ -105,8 +105,6 @@ or Temporal History. Add only the capabilities you intend to run:
 | Local API | `python -m pip install -e ".[api]"` |
 | Python connector SDK | `python -m pip install -e ".[sdk]"` |
 | Local MCP adapter | `python -m pip install -e ".[mcp]"` |
-| DevUI reference connector | `python -m pip install -e ".[devui]"` |
-| Slack reference connector | `python -m pip install -e ".[slack]"` |
 | PostgreSQL/pgvector | `python -m pip install -e ".[postgres]"` |
 | Temporal History | `python -m pip install -e ".[temporal]"` |
 | LongMemEval benchmarks | `python -m pip install -e ".[benchmarks]"` |
@@ -396,9 +394,6 @@ src/data_retrieval/
 ├── cli_parser.py     # command and argument schema
 └── cli.py            # command dispatch and handlers
 
-src/cortex_devui/     # public-SDK-only DevUI reference connector
-src/cortex_slack/     # public-SDK-only Slack reference connector
-
 evals/               # versioned evaluation fixtures
 tests/               # unit, contract, integration, and adapter tests
 docs/                # architecture, runbooks, decisions, and experiment reports
@@ -427,12 +422,11 @@ scripts/             # diagnostic and benchmark utilities
   have memory, SQLite, and PostgreSQL parity. Source sync, scoped retrieval, and attributable
   outcomes are available through the loopback REST API and typed Python SDK. A local stdio MCP
   adapter exposes retrieval and outcomes to agent hosts without exposing source administration or
-  internal atom identity. The DevUI reference connector now maps files, functions, modules,
-  proposals, and relations through only that public SDK and maps retrieved evidence back to DevUI
-  navigation pointers. The Slack reference connector uses the same contract for incremental
-  cursors, edits, threads, tombstones, and explicit channel/project routing. See the
-  [connector SDK quickstart](docs/CONNECTOR-SDK.md),
-  [DevUI connector runbook](docs/DEVUI-CONNECTOR.md), and
+  internal atom identity. DevUI-like structured and Slack-like mutable fixtures validate that the
+  same contract handles stable identity, relations, cursors, edits, threads, and tombstones.
+  Operational source mappers and credentials belong in source-owned connector repositories, not
+  the Cortex distribution. See the [connector SDK quickstart](docs/CONNECTOR-SDK.md),
+  [reference connector conformance](docs/REFERENCE-CONNECTOR-CONFORMANCE.md), and
   [local MCP runbook](docs/LOCAL-MCP.md). The current REST and MCP transports remain local-only.
 - Mem0 vector cold-start and experience-learning policies have not cleared their promotion gates.
 - Collective-learning work remains payload-free, isolated, and non-serving until privacy,
@@ -471,8 +465,7 @@ intended to remain a substantial, independently useful system rather than a nonf
 - [Local MVP runbook](docs/LOCAL-MVP-RUNBOOK.md)
 - [Local API runbook](docs/LOCAL-API.md)
 - [Local MCP runbook](docs/LOCAL-MCP.md)
-- [DevUI reference connector](docs/DEVUI-CONNECTOR.md)
-- [Slack reference connector](docs/SLACK-CONNECTOR.md)
+- [Reference connector conformance](docs/REFERENCE-CONNECTOR-CONFORMANCE.md)
 - [Laptop PostgreSQL and recovery runbook](docs/LAPTOP-POSTGRES.md)
 - [Mem0 bootstrap runbook](docs/MEM0-BOOTSTRAP.md)
 

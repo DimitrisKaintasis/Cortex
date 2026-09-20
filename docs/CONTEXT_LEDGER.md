@@ -76,10 +76,11 @@ change ranking behavior rather than restore a missing prerequisite.
 - Namespace remains distinct from scope and authorization. Local stdio/loopback integration may
   proceed under the laptop trust boundary; remote REST/MCP stays gated on hosted storage,
   identity, authorization, deletion, audit, rate limits, migrations, backup, and recovery.
-- DevUI is the first structured reference connector and Slack is the first mutable conversational
-  reference connector. Their mapping logic remains outside the Cortex core.
-- `CONNECTOR-API-PLAN.md` is the executable product plan. A generic connector framework or
-  scaffolding tool is extracted only after both reference connectors expose real repetition.
+- DevUI-like structured and Slack-like mutable fixtures are the first connector conformance
+  probes. Operational mapping belongs in the source application or a separate connector repository.
+- `CONNECTOR-API-PLAN.md` is the executable product plan. A generic connector framework or broad
+  scaffolding tool requires repeated evidence from external connector implementations. Cortex
+  currently extracts only the proven source-neutral `sync_source_batches` helper.
 
 ## Recovered repair dependencies — accepted 2026-09-02
 
