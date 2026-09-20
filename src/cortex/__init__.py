@@ -1,6 +1,7 @@
 """Public Python SDK for Cortex application integrations."""
 
 from cortex.client import CortexApiError, CortexClient, SyncSession
+from cortex.sync import ConnectorSyncRejected, sync_source_batches
 from cortex.testing import (
     ConnectorContractReport,
     validate_connector_fixture,
@@ -35,6 +36,7 @@ from data_retrieval.connectors import (
 __all__ = [
     "ConnectorCapability",
     "ConnectorContractReport",
+    "ConnectorSyncRejected",
     "ContextPack",
     "ContributionPolicy",
     "CortexApiError",
@@ -62,4 +64,5 @@ __all__ = [
     "Visibility",
     "validate_connector_fixture",
     "validate_source_sync",
+    "sync_source_batches",
 ]
